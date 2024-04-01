@@ -29,6 +29,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rolepermissions',
     'autenticacoes',
+    "rest_framework",
+    "corsheaders",
+    
+
 ]
 
 MIDDLEWARE = [
@@ -39,6 +43,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "corsheaders.middleware.CorsMiddleware",
 ]
 
 ROOT_URLCONF = 'db_performance.urls'
@@ -115,3 +120,9 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 ROLEPERMISSIONS_MODULE = "db_performance.roles"
+
+CORS_ORIGIN_ALLOW_ALL = True
+
+CORS_ALLOW_ORIGINS = [
+    'http://localhost:8080',
+]
