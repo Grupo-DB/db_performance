@@ -1,5 +1,4 @@
-
-import os
+from datetime import timedelta
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -11,6 +10,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-duqfuj4z2nqmikw@@_cffl4&)c-$qo)t#^cg(!=(c6%-p)1)tu'
+#Simple JWT SECRET_KEY
+SECRET_KEY_JWT = 'lkshdgkhjgfçhsdçgjkhskjdfghlshjgçlfs'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -32,6 +33,8 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     'management',
+    'rest_framework_simplejwt',
+    
     
 
 ]
@@ -127,12 +130,30 @@ STATIC_URL = 'static/'
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "BLACKLIST_AFTER_ROTATION": False,
+    "SIGNING_KEY": SECRET_KEY,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+ 
+}
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        # 'rest_framework.authentication.SessionAuthentication',
+        # 'rest_framework.authentication.BasicAuthentication',
+    )
+}
+
+
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-ROLEPERMISSIONS_MODULE = "db_performance.roles"
+# ROLEPERMISSIONS_MODULE = "db_performance.roles"
 
 CORS_ORIGIN_ALLOW_ALL = True
 
-CORS_ALLOW_ORIGINS = [
-    'http://localhost:8080',
-]
+# CORS_ALLOW_ORIGINS = [
+#     'http://localhost:4200',
+# ]

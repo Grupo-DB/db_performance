@@ -6,7 +6,7 @@
     </head>
 
     <body>
-        <form action='{% url 'apilogin' %}' method='POST'> {% csrf_token %}
+        <form action='{% url 'login' %}' method='POST'> {% csrf_token %}
             
             <input type="text" placeholder="Email...." name="username"> 
             <br>

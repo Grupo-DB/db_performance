@@ -1,6 +1,14 @@
 from django.db import models
+from django.contrib.auth.models import User
 
-from django.db import models
+
+class PerfilUsuario(models.Model):
+    auth_user = models.OneToOneField(User, on_delete=models.CASCADE)
+    funcao = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.user.username
+
 
 # class Empresa
 class Empresa(models.Model):

@@ -13,15 +13,15 @@ from rolepermissions.roles import assign_role
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 from rest_framework.views import APIView
-
-from rest_framework.decorators import api_view
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.decorators import api_view,authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 
 
 from .serializers import LoginSerializer, UserSerializer
 
-import json
+
 
 
 
@@ -29,6 +29,10 @@ import json
 #     def get(self,request):
         
 #         return render(request,'login.html')
+
+
+
+
 @api_view(['GET','POST'])
 def login(request):
     if request.method == "GET":
@@ -40,8 +44,8 @@ def login(request):
             password = serializer.validated_data['password']
             user = authenticate(username=username, password=password)
             if user is not None:
-                # Autenticação bem-sucedida
-                # Você pode criar um token de autenticação aqui, se desejar
+                login(request, user)
+                
                 return Response({'message': 'Login bem-sucedido'}, status=status.HTTP_200_OK)
             else:
                 # Credenciais inválidas
@@ -95,6 +99,7 @@ def plataforma(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_users(request):
 
     if request.method == 'GET':
@@ -110,6 +115,7 @@ def get_users(request):
 
 ## Cadsatra Empresa
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def create_user(request):
     if request.method == 'POST':
         serializer = UserSerializer(data=request.data)
