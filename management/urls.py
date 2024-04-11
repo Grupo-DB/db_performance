@@ -5,6 +5,7 @@ urlpatterns = [
     
     #path('management/', views.management, name='management'),
     path('create_user/', views.create_user, name='create_user'),
+    path('registercompany/', views.registercompany, name='registercompany'),
     path('get_users/', views.get_users, name='get_users'),
     path('login/',views.login, name='login'),
     path('token/', TokenObtainPairView.as_view(),name='token_obtain_pair'),

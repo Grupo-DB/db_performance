@@ -18,8 +18,7 @@ from rest_framework.decorators import api_view,authentication_classes, permissio
 from rest_framework.response import Response
 from rest_framework import status
 
-
-from .serializers import LoginSerializer, UserSerializer
+from .serializers import LoginSerializer, UserSerializer,RegisterCompanySerializer
 
 
 
@@ -99,7 +98,7 @@ def plataforma(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+#@permission_classes([IsAuthenticated])
 def get_users(request):
 
     if request.method == 'GET':
@@ -113,7 +112,7 @@ def get_users(request):
     return Response(status=status.HTTP_400_BAD_REQUEST)
 
 
-## Cadsatra Empresa
+## Cadsatra User
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_user(request):
@@ -122,4 +121,14 @@ def create_user(request):
         if serializer.is_valid():
             user = serializer.save()
             return Response({'message': 'Usuário cadastrado com sucesso!', 'user_id': user.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+    
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def registercompany(request):
+    if request.method == 'POST':
+        serializer = RegisterCompanySerializer(data=request.data)
+        if serializer.is_valid():
+            empresa = serializer.save()
+            return Response({'message': 'Empresa cadastrada com sucesso!', 'empresa_id': empresa.id})
         return Response(status=status.HTTP_400_BAD_REQUEST)
