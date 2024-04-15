@@ -17,8 +17,9 @@ from rest_framework.permissions import IsAuthenticated,GroupPermission
 from rest_framework.decorators import api_view,authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
+from .models import Empresa,Area,Cargo,Setor,Colaborador,Filial
 
-from .serializers import LoginSerializer, UserSerializer,RegisterCompanySerializer,GroupSerializer
+from .serializers import LoginSerializer, UserSerializer,RegisterCompanySerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer
 
 
 
@@ -103,11 +104,11 @@ def get_users(request):
 
     if request.method == 'GET':
 
-        users = User.objects.all()                          # Get all objects in User's database (It returns a queryset)
+        users = User.objects.all()                         
 
-        serializer = UserSerializer(users, many=True)       # Serialize the object data into json (Has a 'many' parameter cause it's a queryset)
+        serializer = UserSerializer(users, many=True)       
 
-        return Response(serializer.data)                    # Return the serialized data
+        return Response(serializer.data)                    
     
     return Response(status=status.HTTP_400_BAD_REQUEST)
 
@@ -122,7 +123,10 @@ def create_user(request):
             user = serializer.save()
             return Response({'message': 'Usuário cadastrado com sucesso!', 'user_id': user.id})
         return Response(status=status.HTTP_400_BAD_REQUEST)
-    
+
+
+
+#Empresas    
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def registercompany(request):
@@ -133,6 +137,117 @@ def registercompany(request):
             return Response({'message': 'Empresa cadastrada com sucesso!', 'empresa_id': empresa.id})
         return Response(status=status.HTTP_400_BAD_REQUEST)
     
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_company(request):
+    if request.method == 'GET':
+
+        companys = Empresa.objects.all()                         
+
+        serializer = RegisterCompanySerializer(companys, many=True)       
+
+        return Response(serializer.data)                    
+    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
+#--------------------------------------------------------------------Areas
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_area(request):
+    if request.method == 'GET':
+
+        areas = Area.objects.all()                         
+
+        serializer = AreaSerializer(areas, many=True)       
+
+        return Response(serializer.data)                    
+    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def registerarea(request):
+    if request.method == 'POST':
+        serializer = AreaSerializer(data=request.data)
+        if serializer.is_valid():
+            area = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'area_id': area.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+    
+#---------------------------------------------------------------------------------------Setores
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_setor(request):
+    if request.method == 'GET':
+        setores = Setor.objects.all()                         
+        serializer = SetorSerializer(setores, many=True)       
+        return Response(serializer.data)                    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def registersetor(request):
+    if request.method == 'POST':
+        serializer = SetorSerializer(data=request.data)
+        if serializer.is_valid():
+            setor = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'setor_id': setor.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
+
+#####################################################################################------------Filiais-------------------------################################################
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_filial(request):
+    if request.method == 'GET':
+        filiais = Filial.objects.all()                         
+        serializer = FilialSerializer(filiais, many=True)       
+        return Response(serializer.data)                    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def registerfilial(request):
+    if request.method == 'POST':
+        serializer = FilialSerializer(data=request.data)
+        if serializer.is_valid():
+            filial = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'filial_id': filial.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+##################################################################################------------------Cargos--------------------------------------#############################
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_cargo(request):
+    if request.method == 'GET':
+        cargos = Cargo.objects.all()                         
+        serializer = CargoSerializer(cargos, many=True)       
+        return Response(serializer.data)                    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def registercargo(request):
+    if request.method == 'POST':
+        serializer = CargoSerializer(data=request.data)
+        if serializer.is_valid():
+            cargo = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'cargo_id': cargo.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
+
+
+
+
+
+
+
 
     #get as funções
 @api_view(['GET'])
@@ -147,3 +262,4 @@ def get_funcao(request):
         return Response(nomes_funcoes)                    
     
     return Response(status=status.HTTP_400_BAD_REQUEST)
+
