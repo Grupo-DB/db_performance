@@ -5,7 +5,7 @@ def management(request):
     return HttpResponse(request,'ok')
 
 from django.shortcuts import render, HttpResponse
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User,Group
 from django.contrib.auth import authenticate
 from django.contrib.auth import login as login_django
 from django.contrib.auth.decorators import login_required 
@@ -13,12 +13,12 @@ from rolepermissions.roles import assign_role
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticated,GroupPermission
 from rest_framework.decorators import api_view,authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 
-from .serializers import LoginSerializer, UserSerializer,RegisterCompanySerializer
+from .serializers import LoginSerializer, UserSerializer,RegisterCompanySerializer,GroupSerializer
 
 
 
@@ -91,9 +91,9 @@ def cadastro(request):
 #         else:
 #             return HttpResponse('email ou senha inválidos')
 
-@login_required(login_url='/auth/login/')        
-def plataforma(request):
-    return HttpResponse('You are in')
+# @login_required(login_url='/auth/login/')        
+# def plataforma(request):
+#     return HttpResponse('You are in')
 
 
 
@@ -114,7 +114,7 @@ def get_users(request):
 
 ## Cadsatra User
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated,GroupPermission])
 def create_user(request):
     if request.method == 'POST':
         serializer = UserSerializer(data=request.data)
@@ -132,3 +132,18 @@ def registercompany(request):
             empresa = serializer.save()
             return Response({'message': 'Empresa cadastrada com sucesso!', 'empresa_id': empresa.id})
         return Response(status=status.HTTP_400_BAD_REQUEST)
+    
+
+    #get as funções
+@api_view(['GET'])
+#@permission_classes([IsAuthenticated])
+def get_funcao(request):
+
+    if request.method == 'GET':
+
+        funcao = Group.objects.all()                          
+        nomes_funcoes = [funcao.name for funcao in funcao]       
+
+        return Response(nomes_funcoes)                    
+    
+    return Response(status=status.HTTP_400_BAD_REQUEST)

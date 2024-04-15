@@ -18,7 +18,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
-
+#AUTH_USER_MODEL = 'management.CustomUser'
 # Application definition
 
 INSTALLED_APPS = [
@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "corsheaders",
     'management',
     'rest_framework_simplejwt',
+    
     
     
 
