@@ -57,24 +57,24 @@ def login(request):
 
 
 
-def cadastro(request):
-    if request.method == 'GET':
-        return render(request, 'cadastro_user.html')
-    else:
-        username = request.POST.get('username')
-        email = request.POST.get('email')
-        senha = request.POST.get('senha')
+# def cadastro(request):
+#     if request.method == 'GET':
+#         return render(request, 'cadastro_user.html')
+#     else:
+#         username = request.POST.get('username')
+#         email = request.POST.get('email')
+#         senha = request.POST.get('senha')
         
-        #verifica se já tem esse username cadastrado
-        user = User.objects.filter(username=username).first()
+#         #verifica se já tem esse username cadastrado
+#         user = User.objects.filter(username=username).first()
 
-        if user:
-            return HttpResponse('Username já cadastrado!')
+#         if user:
+#             return HttpResponse('Username já cadastrado!')
         
-        user = User.objects.create_user(username=username, email=email, password=senha)
-        user.save()
+#         user = User.objects.create_user(username=username, email=email, password=senha)
+#         user.save()
         
-        return HttpResponse('Usuário cadastrado com sucesso!')
+#         return HttpResponse('Usuário cadastrado com sucesso!')
 
 # def login(request):
 #     #inca que se o metodo for GET, sem preenceher e enviar o formulário. somente renderiza a pagina
@@ -115,7 +115,7 @@ def get_users(request):
 
 ## Cadsatra User
 @api_view(['POST'])
-@permission_classes([IsAuthenticated,GroupPermission])
+@permission_classes([IsAuthenticated])
 def create_user(request):
     if request.method == 'POST':
         serializer = UserSerializer(data=request.data)
@@ -139,7 +139,7 @@ def registercompany(request):
     
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+#@permission_classes([IsAuthenticated])
 def get_company(request):
     if request.method == 'GET':
 

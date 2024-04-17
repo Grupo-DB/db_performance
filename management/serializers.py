@@ -24,7 +24,8 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField()
 
 class RegisterCompanySerializer(serializers.Serializer):
-    id = serializers.IntegerField()
+   
+    id = serializers.IntegerField(read_only=True)
     nome = serializers.CharField()
     cnpj = serializers.CharField()
     endereco = serializers.CharField()
@@ -37,11 +38,12 @@ class RegisterCompanySerializer(serializers.Serializer):
         return empresa
     
 class FilialSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    empresa = serializers.IntegerField()
+    id = serializers.IntegerField(read_only=True)
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all())
     nome = serializers.CharField()
     cnpj = serializers.CharField()
     endereco = serializers.CharField()
+    cidade = serializers.CharField()
     estado = serializers.CharField()
     codigo = serializers.CharField()
 
@@ -50,9 +52,9 @@ class FilialSerializer(serializers.Serializer):
         return filial
     
 class AreaSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    empresa = serializers.IntegerField()
-    filial = serializers.IntegerField()
+    id = serializers.IntegerField(read_only=True)
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all())
+    filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all())
     nome = serializers.CharField()
 
     def create(self, validated_data):
@@ -60,10 +62,10 @@ class AreaSerializer(serializers.Serializer):
         return area
     
 class SetorSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    empresa = serializers.IntegerField()
-    area = serializers.IntegerField()
-    filial = serializers.IntegerField()
+    id = serializers.IntegerField(read_only=True)
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all())
+    filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all())
+    area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all())
     nome = serializers.CharField()
 
     def create(self, validate_data):
@@ -71,11 +73,11 @@ class SetorSerializer(serializers.Serializer):
         return setor
 
 class CargoSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    empresa = serializers.IntegerField()
-    area = serializers.IntegerField()
-    filial = serializers.IntegerField()
-    setor = serializers.IntegerField()
+    id = serializers.IntegerField(read_only=True)
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all())
+    area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all())
+    filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all())
+    setor = serializers.PrimaryKeyRelatedField(queryset=Setor.objects.all())
     nome = serializers.CharField()
 
     def create(self, validate_data):
@@ -83,11 +85,11 @@ class CargoSerializer(serializers.Serializer):
         return cargo
 
 class TipoContratoSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    empresa = serializers.IntegerField()
-    area = serializers.IntegerField()
-    filial = serializers.IntegerField()
-    setor = serializers.IntegerField()
+    id = serializers.IntegerField(read_only=True)
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all())
+    area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all())
+    filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all())
+    setor = serializers.PrimaryKeyRelatedField(queryset=Setor.objects.all())
     nome = serializers.CharField()
 
     def create(self, validate_data):

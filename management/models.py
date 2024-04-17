@@ -17,8 +17,8 @@ class PerfilUsuario(models.Model):
 # class Empresa
 class Empresa(models.Model):
     id = models.AutoField(primary_key=True,)
-    nome = models.CharField(max_length=20, null=False, blank=False)
-    cnpj = models.CharField(max_length=15, null=False, blank=False)
+    nome = models.CharField(max_length=50, null=False, blank=False)
+    cnpj = models.CharField(max_length=25, null=False, blank=False)
     endereco = models.CharField(max_length=50,null=False, blank=False)
     cidade = models.CharField(max_length=30,null=False, blank=False)
     estado = models.CharField(max_length=2,null=False, blank=False)
@@ -27,9 +27,10 @@ class Empresa(models.Model):
 class Filial(models.Model):
     id = models.AutoField(primary_key=True,)
     empresa = models.ForeignKey(Empresa,on_delete=models.CASCADE,related_name='filiais')
-    nome = models.CharField(max_length=20, null=False,blank=False)
-    cnpj = models.CharField(max_length=13,null=False,blank=False)
+    nome = models.CharField(max_length=50, null=False,blank=False)
+    cnpj = models.CharField(max_length=23,null=False,blank=False)
     endereco = models.CharField(max_length=50,null=False, blank=False)
+    cidade = models.CharField(max_length=50,null=False, blank=False)
     estado = models.CharField(max_length=2,null=False, blank=False)
     codigo = models.CharField(max_length=2,null=False, blank=False)
 
