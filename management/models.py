@@ -11,7 +11,8 @@ class PerfilUsuario(models.Model):
     
 
 
-
+def upload_image_colaborador(Colaborador,filename):
+        return f"{Colaborador.id} - {filename}"
 
 
 # class Empresa
@@ -61,11 +62,11 @@ class TipoContrato(models.Model):
     filial = models.ForeignKey(Filial,on_delete=models.CASCADE,related_name='tiposcontratos')
     area = models.ForeignKey(Area,on_delete=models.CASCADE,related_name='tiposcontratos')
     setor = models.ForeignKey(Setor, on_delete=models.CASCADE, related_name='tiposcontratos')
+    cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE, related_name='tiposcontratos')
     nome = models.CharField(max_length=20, null=False, blank=False)
 
 
-def upload_image_colaborador(instance,filename):
-        return f"{instance.id} - {filename}"
+
 
 class Colaborador(models.Model):
     id = models.AutoField(primary_key=True,)
@@ -76,17 +77,17 @@ class Colaborador(models.Model):
     area = models.ForeignKey(Area,on_delete=models.CASCADE,related_name='colaboradores')
     tipocontrato = models.ForeignKey(TipoContrato, on_delete=models.CASCADE,related_name='colaboradores')
     nome = models.CharField(max_length=100,blank=False,null=False)
-    data_admissao = models.DateField(blank=False,null=False)
-    situacao = models.BooleanField(blank=False,null=False)
-    genero = models.CharField(max_length=15,null=False,blank=False)
+    data_admissao = models.DateTimeField(blank=True,null=True)
+    situacao = models.BooleanField(blank=True,null=True)
+    genero = models.CharField(max_length=15,null=True,blank=True)
     estado_civil = models.CharField(max_length=15,blank=True,null=True)
-    data_nascimento = models.DateField(blank=True,null=False)
-    data_troca_setor = models.DateField(blank=True,null=True)
-    data_troca_cargo = models.DateField(blank=True,null=False)
-    data_demissao = models.DateField(blank=True,null=False)
+    data_nascimento = models.DateTimeField(blank=True,null=True)
+    data_troca_setor = models.DateTimeField(blank=True,null=True)
+    data_troca_cargo = models.DateTimeField(blank=True,null=True)
+    data_demissao = models.DateTimeField(blank=True,null=True)
     create_at = models.DateTimeField(auto_now_add=True)
-    image = models.ImageField(upload_to=upload_image_colaborador,blank=True,null=True)
-    
+    image = models.FileField(upload_to=upload_image_colaborador,blank=True,null=True)
+   
 
 
 class Avaliador(models.Model):
@@ -99,3 +100,6 @@ class TipoAvaliacao(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=20, null=False, blank=False)
 
+class Upload(models.Model):
+    imagem = models.FileField(upload_image_colaborador,null=True,blank=True)
+   

@@ -13,7 +13,12 @@ urlpatterns = [
     path('registersetor/', views.registersetor, name='registersetor'),
     path('get_setor/', views.get_setor, name='get_setor'),
     path('registercargo/', views.registercargo, name='registercargo'),
+    path('upload/', views.upload, name='upload'),
     path('get_cargo/', views.get_cargo, name='get_cargo'),
+    path('registertipocontrato/', views.registertipocontrato, name='registertipocontrato'),
+    path('get_tipocontrato/', views.get_tipocontrato, name='get_tipocontrato'),
+    path('registercolaborador/', views.registercolaborador, name='registercolaborador'),
+    path('get_colaborador/', views.get_colaborador, name='get_colaborador'),
     path('get_company/', views.get_company, name='get_company'),
     path('registerarea/', views.registerarea, name='registerarea'),
     path('get_area/', views.get_area, name='get_area'),
@@ -24,4 +29,5 @@ urlpatterns = [
     path('token/refresh/',TokenRefreshView.as_view(),name='token_refresh'),
     path('token/verify/',TokenVerifyView.as_view(),name='token_verify'),
 
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+] 
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

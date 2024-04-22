@@ -1,7 +1,10 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User,Group
 from rest_framework import serializers
-from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador
+from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Upload
+
+
+
 
 class GroupSerializer(serializers.ModelSerializer):
     class Meta:
@@ -90,16 +93,37 @@ class TipoContratoSerializer(serializers.Serializer):
     area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all())
     filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all())
     setor = serializers.PrimaryKeyRelatedField(queryset=Setor.objects.all())
+    cargo = serializers.PrimaryKeyRelatedField(queryset=Cargo.objects.all())
     nome = serializers.CharField()
 
     def create(self, validate_data):
         tipocontrato = TipoContrato.objects.create(**validate_data)
         return tipocontrato
     
-class ColaboradorSerializer(serializers.Serializer):
+class ColaboradorSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Colaborador
-        fields = '__all__'
+         model = Colaborador
+         fields = '__all__'
+    # id = serializers.IntegerField(read_only=True)
+    # empresa = serializers.PrimaryKeyRelatedField(required=False,queryset=Empresa.objects.all())
+    # area = serializers.PrimaryKeyRelatedField(required=False,queryset=Area.objects.all())
+    # filial = serializers.PrimaryKeyRelatedField(required=False,queryset=Filial.objects.all())
+    # setor = serializers.PrimaryKeyRelatedField(required=False,queryset=Setor.objects.all())
+    # cargo = serializers.PrimaryKeyRelatedField(required=False,queryset=Cargo.objects.all())
+    # tipocontrato = serializers.PrimaryKeyRelatedField(required=False,queryset=TipoContrato.objects.all())
+    # nome = serializers.CharField()
+    # data_admissao = serializers.DateTimeField(required=False,allow_null=True)
+    # #situacao = serializers.BooleanField(required=False,allow_null=True)
+    # genero = serializers.CharField(required=False,allow_blank=True)
+    # estado_civil = serializers.CharField(required=False,allow_null=True)
+    # data_nascimento = serializers.DateTimeField(required=False,allow_null=True)
+    # data_troca_setor = serializers.DateTimeField(required=False,allow_null=True)
+    # data_troca_cargo = serializers.DateTimeField(required=False,allow_null=True)
+    # data_demissao = serializers.DateTimeField(required=False,allow_null=True)
+    # image = serializers.FileField(required=False,allow_null=True)
+
+    
+      
 
     def create (self, validate_data):
         colaborador = Colaborador.objects.create(**validate_data)
@@ -123,3 +147,11 @@ class TipoAvaliacaoSerializer(serializers.Serializer):
         return tipoavaliacao
     
     
+class UploadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Upload
+        fields = '__all__' 
+
+    def create(self,validate_data):
+        upload = Upload.objects.create(**validate_data)
+        return upload    

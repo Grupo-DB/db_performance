@@ -3,7 +3,6 @@ from django.shortcuts import render,HttpResponse
 # Create your views here.
 def management(request):
     return HttpResponse(request,'ok')
-
 from django.shortcuts import render, HttpResponse
 from django.contrib.auth.models import User,Group
 from django.contrib.auth import authenticate
@@ -12,14 +11,16 @@ from django.contrib.auth.decorators import login_required
 from rolepermissions.roles import assign_role
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
+from rest_framework.parsers import MultiPartParser,FormParser,FileUploadParser,JSONParser
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated,GroupPermission
-from rest_framework.decorators import api_view,authentication_classes, permission_classes
+from rest_framework.decorators import api_view,authentication_classes, permission_classes,parser_classes
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Empresa,Area,Cargo,Setor,Colaborador,Filial
 
-from .serializers import LoginSerializer, UserSerializer,RegisterCompanySerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer
+from .models import Empresa,Area,Cargo,Setor,Colaborador,Filial,TipoContrato,TipoAvaliacao
+
+from .serializers import LoginSerializer, UploadSerializer, UserSerializer,RegisterCompanySerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer,TipoContratoSerializer,TipoAvaliacaoSerializer
 
 
 
@@ -139,7 +140,7 @@ def registercompany(request):
     
 
 @api_view(['GET'])
-#@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 def get_company(request):
     if request.method == 'GET':
 
@@ -241,7 +242,65 @@ def registercargo(request):
         return Response(status=status.HTTP_400_BAD_REQUEST)
 
 
+###############################-------------------------------------------Tipos-de-contratos-------------------##############
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_tipocontrato(request):
+    if request.method == 'GET':
+        tipocontratos = TipoContrato.objects.all()                         
+        serializer = TipoContratoSerializer(tipocontratos, many=True)       
+        return Response(serializer.data)                    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def registertipocontrato(request):
+    if request.method == 'POST':
+        serializer = TipoContratoSerializer(data=request.data)
+        if serializer.is_valid():
+            tipocontrato = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'tipocontrato_id': tipocontrato.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
+#########################################----------------------------Colaboradores---------------------------#####################
+@api_view(['GET'])
+#@permission_classes([IsAuthenticated])
+def get_colaborador(request):
+    if request.method == 'GET':
+        colaboradores = Colaborador.objects.all()                         
+        serializer = ColaboradorSerializer(colaboradores, many=True)       
+        return Response(serializer.data)                    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+#@permission_classes([IsAuthenticated])
+@api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser])
+def registercolaborador(request):
+    if request.method == 'POST':
+        serializer = ColaboradorSerializer(data=request.data)
+        if serializer.is_valid():
+            colaborador = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'colaborador_id': colaborador.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+    
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_colaborador(request):
+    if request.method == 'GET':
+        colaboradores = Colaborador.objects.all()                         
+        serializer = ColaboradorSerializer(colaboradores, many=True)       
+        return Response(serializer.data)                    
+    return Response(status=status.HTTP_400_BAD_REQUEST)    
+
+@api_view(['POST'])
+def upload(request):
+    if request.method == 'POST':
+        serializer = UploadSerializer(data=request.data)
+        if serializer.is_valid():
+            upload= serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'upload_id': upload.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
 
 
 
