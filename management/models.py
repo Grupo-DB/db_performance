@@ -103,3 +103,26 @@ class TipoAvaliacao(models.Model):
 class Upload(models.Model):
     imagem = models.FileField(upload_image_colaborador,null=True,blank=True)
    
+
+class Formulario(models.Model):
+    id = models.AutoField(primary_key=True)
+    nome = models.CharField(max_length=80, null=False, blank=False)
+    perguntas = models.ManyToManyField('Pergunta',related_name='formularios')
+
+class Pergunta(models.Model):
+    texto = models.CharField(max_length=255)
+
+class Avaliacao(models.Model):
+    id = models.AutoField(primary_key=True)
+    tipoavaliacao = models.ForeignKey(TipoAvaliacao, on_delete=models.CASCADE, related_name='avaliacoes')
+    colaborador = models.ForeignKey(Colaborador, on_delete=models.CASCADE, related_name='avaliacoes')
+    avaliador = models.ForeignKey(Avaliador, on_delete=models.CASCADE, related_name='avaliacoes')
+    formulario = models.ForeignKey(Formulario, on_delete=models.CASCADE, related_name='avaliacoes')
+    data_avaliacao = models.DateTimeField(blank=False, null=False)
+    resposta = models.CharField(max_length=255,blank=True,null=True)
+    justificativa = models.CharField(max_length=255, blank=True, null=True)
+    nota = models.IntegerField(blank=True, null=True)
+    feedback = models.CharField(max_length=500, blank=True, null=True)
+    create_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(auto_now=True,blank=True, null=True)
+    deleted_at = models.DateTimeField(auto_now=True,blank=True, null=True)

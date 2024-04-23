@@ -18,9 +18,9 @@ from rest_framework.decorators import api_view,authentication_classes, permissio
 from rest_framework.response import Response
 from rest_framework import status
 
-from .models import Empresa,Area,Cargo,Setor,Colaborador,Filial,TipoContrato,TipoAvaliacao
+from .models import Empresa,Area,Cargo,Setor,Colaborador,Filial,TipoContrato,TipoAvaliacao,Avaliacao,Avaliador,Formulario,Pergunta
 
-from .serializers import LoginSerializer, UploadSerializer, UserSerializer,RegisterCompanySerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer,TipoContratoSerializer,TipoAvaliacaoSerializer
+from .serializers import LoginSerializer, UploadSerializer, UserSerializer,RegisterCompanySerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer,TipoContratoSerializer,TipoAvaliacaoSerializer,AvaliacaoSerializer,FormularioSerializer,AvaliadorSerializer,PerguntaSerializer
 
 
 
@@ -284,14 +284,121 @@ def registercolaborador(request):
             return Response({'message': 'Area cadastrada com sucesso!', 'colaborador_id': colaborador.id})
         return Response(status=status.HTTP_400_BAD_REQUEST)
     
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_colaborador(request):
+################################-------------------------Tipos de Avaliacao----------------------------------############
+def get_tipoavaliacao(request):
     if request.method == 'GET':
-        colaboradores = Colaborador.objects.all()                         
-        serializer = ColaboradorSerializer(colaboradores, many=True)       
+        tipoavaliacoes = TipoAvaliacao.objects.all()                         
+        serializer = TipoAvaliacaoSerializer(tipoavaliacoes, many=True)       
         return Response(serializer.data)                    
-    return Response(status=status.HTTP_400_BAD_REQUEST)    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+#@permission_classes([IsAuthenticated])
+@api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser])
+def registertipoavaliacao(request):
+    if request.method == 'POST':
+        serializer = TipoAvaliacaoSerializer(data=request.data)
+        if serializer.is_valid():
+            tipoavaliacao = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'colaborador_id': tipoavaliacao.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
+############################################------------------AVALIAÇÔES--------------------##########################################
+@permission_classes([IsAuthenticated])
+@api_view(['GET'])
+def get_avaliacao(request):
+    if request.method == 'GET':
+        avaliacoes = Avaliacao.objects.all()                         
+        serializer = AvaliacaoSerializer(avaliacoes, many=True)       
+        return Response(serializer.data)                    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+
+@permission_classes([IsAuthenticated])
+@api_view(['POST'])
+#@parser_classes([MultiPartParser, FormParser])
+def registeravaliacao(request):
+    if request.method == 'POST':
+        serializer = AvaliacaoSerializer(data=request.data)
+        if serializer.is_valid():
+            avaliacao = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'colaborador_id': avaliacao.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
+#####################------------------------------------------------Avaliadores-----------------------------------------########
+@permission_classes([IsAuthenticated])
+@api_view(['GET'])
+def get_avaliador(request):
+    if request.method == 'GET':
+        avaliadores = Avaliador.objects.all()                         
+        serializer = AvaliadorSerializer(avaliadores, many=True)       
+        return Response(serializer.data)                    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+
+@permission_classes([IsAuthenticated])
+@api_view(['POST'])
+#@parser_classes([MultiPartParser, FormParser])
+def registeravaliador(request):
+    if request.method == 'POST':
+        serializer = AvaliadorSerializer(data=request.data)
+        if serializer.is_valid():
+            avaliador = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'avaliador_id': avaliador.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+###########-------------------------------------------------------------Formulaios--------------------------------############
+@permission_classes([IsAuthenticated])
+@api_view(['GET'])
+def get_formulario(request):
+    if request.method == 'GET':
+        formularios = Formulario.objects.all()                         
+        serializer = FormularioSerializer(formularios, many=True)       
+        return Response(serializer.data)                    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+
+@permission_classes([IsAuthenticated])
+@api_view(['POST'])
+#@parser_classes([MultiPartParser, FormParser])
+def registerformulario(request):
+    if request.method == 'POST':
+        serializer = FormularioSerializer(data=request.data)
+        if serializer.is_valid():
+            formulario = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'formulario_id': formulario.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+######################----------------------------------------PERGUNTAS-----------------------------------##########################
+@permission_classes([IsAuthenticated])
+@api_view(['GET'])
+def get_pergunta(request):
+    if request.method == 'GET':
+        perguntas = Pergunta.objects.all()                         
+        serializer = PerguntaSerializer(perguntas, many=True)       
+        return Response(serializer.data)                    
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+
+@permission_classes([IsAuthenticated])
+@api_view(['POST'])
+#@parser_classes([MultiPartParser, FormParser])
+def registerpergunta(request):
+    if request.method == 'POST':
+        serializer = PerguntaSerializer(data=request.data)
+        if serializer.is_valid():
+            pergunta = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'pergunta_id': pergunta.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
+
+
+
+
+
+
+
+
+
+
 
 @api_view(['POST'])
 def upload(request):

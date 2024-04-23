@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User,Group
 from rest_framework import serializers
-from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Upload
+from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Upload,Avaliacao,Formulario,Pergunta
 
 
 
@@ -129,10 +129,10 @@ class ColaboradorSerializer(serializers.ModelSerializer):
         colaborador = Colaborador.objects.create(**validate_data)
         return colaborador
 
-class AvaliadorSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    colaborador = serializers.IntegerField()
-    usuario = serializers.IntegerField()    
+class AvaliadorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Avaliador
+        fields = '__all__'
     
     def create(self,validate_data):
         avaliador = Avaliador.objects.create(**validate_data)
@@ -143,7 +143,7 @@ class TipoAvaliacaoSerializer(serializers.Serializer):
     nome = serializers.CharField()
 
     def create(self,validate_data):
-        tipoavaliacao = TipoAvaliacao.objects.crate(**validate_data)
+        tipoavaliacao = TipoAvaliacao.objects.create(**validate_data)
         return tipoavaliacao
     
     
@@ -154,4 +154,30 @@ class UploadSerializer(serializers.ModelSerializer):
 
     def create(self,validate_data):
         upload = Upload.objects.create(**validate_data)
-        return upload    
+        return upload
+
+class FormularioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Formulario
+        fields = '__all__'
+
+    def create(self,validate_data):
+        formulario = Formulario.objects.create(**validate_data)
+        return formulario             
+    
+class AvaliacaoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Avaliacao
+        fields = '__all__'
+
+    def create(self, validate_data):
+        avaliacao = Avaliacao.objects.create(**validate_data)
+        return avaliacao        
+    
+class PerguntaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Pergunta
+        fields = '__all__'
+    def create(self, validate_data):
+        pergunta = Pergunta.objects.create(**validate_data)
+        return pergunta      
