@@ -92,25 +92,27 @@ class Colaborador(models.Model):
 
 class Avaliador(models.Model):
     id = models.AutoField(primary_key=True,)
+    nome = models.CharField(max_length=20, null=False, blank=False)
     colaborador = models.ForeignKey(Colaborador, on_delete=models.CASCADE,related_name='avaliadores')
     usuario = models.ForeignKey(User,on_delete=models.CASCADE,related_name='avaliadores')
     
 
 class TipoAvaliacao(models.Model):
     id = models.AutoField(primary_key=True)
-    nome = models.CharField(max_length=20, null=False, blank=False)
+    nome = models.CharField(max_length=60, null=False, blank=False)
 
 class Upload(models.Model):
     imagem = models.FileField(upload_image_colaborador,null=True,blank=True)
    
+class Pergunta(models.Model):
+    texto = models.CharField(max_length=255)
 
 class Formulario(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=80, null=False, blank=False)
     perguntas = models.ManyToManyField('Pergunta',related_name='formularios')
 
-class Pergunta(models.Model):
-    texto = models.CharField(max_length=255)
+
 
 class Avaliacao(models.Model):
     id = models.AutoField(primary_key=True)
@@ -119,6 +121,7 @@ class Avaliacao(models.Model):
     avaliador = models.ForeignKey(Avaliador, on_delete=models.CASCADE, related_name='avaliacoes')
     formulario = models.ForeignKey(Formulario, on_delete=models.CASCADE, related_name='avaliacoes')
     data_avaliacao = models.DateTimeField(blank=False, null=False)
+    periodo = models.CharField(max_length=60, null=False, blank=False)
     resposta = models.CharField(max_length=255,blank=True,null=True)
     justificativa = models.CharField(max_length=255, blank=True, null=True)
     nota = models.IntegerField(blank=True, null=True)

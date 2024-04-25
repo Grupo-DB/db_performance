@@ -3,7 +3,7 @@ from django.shortcuts import render,HttpResponse
 # Create your views here.
 def management(request):
     return HttpResponse(request,'ok')
-from django.shortcuts import render, HttpResponse
+from django.shortcuts import render, HttpResponse,get_object_or_404
 from django.contrib.auth.models import User,Group
 from django.contrib.auth import authenticate
 from django.contrib.auth import login as login_django
@@ -285,6 +285,8 @@ def registercolaborador(request):
         return Response(status=status.HTTP_400_BAD_REQUEST)
     
 ################################-------------------------Tipos de Avaliacao----------------------------------############
+@permission_classes([IsAuthenticated])
+@api_view(['GET'])
 def get_tipoavaliacao(request):
     if request.method == 'GET':
         tipoavaliacoes = TipoAvaliacao.objects.all()                         
@@ -293,7 +295,6 @@ def get_tipoavaliacao(request):
     return Response(status=status.HTTP_400_BAD_REQUEST)
 #@permission_classes([IsAuthenticated])
 @api_view(['POST'])
-@parser_classes([MultiPartParser, FormParser])
 def registertipoavaliacao(request):
     if request.method == 'POST':
         serializer = TipoAvaliacaoSerializer(data=request.data)
@@ -389,14 +390,27 @@ def registerpergunta(request):
         return Response(status=status.HTTP_400_BAD_REQUEST)
 
 
+#################-----------------------------------Inserir Pergunta no formulário-------------------===========###################
+@api_view(['POST'])
+def add_pergunta_formulario(request, formulario_id):
+    formulario = Formulario.objects.get(pk=formulario_id)
+    pergunta_id = request.data.get('pergunta_id')  # Supondo que você envia o ID da pergunta no corpo da requisição
 
+    try:
+        pergunta = Pergunta.objects.get(pk=pergunta_id)
+    except Pergunta.DoesNotExist:
+        return Response({'error': 'Pergunta não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
+    # Verifica se a pergunta já está associada ao formulário
+    if formulario.perguntas.filter(pk=pergunta_id).exists():
+        return Response({'error': 'Esta pergunta já está associada ao formulário.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Adiciona a pergunta ao formulário na tabela intermediária
+    formulario.perguntas.add(pergunta)
 
-
-
-
-
+    # Serializa o formulário atualizado para retornar na resposta
+    serializer = FormularioSerializer(formulario)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 

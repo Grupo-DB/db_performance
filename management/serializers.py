@@ -138,9 +138,10 @@ class AvaliadorSerializer(serializers.ModelSerializer):
         avaliador = Avaliador.objects.create(**validate_data)
         return avaliador
     
-class TipoAvaliacaoSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    nome = serializers.CharField()
+class TipoAvaliacaoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TipoAvaliacao
+        fields = '__all__' 
 
     def create(self,validate_data):
         tipoavaliacao = TipoAvaliacao.objects.create(**validate_data)
@@ -155,15 +156,7 @@ class UploadSerializer(serializers.ModelSerializer):
     def create(self,validate_data):
         upload = Upload.objects.create(**validate_data)
         return upload
-
-class FormularioSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Formulario
-        fields = '__all__'
-
-    def create(self,validate_data):
-        formulario = Formulario.objects.create(**validate_data)
-        return formulario             
+           
     
 class AvaliacaoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -181,3 +174,19 @@ class PerguntaSerializer(serializers.ModelSerializer):
     def create(self, validate_data):
         pergunta = Pergunta.objects.create(**validate_data)
         return pergunta      
+class FormularioSerializer(serializers.ModelSerializer):
+    perguntas = PerguntaSerializer(many=True)    
+    class Meta:
+        model = Formulario
+        fields = '__all__'
+
+    def create(self, validate_data):
+        perguntas_data = validate_data.pop('perguntas', [])  # Extrai os dados das perguntas do formulário
+        formulario = Formulario.objects.create(**validate_data)
+
+        # Adiciona as perguntas ao formulário recém-criado
+        for pergunta_data in perguntas_data:
+            pergunta = Pergunta.objects.create(**pergunta_data)
+            formulario.perguntas.add(pergunta)
+
+        return formulario

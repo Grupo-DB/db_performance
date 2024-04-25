@@ -38,6 +38,7 @@ urlpatterns = [
     path('token/', TokenObtainPairView.as_view(),name='token_obtain_pair'),
     path('token/refresh/',TokenRefreshView.as_view(),name='token_refresh'),
     path('token/verify/',TokenVerifyView.as_view(),name='token_verify'),
+    path('formulario/<int:formulario_id>/adicionar-pergunta/', views.add_pergunta_formulario, name='add_pergunta_formulario'),
 
 ] 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
