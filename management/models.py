@@ -94,7 +94,7 @@ class Avaliador(models.Model):
     id = models.AutoField(primary_key=True,)
     nome = models.CharField(max_length=20, null=False, blank=False)
     colaborador = models.ForeignKey(Colaborador, on_delete=models.CASCADE,related_name='avaliadores')
-    usuario = models.ForeignKey(User,on_delete=models.CASCADE,related_name='avaliadores')
+    usuario = models.OneToOneField(User,on_delete=models.CASCADE,related_name='avaliadores')
     
 
 class TipoAvaliacao(models.Model):
@@ -119,13 +119,17 @@ class Avaliacao(models.Model):
     tipoavaliacao = models.ForeignKey(TipoAvaliacao, on_delete=models.CASCADE, related_name='avaliacoes')
     colaborador = models.ForeignKey(Colaborador, on_delete=models.CASCADE, related_name='avaliacoes')
     avaliador = models.ForeignKey(Avaliador, on_delete=models.CASCADE, related_name='avaliacoes')
-    formulario = models.ForeignKey(Formulario, on_delete=models.CASCADE, related_name='avaliacoes')
-    data_avaliacao = models.DateTimeField(blank=False, null=False)
-    periodo = models.CharField(max_length=60, null=False, blank=False)
-    resposta = models.CharField(max_length=255,blank=True,null=True)
-    justificativa = models.CharField(max_length=255, blank=True, null=True)
-    nota = models.IntegerField(blank=True, null=True)
-    feedback = models.CharField(max_length=500, blank=True, null=True)
+    periodo = models.CharField(max_length=60, null=True, blank=True)
+    perguntasRespostas = models.JSONField(null=True,blank=True)
+    feedback = models.CharField(max_length=60, null=True, blank=True)
     create_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(auto_now=True,blank=True, null=True)
     deleted_at = models.DateTimeField(auto_now=True,blank=True, null=True)
+
+class Respondido(models.Model):
+    avaliacao = models.OneToOneField(Avaliacao, on_delete=models.CASCADE, related_name='respondidos')
+    pergunta = models.ForeignKey('Pergunta',on_delete=models.CASCADE,related_name='respondidos')
+    resposta = models.CharField(max_length=255,blank=True,null=True) 
+    justificativa = models.CharField(max_length=255,blank=True,null=True) 
+
+

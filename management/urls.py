@@ -31,6 +31,10 @@ urlpatterns = [
     path('get_pergunta/', views.get_pergunta, name='get_pergunta'),
     path('get_company/', views.get_company, name='get_company'),
     path('registerarea/', views.registerarea, name='registerarea'),
+    path('responder/', views.responder, name='responder'),
+   # path('colaborador_ativo/', views.colaborador_ativo, name='colaborador_ativo'),
+    path('avaliadores/<int:user_id>/informacoes_avaliador/', views.informacoes_avaliador, name='informacoes_avaliador'),
+    path('avaliador_do_usuario/', views.avaliador_do_usuario, name='avaliador_do_usuario'),
     path('get_area/', views.get_area, name='get_area'),
     path('get_users/', views.get_users, name='get_users'),
     path('get_funcao/', views.get_funcao, name='get_funcao'),
@@ -39,6 +43,7 @@ urlpatterns = [
     path('token/refresh/',TokenRefreshView.as_view(),name='token_refresh'),
     path('token/verify/',TokenVerifyView.as_view(),name='token_verify'),
     path('formulario/<int:formulario_id>/adicionar-pergunta/', views.add_pergunta_formulario, name='add_pergunta_formulario'),
+    path('formulario/<int:formulario_id>/perguntas/', views.get_perguntas_formularios, name='get_perguntas_formulario'),
 
 ] 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

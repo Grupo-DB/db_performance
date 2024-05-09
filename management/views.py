@@ -20,7 +20,7 @@ from rest_framework import status
 
 from .models import Empresa,Area,Cargo,Setor,Colaborador,Filial,TipoContrato,TipoAvaliacao,Avaliacao,Avaliador,Formulario,Pergunta
 
-from .serializers import LoginSerializer, UploadSerializer, UserSerializer,RegisterCompanySerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer,TipoContratoSerializer,TipoAvaliacaoSerializer,AvaliacaoSerializer,FormularioSerializer,AvaliadorSerializer,PerguntaSerializer
+from .serializers import LoginSerializer, UploadSerializer, UserSerializer,RegisterCompanySerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer,TipoContratoSerializer,TipoAvaliacaoSerializer,AvaliacaoSerializer,FormularioSerializer,AvaliadorSerializer,PerguntaSerializer,RespondidoSerializer
 
 
 
@@ -423,6 +423,35 @@ def upload(request):
             return Response({'message': 'Area cadastrada com sucesso!', 'upload_id': upload.id})
         return Response(status=status.HTTP_400_BAD_REQUEST)
 
+###########################----------------------------------------------------------######################
+
+
+@api_view(['GET'])
+def get_perguntas_formularios(request, formulario_id):
+    try:
+        formulario = Formulario.objects.get(id=formulario_id)
+        perguntas = formulario.perguntas.all()  # Obtém todas as perguntas associadas a este formulário
+        perguntas_data = [{'id': pergunta.id, 'texto': pergunta.texto} for pergunta in perguntas]
+        return Response(perguntas_data)
+    except Formulario.DoesNotExist:
+        return Response({'error': 'Formulário não encontrado'}, status=404)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+
+#####################################################################
+
+@permission_classes([IsAuthenticated])
+@api_view(['POST'])
+#@parser_classes([MultiPartParser, FormParser])
+def responder(request):
+    if request.method == 'POST':
+        serializer = RespondidoSerializer(data=request.data)
+        if serializer.is_valid():
+            respondido = serializer.save()
+            return Response({'message': 'Area cadastrada com sucesso!', 'respondido_id': respondido.id})
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
 
 
 
@@ -443,3 +472,49 @@ def get_funcao(request):
     
     return Response(status=status.HTTP_400_BAD_REQUEST)
 
+
+@api_view(['GET'])
+def informacoes_avaliador(request, user_id):
+    avaliador = get_object_or_404(Avaliador, usuario_id=user_id)
+    colaborador = avaliador.colaborador
+    avaliador_serializer = AvaliadorSerializer(avaliador)
+    colaborador_serializer = ColaboradorSerializer(colaborador)  # Adicione o serializer do Colaborador
+    return Response({
+        'avaliador': avaliador_serializer.data,
+        'colaborador': colaborador_serializer.data,  # Inclua os dados do Colaborador na resposta
+    })
+
+# @api_view(['GET'])
+# def informacoes_avaliador(request, avaliador_id):
+#     try:
+#         avaliador = Avaliador.objects.get(id=avaliador_id)
+#         serializer = AvaliadorSerializer(avaliador)
+#         return Response(serializer.data)
+#     except Avaliador.DoesNotExist:
+#         return Response({"error": "Avaliador não encontrado."}, status=404)
+
+# @api_view(['GET'])
+
+# def avaliador_do_usuario(request):
+#     user_id = request.user.id
+#     try:
+#         avaliador = Avaliador.objects.get(usuario_id=user_id)
+#         serializer = AvaliadorSerializer(avaliador)
+#         return Response(serializer.data)
+#     except Avaliador.DoesNotExist:
+#         return Response({"error": "Avaliador não encontrado para este usuário."}, status=404)
+
+@api_view(['GET'])
+
+def avaliador_do_usuario(request):
+    user_id = request.user.id
+    try:
+        avaliador = Avaliador.objects.select_related('colaborador').get(usuario_id=user_id)
+        avaliador_serializer = AvaliadorSerializer(avaliador)
+        colaborador_serializer = ColaboradorSerializer(avaliador.colaborador)
+        return Response({
+            'avaliador': avaliador_serializer.data,
+            'colaborador': colaborador_serializer.data
+        })
+    except Avaliador.DoesNotExist:
+        return Response({"error": "Avaliador não encontrado para este usuário."}, status=404)

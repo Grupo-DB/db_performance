@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User,Group
 from rest_framework import serializers
-from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Upload,Avaliacao,Formulario,Pergunta
+from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Upload,Avaliacao,Formulario,Pergunta,Respondido
 
 
 
@@ -101,6 +101,9 @@ class TipoContratoSerializer(serializers.Serializer):
         return tipocontrato
     
 class ColaboradorSerializer(serializers.ModelSerializer):
+    cargo_nome = serializers.CharField(source='cargo.nome', read_only=True)
+    area_nome = serializers.CharField(source='area.nome', read_only=True)
+    setor_nome = serializers.CharField(source='setor.nome', read_only=True)
     class Meta:
          model = Colaborador
          fields = '__all__'
@@ -130,6 +133,7 @@ class ColaboradorSerializer(serializers.ModelSerializer):
         return colaborador
 
 class AvaliadorSerializer(serializers.ModelSerializer):
+    colaborador = serializers.PrimaryKeyRelatedField(read_only=True)
     class Meta:
         model = Avaliador
         fields = '__all__'
@@ -190,3 +194,11 @@ class FormularioSerializer(serializers.ModelSerializer):
             formulario.perguntas.add(pergunta)
 
         return formulario
+class RespondidoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Respondido
+        fields = '__all__'    
+
+    def create(self,validate_data):
+        respondido = Respondido.objects.create(**validate_data)
+        return respondido    
