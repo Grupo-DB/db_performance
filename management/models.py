@@ -10,7 +10,6 @@ class PerfilUsuario(models.Model):
         return self.user.username
     
 
-
 def upload_image_colaborador(Colaborador,filename):
         return f"{Colaborador.id} - {filename}"
 
@@ -48,6 +47,8 @@ class Setor(models.Model):
     filial = models.ForeignKey(Filial,on_delete=models.CASCADE,related_name='setores')
     nome = models.CharField(max_length=20, null=False, blank=False)
 
+#### criar ambiente aqui
+
 class Cargo(models.Model):
     id = models.AutoField(primary_key=True,)
     empresa = models.ForeignKey(Empresa,on_delete=models.CASCADE,related_name='cargos')
@@ -65,7 +66,10 @@ class TipoContrato(models.Model):
     cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE, related_name='tiposcontratos')
     nome = models.CharField(max_length=20, null=False, blank=False)
 
-
+class Formulario(models.Model):
+    id = models.AutoField(primary_key=True)
+    nome = models.CharField(max_length=80, null=False, blank=False)
+    perguntas = models.ManyToManyField('Pergunta',related_name='formularios', blank=True, null=True)
 
 
 class Colaborador(models.Model):
@@ -87,15 +91,26 @@ class Colaborador(models.Model):
     data_demissao = models.DateTimeField(blank=True,null=True)
     create_at = models.DateTimeField(auto_now_add=True)
     image = models.FileField(upload_to=upload_image_colaborador,blank=True,null=True)
-   
+    class Meta:
+        verbose_name = "Colaborador"
+        verbose_name_plural = "Colaboradores"
 
 
-class Avaliador(models.Model):
-    id = models.AutoField(primary_key=True,)
-    nome = models.CharField(max_length=20, null=False, blank=False)
-    colaborador = models.ForeignKey(Colaborador, on_delete=models.CASCADE,related_name='avaliadores')
+class Avaliador(Colaborador):
+    #colaborador = models.ForeignKey(Colaborador, on_delete=models.CASCADE,related_name='avaliadores')
     usuario = models.OneToOneField(User,on_delete=models.CASCADE,related_name='avaliadores')
+    avaliados = models.ManyToManyField('Avaliado', related_name='avaliadores')
+    class Meta:
+        verbose_name = "Avaliador"
+        verbose_name_plural = "Avaliadores"
+
+class Avaliado(Colaborador):
+    formulario = models.ForeignKey(Formulario, on_delete=models.CASCADE, related_name='avaliados')
     
+    class Meta:
+        verbose_name = "Avaliado"
+        verbose_name_plural = "Avaliados"
+
 
 class TipoAvaliacao(models.Model):
     id = models.AutoField(primary_key=True)
@@ -107,18 +122,15 @@ class Upload(models.Model):
 class Pergunta(models.Model):
     texto = models.CharField(max_length=255)
 
-class Formulario(models.Model):
-    id = models.AutoField(primary_key=True)
-    nome = models.CharField(max_length=80, null=False, blank=False)
-    perguntas = models.ManyToManyField('Pergunta',related_name='formularios')
+
 
 
 
 class Avaliacao(models.Model):
     id = models.AutoField(primary_key=True)
     tipoavaliacao = models.ForeignKey(TipoAvaliacao, on_delete=models.CASCADE, related_name='avaliacoes')
-    colaborador = models.ForeignKey(Colaborador, on_delete=models.CASCADE, related_name='avaliacoes')
-    avaliador = models.ForeignKey(Avaliador, on_delete=models.CASCADE, related_name='avaliacoes')
+    avaliador = models.ForeignKey(Avaliador, on_delete=models.CASCADE, related_name='avaliacoes_avaliador')
+    avaliado = models.ForeignKey(Avaliado, on_delete=models.CASCADE, related_name='avaliacoes_avaliado')
     periodo = models.CharField(max_length=60, null=True, blank=True)
     perguntasRespostas = models.JSONField(null=True,blank=True)
     feedback = models.CharField(max_length=60, null=True, blank=True)
