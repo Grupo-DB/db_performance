@@ -18,9 +18,9 @@ from rest_framework.decorators import api_view,authentication_classes, permissio
 from rest_framework.response import Response
 from rest_framework import status, viewsets
 
-from .models import Empresa,Area,Cargo,Setor,Colaborador,Filial,TipoContrato,TipoAvaliacao,Avaliacao,Avaliador,Formulario,Pergunta,Avaliado
+from .models import Ambiente, Empresa,Area,Cargo,Setor,Colaborador,Filial,TipoContrato,TipoAvaliacao,Avaliacao,Avaliador,Formulario,Pergunta,Avaliado
 
-from .serializers import LoginSerializer, UserSerializer,EmpresaSerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer,TipoContratoSerializer,TipoAvaliacaoSerializer,AvaliacaoSerializer,FormularioSerializer,AvaliadorSerializer,PerguntaSerializer,AvaliadoSerializer
+from .serializers import LoginSerializer, UserSerializer,EmpresaSerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer,TipoContratoSerializer,TipoAvaliacaoSerializer,AvaliacaoSerializer,FormularioSerializer,AvaliadorSerializer,PerguntaSerializer,AvaliadoSerializer,AmbienteSerializer
 
 
 @api_view(['GET','POST'])
@@ -570,18 +570,52 @@ class EmpresaViewSet(viewsets.ModelViewSet):
 class FilialViewSet(viewsets.ModelViewSet):
     queryset = Filial.objects.all()
     serializer_class = FilialSerializer    
-
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+    
 class AreaViewSet(viewsets.ModelViewSet):
     queryset = Area.objects.all()
-    serializer_class = AreaSerializer        
+    serializer_class = AreaSerializer
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)        
 
 class SetorViewSet(viewsets.ModelViewSet):
     queryset = Setor.objects.all()
     serializer_class = SetorSerializer        
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+    
+class AmbienteViewSet(viewsets.ModelViewSet):
+    queryset = Ambiente.objects.all()
+    serializer_class = AmbienteSerializer        
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data) 
 
 class CargoViewSet(viewsets.ModelViewSet):
     queryset = Cargo.objects.all()
-    serializer_class = CargoSerializer        
+    serializer_class = CargoSerializer
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)        
 
 class TipoContratoViewSet(viewsets.ModelViewSet):
     queryset = TipoContrato.objects.all()

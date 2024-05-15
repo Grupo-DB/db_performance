@@ -43,11 +43,17 @@ class Area(models.Model):
 class Setor(models.Model):
     id = models.AutoField(primary_key=True,)
     empresa = models.ForeignKey(Empresa,on_delete=models.CASCADE,related_name='setores')
-    area = models.ForeignKey(Area,on_delete=models.CASCADE,related_name='setores')
     filial = models.ForeignKey(Filial,on_delete=models.CASCADE,related_name='setores')
+    area = models.ForeignKey(Area,on_delete=models.CASCADE,related_name='setores')
     nome = models.CharField(max_length=20, null=False, blank=False)
 
-#### criar ambiente aqui
+class Ambiente(models.Model):
+    id = models.AutoField(primary_key=True,)
+    empresa = models.ForeignKey(Empresa,on_delete=models.CASCADE,related_name='ambientes')
+    filial = models.ForeignKey(Filial,on_delete=models.CASCADE,related_name='ambientes')
+    area = models.ForeignKey(Area,on_delete=models.CASCADE,related_name='ambientes')
+    setor = models.ForeignKey(Setor,on_delete=models.CASCADE,related_name='ambientes')
+    nome = models.CharField(max_length=20, null=False, blank=False)
 
 class Cargo(models.Model):
     id = models.AutoField(primary_key=True,)
@@ -55,6 +61,7 @@ class Cargo(models.Model):
     filial = models.ForeignKey(Filial,on_delete=models.CASCADE,related_name='cargos')
     area = models.ForeignKey(Area,on_delete=models.CASCADE,related_name='cargos')
     setor = models.ForeignKey(Setor, on_delete=models.CASCADE, related_name='cargos')
+    ambiente = models.ForeignKey(Ambiente, on_delete=models.CASCADE, related_name='cargos')
     nome = models.CharField(max_length=20, null=False, blank=False)
 
 class TipoContrato(models.Model):

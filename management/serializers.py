@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User,Group
 from rest_framework import serializers
-from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Avaliacao,Formulario,Pergunta,Avaliado
+from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Avaliacao,Formulario,Pergunta,Avaliado,Ambiente
 
 
 
@@ -260,6 +260,11 @@ class SetorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Setor
         fields = '__all__'           
+
+class AmbienteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Ambiente
+        fields = '__all__'
 
 class CargoSerializer(serializers.ModelSerializer):
     class Meta:

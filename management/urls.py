@@ -3,7 +3,7 @@ from django.conf.urls.static import static
 from django.conf import settings
 from rest_framework import routers
 from . import views
-from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet
+from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView,TokenVerifyView
 from rest_framework.routers import DefaultRouter
 router = DefaultRouter()
@@ -11,6 +11,11 @@ router.register(r'colaboradores', ColaboradorViewSet, basename='Colaborador')
 router.register(r'avaliadores', AvaliadorViewSet, basename='Avaliador')
 router.register(r'avaliados', AvaliadoViewSet, basename='Avaliado')
 router.register(r'empresas', EmpresaViewSet, basename='Empresa')
+router.register(r'filiais', FilialViewSet, basename='Filial')
+router.register(r'areas', AreaViewSet, basename='Areas')
+router.register(r'setores', SetorViewSet, basename='Setores')
+router.register(r'ambientes', AmbienteViewSet, basename='Ambientes')
+router.register(r'cargos', CargoViewSet, basename='Cargos')
 urlpatterns = [
     
     #path('management/', views.management, name='management'),
