@@ -8,7 +8,7 @@ class PerfilUsuario(models.Model):
 
     def __str__(self):
         return self.user.username
-    
+
 
 def upload_image_colaborador(Colaborador,filename):
         return f"{Colaborador.id} - {filename}"
@@ -71,6 +71,7 @@ class TipoContrato(models.Model):
     area = models.ForeignKey(Area,on_delete=models.CASCADE,related_name='tiposcontratos')
     setor = models.ForeignKey(Setor, on_delete=models.CASCADE, related_name='tiposcontratos')
     cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE, related_name='tiposcontratos')
+    ambiente = models.ForeignKey(Ambiente, on_delete=models.CASCADE, related_name='tiposcontratos')
     nome = models.CharField(max_length=20, null=False, blank=False)
 
 class Formulario(models.Model):
@@ -84,8 +85,9 @@ class Colaborador(models.Model):
     empresa = models.ForeignKey(Empresa,on_delete=models.CASCADE,related_name='colaboradores')
     filial = models.ForeignKey(Filial,on_delete=models.CASCADE,related_name='colaboradores')
     setor = models.ForeignKey(Setor,on_delete=models.CASCADE,related_name='colaboradores')
-    cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE,related_name='colaboradores')
     area = models.ForeignKey(Area,on_delete=models.CASCADE,related_name='colaboradores')
+    cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE,related_name='colaboradores')
+    ambiente = models.ForeignKey(Ambiente,on_delete=models.CASCADE,related_name='colaboradores')
     tipocontrato = models.ForeignKey(TipoContrato, on_delete=models.CASCADE,related_name='colaboradores')
     nome = models.CharField(max_length=100,blank=False,null=False)
     data_admissao = models.DateTimeField(blank=True,null=True)
@@ -113,7 +115,7 @@ class Avaliador(Colaborador):
 
 class Avaliado(Colaborador):
     formulario = models.ForeignKey(Formulario, on_delete=models.CASCADE, related_name='avaliados')
-    
+
     class Meta:
         verbose_name = "Avaliado"
         verbose_name_plural = "Avaliados"
@@ -123,12 +125,13 @@ class TipoAvaliacao(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=60, null=False, blank=False)
 
-class Upload(models.Model):
-    imagem = models.FileField(upload_image_colaborador,null=True,blank=True)
-   
+
+
 class Pergunta(models.Model):
     texto = models.CharField(max_length=255)
-
+    class Meta:
+        verbose_name = "Pergunta"
+        verbose_name_plural = "Perguntas"
 
 
 
@@ -148,7 +151,7 @@ class Avaliacao(models.Model):
 class Respondido(models.Model):
     avaliacao = models.OneToOneField(Avaliacao, on_delete=models.CASCADE, related_name='respondidos')
     pergunta = models.ForeignKey('Pergunta',on_delete=models.CASCADE,related_name='respondidos')
-    resposta = models.CharField(max_length=255,blank=True,null=True) 
-    justificativa = models.CharField(max_length=255,blank=True,null=True) 
+    resposta = models.CharField(max_length=255,blank=True,null=True)
+    justificativa = models.CharField(max_length=255,blank=True,null=True)
 
 

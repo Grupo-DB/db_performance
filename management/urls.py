@@ -3,7 +3,7 @@ from django.conf.urls.static import static
 from django.conf import settings
 from rest_framework import routers
 from . import views
-from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet
+from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet,TipoContratoViewSet,PerguntaViewSet,FormularioViewSet,AvaliacaoViewSet
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView,TokenVerifyView
 from rest_framework.routers import DefaultRouter
 router = DefaultRouter()
@@ -16,6 +16,10 @@ router.register(r'areas', AreaViewSet, basename='Areas')
 router.register(r'setores', SetorViewSet, basename='Setores')
 router.register(r'ambientes', AmbienteViewSet, basename='Ambientes')
 router.register(r'cargos', CargoViewSet, basename='Cargos')
+router.register(r'tipocontratos', TipoContratoViewSet, basename='TipoContratos')
+router.register(r'perguntas', PerguntaViewSet, basename='Perguntas')
+router.register(r'formularios', FormularioViewSet, basename='Formularios')
+router.register(r'avaliacoes', AvaliacaoViewSet, basename='Avaliacoes')
 urlpatterns = [
     
     #path('management/', views.management, name='management'),
@@ -36,8 +40,8 @@ urlpatterns = [
     #path('get_avaliacao/', views.get_avaliacao, name='get_avaliacao'),
     #path('registercolaborador/', views.registercolaborador, name='registercolaborador'),
     #path('get_colaborador/', views.get_colaborador, name='get_colaborador'),
-    path('registerformulario/', views.registerformulario, name='registerformulario'),
-    path('get_formulario/', views.get_formulario, name='get_formulario'),
+    #path('registerformulario/', views.registerformulario, name='registerformulario'),
+    #path('get_formulario/', views.get_formulario, name='get_formulario'),
     #path('registeravaliador/', views.registeravaliador, name='registeravaliador'),
     #path('get_avaliador/', views.get_avaliador, name='get_avaliador'),
     #path('registerpergunta/', views.registerpergunta, name='registerpergunta'),

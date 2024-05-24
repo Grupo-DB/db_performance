@@ -36,10 +36,9 @@ INSTALLED_APPS = [
     'management',
     'rest_framework_simplejwt',
     
-    
-    
 
 ]
+CORS_ORIGIN_ALLOW_ALL = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -164,7 +163,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ROLEPERMISSIONS_MODULE = "db_performance.roles"
 
-CORS_ORIGIN_ALLOW_ALL = True
+
 
 # CORS_ALLOW_ORIGINS = [
 #     'http://localhost:4200',

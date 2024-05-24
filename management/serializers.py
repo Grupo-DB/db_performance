@@ -180,22 +180,59 @@ class LoginSerializer(serializers.Serializer):
 #         return pergunta      
 
 
-class FormularioSerializer(serializers.ModelSerializer):  
+# class FormularioSerializer(serializers.ModelSerializer):  
+#     class Meta:
+#         model = Formulario
+#         fields = '__all__'
+
+#     def create(self, validate_data):
+#         perguntas_data = validate_data.pop('perguntas', [])  # Extrai os dados das perguntas do formulário
+#         formulario = Formulario.objects.create(**validate_data)
+
+#         # Adiciona as perguntas ao formulário recém-criado
+#         for pergunta_data in perguntas_data:
+#             pergunta = Pergunta.objects.create(**pergunta_data)
+#             formulario.perguntas.add(pergunta)
+
+#         return formulario
+    
+class FormularioUpdateSerializer(serializers.ModelSerializer):
+    perguntas = serializers.PrimaryKeyRelatedField(queryset=Pergunta.objects.all(), many=True)
+
     class Meta:
         model = Formulario
-        fields = '__all__'
+        fields = ['id', 'perguntas']
 
-    def create(self, validate_data):
-        perguntas_data = validate_data.pop('perguntas', [])  # Extrai os dados das perguntas do formulário
-        formulario = Formulario.objects.create(**validate_data)
+class FormularioCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Formulario
+        fields = ['id', 'nome']
+# class FormularioSerializer(serializers.ModelSerializer):
+#     perguntas = serializers.PrimaryKeyRelatedField(many=True, queryset=Pergunta.objects.all())
 
-        # Adiciona as perguntas ao formulário recém-criado
-        for pergunta_data in perguntas_data:
-            pergunta = Pergunta.objects.create(**pergunta_data)
-            formulario.perguntas.add(pergunta)
+#     class Meta:
+#         model = Formulario
+#         fields = ['id', 'nome', 'perguntas']
 
-        return formulario
+class FormularioSerializer(serializers.ModelSerializer):
+    perguntas = serializers.PrimaryKeyRelatedField(queryset=Pergunta.objects.all(), many=True, required=False)
     
+    class Meta:
+        model = Formulario
+        fields = ['id', 'nome', 'perguntas']
+
+    def create(self, validated_data):
+        perguntas_data = validated_data.pop('perguntas', [])
+        formulario = Formulario.objects.create(**validated_data)
+        formulario.perguntas.set(perguntas_data)
+        return formulario
+
+    def update(self, instance, validated_data):
+        perguntas_data = validated_data.pop('perguntas', [])
+        instance.nome = validated_data.get('nome', instance.nome)
+        instance.save()
+        instance.perguntas.set(perguntas_data)
+        return instance
 
 # class FormularioNomeSerializer(serializers.Serializer):
 #     nome = serializers.CharField()
@@ -229,17 +266,38 @@ class FormularioSerializer(serializers.ModelSerializer):
 class ColaboradorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Colaborador
-        fields = '__all__'  
+        fields = '__all__' 
+
+    # def update(self, instance, validated_data):
+    #     if 'image' in validated_data:
+    #         instance.image.delete(save=False)  # Remove a imagem antiga se necessário
+    #         instance.image = validated_data['image']
+    #     return super().update(instance, validated_data)     
 
 class AvaliadoSerializer(serializers.ModelSerializer):
+    colaborador_id = serializers.IntegerField(write_only=True)
+    formulario_id = serializers.IntegerField(write_only=True)
     class Meta:
         model = Avaliado
         fields = '__all__'  # Ou liste os campos que deseja incluir no serializer
+    def create(self, validated_data):
+        colaborador_data = validated_data.pop('colaborador_ptr', None)
+        formulario = validated_data.pop('formulario', None)
+        avaliado = Avaliado.objects.create(colaborador_ptr=colaborador_data, formulario=formulario, **validated_data)
+        return avaliado
 
 class AvaliadorSerializer(serializers.ModelSerializer):
+    colaborador_id = serializers.IntegerField(write_only=True)
+    usuario_id = serializers.IntegerField(write_only=True)
     class Meta:
         model = Avaliador
         fields = '__all__'  # Ou liste os campos que deseja incluir no serializer
+    def create(self, validated_data):
+        colaborador_data = validated_data.pop('colaborador_ptr', None)
+        usuario = validated_data.pop('usuario', None)
+        avaliador = Avaliador.objects.create(colaborador_ptr=colaborador_data, usuario=usuario, **validated_data)
+        return avaliador
+        
 
 class EmpresaSerializer(serializers.ModelSerializer):
     class Meta:
