@@ -420,7 +420,7 @@ def get_perguntas_formularios(request, formulario_id):
     try:
         formulario = Formulario.objects.get(id=formulario_id)
         perguntas = formulario.perguntas.all()  # Obtém todas as perguntas associadas a este formulário
-        perguntas_data = [{'id': pergunta.id, 'texto': pergunta.texto} for pergunta in perguntas]
+        perguntas_data = [{'id': pergunta.id, 'texto': pergunta.texto,'legenda':pergunta.legenda} for pergunta in perguntas]
         return Response(perguntas_data)
     except Formulario.DoesNotExist:
         return Response({'error': 'Formulário não encontrado'}, status=404)
@@ -604,12 +604,29 @@ class AvaliadoViewSet(viewsets.ModelViewSet):
         avaliado = self.get_object()
         serializer = self.get_serializer(avaliado)
         return Response(serializer.data)
-
+    @action(detail=False, methods=['get'], url_path='byTipoAvaliacao')
+    def by_tipo_avaliacao(self, request):
+        tipo_avaliacao_id = request.query_params.get('tipoAvaliacao')
+        if not tipo_avaliacao_id:
+            return Response({'detail': 'TipoAvaliacao ID is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            tipo_avaliacao = TipoAvaliacao.objects.get(id=tipo_avaliacao_id)
+        except TipoAvaliacao.DoesNotExist:
+            return Response({'detail': 'TipoAvaliacao not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Utilizando o campo de relacionamento many-to-many correto
+        avaliados = Avaliado.objects.filter(tipoAvaliacao__id=tipo_avaliacao_id)
+        serializer = AvaliadoSerializer(avaliados, many=True)
+        return Response(serializer.data)
     
 class ColaboradorViewSet(viewsets.ModelViewSet):
     queryset = Colaborador.objects.all()
-    serializer_class = ColaboradorSerializer    
+    serializer_class = ColaboradorSerializer  
+
+
     def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -619,6 +636,64 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
             return Response({'image_url': image_url, **serializer.data})
         
         return Response(serializer.data)
+    
+    def perform_create(self, serializer):
+        username = self.request.data.get('username', None)
+        password = self.request.data.get('password', None)
+        tornar_avaliado = self.request.data.get('tornar_avaliado', False)
+        tornar_avaliador = self.request.data.get('tornar_avaliador', False)
+
+        colaborador = serializer.save()
+        
+        if username and password:
+            user = User.objects.create_user(username=username, password=password)
+            colaborador.user = user
+            colaborador.save()
+        if tornar_avaliado and not hasattr(colaborador, 'avaliado'):
+            Avaliado.objects.create(
+                colaborador_ptr=colaborador,
+                **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
+            )
+
+        if tornar_avaliador and not hasattr(colaborador, 'avaliador'):
+            Avaliador.objects.create(
+                colaborador_ptr=colaborador,
+                **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
+            )
+    def perform_update(self, serializer):
+        username = self.request.data.get('username', None)
+        password = self.request.data.get('password', None)
+        tornar_avaliado = self.request.data.get('tornar_avaliado', False)
+        tornar_avaliador = self.request.data.get('tornar_avaliador', False)
+
+        colaborador = serializer.save()
+
+        if username and password:
+            if colaborador.user:
+                user = colaborador.user
+                user.username = username
+                if password:
+                    user.set_password(password)
+                user.save()
+            else:
+                user = User.objects.create_user(username=username, password=password)
+                colaborador.user = user
+                colaborador.save()
+
+        if tornar_avaliado and not hasattr(colaborador, 'avaliado'):
+            Avaliado.objects.create(
+                colaborador_ptr=colaborador,
+                **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
+            )
+
+        if tornar_avaliador and not hasattr(colaborador, 'avaliador'):
+            Avaliador.objects.create(
+                colaborador_ptr=colaborador,
+                **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
+            )
+            
+                
+        
     
 class AvaliadorViewSet(viewsets.ModelViewSet):
     queryset = Avaliador.objects.all()
@@ -674,8 +749,8 @@ class AvaliadorViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='meus_avaliados')
     def meus_avaliados(self, request):
         try:
-            usuario = request.user
-            avaliador = Avaliador.objects.get(usuario=usuario)
+            user = request.user
+            avaliador = Avaliador.objects.get(user=user)
             avaliados = avaliador.avaliados.all()
             serializer = AvaliadoSerializer(avaliados, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -687,8 +762,8 @@ class AvaliadorViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def me(self, request):
         try:
-            usuario = request.user
-            avaliador = Avaliador.objects.get(usuario=usuario)
+            user = request.user
+            avaliador = Avaliador.objects.get(user=user)
             serializer = self.get_serializer(avaliador)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Avaliador.DoesNotExist:
@@ -830,7 +905,41 @@ class TipoContratoViewSet(viewsets.ModelViewSet):
 
 class TipoAvaliacaoViewSet(viewsets.ModelViewSet):
     queryset = TipoAvaliacao.objects.all()
-    serializer_class = TipoAvaliacaoSerializer          
+    serializer_class = TipoAvaliacaoSerializer   
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)   
+    @action(detail=True, methods=['post'], url_path='add_avaliado')
+    def add_avaliado(self, request, pk=None):
+        tipoavaliacao = self.get_object()
+        avaliado_id = request.data.get('avaliado_id')  # Supondo que você envia o ID da pergunta no corpo da requisição
+
+        try:
+            avaliado = Avaliado.objects.get(pk=avaliado_id)
+        except Avaliado.DoesNotExist:
+            return Response({'error': 'Avaliado não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Verifica se a pergunta já está associada ao formulário
+        if tipoavaliacao.avaliados.filter(pk=avaliado_id).exists():
+            return Response({'error': 'Este avaliado já está associada ao formulário.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Adiciona a pergunta ao formulário na tabela intermediária
+        tipoavaliacao.avaliados.add(avaliado)
+
+        # Serializa o formulário atualizado para retornar na resposta
+        serializer = TipoAvaliacaoSerializer(tipoavaliacao)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)    
+    @action(detail=False, methods=['get'], url_path='user/(?P<user_id>[^/.]+)')
+    def get_by_user(self, request, user_id=None):
+        try:
+            tipos_avaliacao = TipoAvaliacao.objects.filter(avaliados__id=user_id)
+            serializer = self.get_serializer(tipos_avaliacao, many=True)
+            return Response(serializer.data)
+        except TipoAvaliacao.DoesNotExist:
+            return Response({'error': 'Tipo de avaliação não encontrado'}, status=404)
 
 class AvaliacaoViewSet(viewsets.ModelViewSet):
     queryset = Avaliacao.objects.all()

@@ -5,7 +5,6 @@ from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,C
 
 
 
-
 class GroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = Group
@@ -26,175 +25,7 @@ class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField()
 
-# class RegisterCompanySerializer(serializers.Serializer):
-   
-#     id = serializers.IntegerField(read_only=True)
-#     nome = serializers.CharField()
-#     cnpj = serializers.CharField()
-#     endereco = serializers.CharField()
-#     cidade = serializers.CharField()
-#     estado = serializers.CharField()
-#     codigo = serializers.CharField()
 
-#     def create(self, validated_data):
-#         empresa = Empresa.objects.create(**validated_data)
-#         return empresa
-    
-# class FilialSerializer(serializers.Serializer):
-#     id = serializers.IntegerField(read_only=True)
-#     empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all())
-#     nome = serializers.CharField()
-#     cnpj = serializers.CharField()
-#     endereco = serializers.CharField()
-#     cidade = serializers.CharField()
-#     estado = serializers.CharField()
-#     codigo = serializers.CharField()
-
-#     def create(self, validate_data):
-#         filial = Filial.objects.create(**validate_data)
-#         return filial
-    
-# class AreaSerializer(serializers.Serializer):
-#     id = serializers.IntegerField(read_only=True)
-#     empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all())
-#     filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all())
-#     nome = serializers.CharField()
-
-#     def create(self, validated_data):
-#         area = Area.objects.create(**validated_data)
-#         return area
-    
-# class SetorSerializer(serializers.Serializer):
-#     id = serializers.IntegerField(read_only=True)
-#     empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all())
-#     filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all())
-#     area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all())
-#     nome = serializers.CharField()
-
-#     def create(self, validate_data):
-#         setor = Setor.objects.create(**validate_data)
-#         return setor
-
-# class CargoSerializer(serializers.Serializer):
-#     id = serializers.IntegerField(read_only=True)
-#     empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all())
-#     area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all())
-#     filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all())
-#     setor = serializers.PrimaryKeyRelatedField(queryset=Setor.objects.all())
-#     nome = serializers.CharField()
-
-#     def create(self, validate_data):
-#         cargo = Cargo.objects.create(**validate_data)
-#         return cargo
-
-# class TipoContratoSerializer(serializers.Serializer):
-#     id = serializers.IntegerField(read_only=True)
-#     empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all())
-#     area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all())
-#     filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all())
-#     setor = serializers.PrimaryKeyRelatedField(queryset=Setor.objects.all())
-#     cargo = serializers.PrimaryKeyRelatedField(queryset=Cargo.objects.all())
-#     nome = serializers.CharField()
-
-#     def create(self, validate_data):
-#         tipocontrato = TipoContrato.objects.create(**validate_data)
-#         return tipocontrato
-    
-# class ColaboradorSerializer(serializers.ModelSerializer):
-#     cargo_nome = serializers.CharField(source='cargo.nome', read_only=True)
-#     area_nome = serializers.CharField(source='area.nome', read_only=True)
-#     setor_nome = serializers.CharField(source='setor.nome', read_only=True)
-#     class Meta:
-#          model = Colaborador
-#          fields = '__all__'
-#     # id = serializers.IntegerField(read_only=True)
-    # empresa = serializers.PrimaryKeyRelatedField(required=False,queryset=Empresa.objects.all())
-    # area = serializers.PrimaryKeyRelatedField(required=False,queryset=Area.objects.all())
-    # filial = serializers.PrimaryKeyRelatedField(required=False,queryset=Filial.objects.all())
-    # setor = serializers.PrimaryKeyRelatedField(required=False,queryset=Setor.objects.all())
-    # cargo = serializers.PrimaryKeyRelatedField(required=False,queryset=Cargo.objects.all())
-    # tipocontrato = serializers.PrimaryKeyRelatedField(required=False,queryset=TipoContrato.objects.all())
-    # nome = serializers.CharField()
-    # data_admissao = serializers.DateTimeField(required=False,allow_null=True)
-    # #situacao = serializers.BooleanField(required=False,allow_null=True)
-    # genero = serializers.CharField(required=False,allow_blank=True)
-    # estado_civil = serializers.CharField(required=False,allow_null=True)
-    # data_nascimento = serializers.DateTimeField(required=False,allow_null=True)
-    # data_troca_setor = serializers.DateTimeField(required=False,allow_null=True)
-    # data_troca_cargo = serializers.DateTimeField(required=False,allow_null=True)
-    # data_demissao = serializers.DateTimeField(required=False,allow_null=True)
-    # image = serializers.FileField(required=False,allow_null=True)
-
-    
-      
-
-    # def create (self, validate_data):
-    #     colaborador = Colaborador.objects.create(**validate_data)
-    #     return colaborador
-
-# class AvaliadorSerializer(serializers.ModelSerializer):
-#     #colaborador = serializers.PrimaryKeyRelatedField(read_only=True)
-#     class Meta:
-#         model = Avaliador
-#         fields = '__all__'
-    
-#     def create(self,validate_data):
-#         avaliador = Avaliador.objects.create(**validate_data)
-#         return avaliador
-    
-# class TipoAvaliacaoSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = TipoAvaliacao
-#         fields = '__all__' 
-
-#     def create(self,validate_data):
-#         tipoavaliacao = TipoAvaliacao.objects.create(**validate_data)
-#         return tipoavaliacao
-    
-    
-# class UploadSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = Upload
-#         fields = '__all__' 
-
-    # def create(self,validate_data):
-    #     upload = Upload.objects.create(**validate_data)
-    #     return upload
-           
-    
-# class AvaliacaoSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = Avaliacao
-#         fields = '__all__'
-
-#     def create(self, validate_data):
-#         avaliacao = Avaliacao.objects.create(**validate_data)
-#         return avaliacao        
-    
-# class PerguntaSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = Pergunta
-#         fields = '__all__'
-#     def create(self, validate_data):
-#         pergunta = Pergunta.objects.create(**validate_data)
-#         return pergunta      
-
-
-# class FormularioSerializer(serializers.ModelSerializer):  
-#     class Meta:
-#         model = Formulario
-#         fields = '__all__'
-
-#     def create(self, validate_data):
-#         perguntas_data = validate_data.pop('perguntas', [])  # Extrai os dados das perguntas do formulário
-#         formulario = Formulario.objects.create(**validate_data)
-
-#         # Adiciona as perguntas ao formulário recém-criado
-#         for pergunta_data in perguntas_data:
-#             pergunta = Pergunta.objects.create(**pergunta_data)
-#             formulario.perguntas.add(pergunta)
-
-#         return formulario
     
 class FormularioUpdateSerializer(serializers.ModelSerializer):
     perguntas = serializers.PrimaryKeyRelatedField(queryset=Pergunta.objects.all(), many=True)
@@ -207,12 +38,7 @@ class FormularioCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Formulario
         fields = ['id', 'nome']
-# class FormularioSerializer(serializers.ModelSerializer):
-#     perguntas = serializers.PrimaryKeyRelatedField(many=True, queryset=Pergunta.objects.all())
 
-#     class Meta:
-#         model = Formulario
-#         fields = ['id', 'nome', 'perguntas']
 
 class FormularioSerializer(serializers.ModelSerializer):
     perguntas = serializers.PrimaryKeyRelatedField(queryset=Pergunta.objects.all(), many=True, required=False)
@@ -234,70 +60,104 @@ class FormularioSerializer(serializers.ModelSerializer):
         instance.perguntas.set(perguntas_data)
         return instance
 
-# class FormularioNomeSerializer(serializers.Serializer):
-#     nome = serializers.CharField()
-#     # class Meta:
-#     #     model = Formulario
-#     #     fields = '__all__'    
-
-#     def create(self,validate_data):
-#         formulario = formulario.objects.create(**validate_data)
-#         return formulario    
-    
-# class AvaliadoSerializer(serializers.ModelSerializer):
-#     avaliadores = AvaliadorSerializer(many=True, read_only=True)
-
-#     class Meta:
-#         model = Avaliado
-#         fields = ['id', 'colaborador', 'formulario', 'avaliadores']
-
-#     def create(self, validated_data):
-#         avaliadores_data = validated_data.pop('avaliadores', [])  # Extrai os dados dos avaliadores do avaliado
-#         avaliado = Avaliado.objects.create(**validated_data)
-
-#         # Adiciona os avaliadores ao avaliado recém-criado
-#         for avaliador_data in avaliadores_data:
-#             avaliador = Avaliador.objects.create(**avaliador_data)
-#             avaliado.avaliadores.add(avaliador)
-
-#         return avaliado
-    
+ 
 
 class ColaboradorSerializer(serializers.ModelSerializer):
+    # user = UserSerializer(required=False)
+    # tornar_avaliado = serializers.BooleanField(write_only=True, required=False)
+    # tornar_avaliador = serializers.BooleanField(write_only=True, required=False)
+
     class Meta:
         model = Colaborador
-        fields = '__all__' 
+        fields = '__all__'
+
+    
 
     # def update(self, instance, validated_data):
-    #     if 'image' in validated_data:
-    #         instance.image.delete(save=False)  # Remove a imagem antiga se necessário
-    #         instance.image = validated_data['image']
-    #     return super().update(instance, validated_data)     
+    #     user_data = validated_data.pop('user', None)
+    #     tornar_avaliado = validated_data.pop('tornar_avaliado', False)
+    #     tornar_avaliador = validated_data.pop('tornar_avaliador', False)
+
+    #     for attr, value in validated_data.items():
+    #         setattr(instance, attr, value)
+    #     instance.save()
+
+    #     if user_data:
+    #         if instance.user:
+    #             user = instance.user
+    #             user.username = user_data.get('username', user.username)
+    #             user.email = user_data.get('email', user.email)
+    #             if 'password' in user_data:
+    #                 user.set_password(user_data['password'])
+    #             user.save()
+    #         else:
+    #             user = User.objects.create_user(**user_data)
+    #             instance.user = user
+    #             instance.save()
+
+    #     if tornar_avaliado and not Avaliado.objects.filter(colaborador_ptr=instance).exists():
+    #         Avaliado.objects.create(**validated_data, colaborador_ptr=instance)
+    #     elif tornar_avaliador and not Avaliador.objects.filter(colaborador_ptr=instance).exists():
+    #         Avaliador.objects.create(**validated_data, colaborador_ptr=instance)
+
+        # return instance
+
+# class AvaliadoSerializer(serializers.ModelSerializer):
+#     colaborador_id = serializers.IntegerField(write_only=True)
+#     formulario_id = serializers.IntegerField(write_only=True)
+#     class Meta:
+#         model = Avaliado
+#         fields = '__all__'  # Ou liste os campos que deseja incluir no serializer
+#     def create(self, validated_data):
+#         colaborador_data = validated_data.pop('colaborador_ptr', None)
+#         formulario = validated_data.pop('formulario', None)
+#         avaliado = Avaliado.objects.create(colaborador_ptr=colaborador_data, formulario=formulario, **validated_data)
+#         return avaliado
 
 class AvaliadoSerializer(serializers.ModelSerializer):
     colaborador_id = serializers.IntegerField(write_only=True)
-    formulario_id = serializers.IntegerField(write_only=True)
+    tipoAvaliacao_id = serializers.IntegerField(write_only=True)
+
     class Meta:
         model = Avaliado
         fields = '__all__'  # Ou liste os campos que deseja incluir no serializer
+
     def create(self, validated_data):
-        colaborador_data = validated_data.pop('colaborador_ptr', None)
-        formulario = validated_data.pop('formulario', None)
-        avaliado = Avaliado.objects.create(colaborador_ptr=colaborador_data, formulario=formulario, **validated_data)
+        colaborador_data = validated_data.pop('colaborador_id', None)
+        # formulario_id = validated_data.pop('formulario_id', None)
+        if colaborador_data:
+            colaborador = Colaborador.objects.get(id=colaborador_data)
+            validated_data['colaborador_ptr'] = colaborador
+       
+        avaliado = Avaliado.objects.create(**validated_data)
         return avaliado
 
+# class AvaliadorSerializer(serializers.ModelSerializer):
+#     colaborador_id = serializers.IntegerField(write_only=True)
+#     usuario_id = serializers.IntegerField(write_only=True)
+#     class Meta:
+#         model = Avaliador
+#         fields = '__all__'  # Ou liste os campos que deseja incluir no serializer
+#     def create(self, validated_data):
+#         colaborador_data = validated_data.pop('colaborador_ptr', None)
+#         usuario = validated_data.pop('usuario', None)
+#         avaliador = Avaliador.objects.create(colaborador_ptr=colaborador_data, usuario=usuario, **validated_data)
+#         return avaliador
+        
 class AvaliadorSerializer(serializers.ModelSerializer):
     colaborador_id = serializers.IntegerField(write_only=True)
-    usuario_id = serializers.IntegerField(write_only=True)
+
     class Meta:
         model = Avaliador
         fields = '__all__'  # Ou liste os campos que deseja incluir no serializer
+
     def create(self, validated_data):
-        colaborador_data = validated_data.pop('colaborador_ptr', None)
-        usuario = validated_data.pop('usuario', None)
-        avaliador = Avaliador.objects.create(colaborador_ptr=colaborador_data, usuario=usuario, **validated_data)
+        colaborador_data = validated_data.pop('colaborador_id', None)
+        if colaborador_data:
+            colaborador = Colaborador.objects.get(id=colaborador_data)
+            validated_data['colaborador_ptr'] = colaborador
+        avaliador = Avaliador.objects.create(**validated_data)
         return avaliador
-        
 
 class EmpresaSerializer(serializers.ModelSerializer):
     class Meta:

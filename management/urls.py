@@ -3,7 +3,7 @@ from django.conf.urls.static import static
 from django.conf import settings
 from rest_framework import routers
 from . import views
-from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet,TipoContratoViewSet,PerguntaViewSet,FormularioViewSet,AvaliacaoViewSet
+from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet,TipoContratoViewSet,PerguntaViewSet,FormularioViewSet,AvaliacaoViewSet,TipoAvaliacaoViewSet
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView,TokenVerifyView
 from rest_framework.routers import DefaultRouter
 router = DefaultRouter()
@@ -17,6 +17,7 @@ router.register(r'setores', SetorViewSet, basename='Setores')
 router.register(r'ambientes', AmbienteViewSet, basename='Ambientes')
 router.register(r'cargos', CargoViewSet, basename='Cargos')
 router.register(r'tipocontratos', TipoContratoViewSet, basename='TipoContratos')
+router.register(r'tipoavaliacoes', TipoAvaliacaoViewSet, basename='TipoAvaliacoes')
 router.register(r'perguntas', PerguntaViewSet, basename='Perguntas')
 router.register(r'formularios', FormularioViewSet, basename='Formularios')
 router.register(r'avaliacoes', AvaliacaoViewSet, basename='Avaliacoes')
