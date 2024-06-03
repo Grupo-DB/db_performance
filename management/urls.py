@@ -23,7 +23,7 @@ router.register(r'formularios', FormularioViewSet, basename='Formularios')
 router.register(r'avaliacoes', AvaliacaoViewSet, basename='Avaliacoes')
 urlpatterns = [
     
-    #path('management/', views.management, name='management'),
+    #path('update_feedback/<int:avaliacao_id>/', UpdateFeedbackView.as_view(), name='update_feedback'),
     path('create_user/', views.create_user, name='create_user'),
     #path('registercompany/', views.registercompany, name='registercompany'),
     #path('registerfilial/', views.registerfilial, name='registerfilial'),

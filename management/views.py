@@ -3,6 +3,8 @@ from django.shortcuts import render,HttpResponse
 # Create your views here.
 def management(request):
     return HttpResponse(request,'ok')
+
+from django.utils import timezone
 from django.shortcuts import render, HttpResponse,get_object_or_404
 from django.contrib.auth.models import User,Group
 from django.contrib.auth import authenticate
@@ -620,6 +622,49 @@ class AvaliadoViewSet(viewsets.ModelViewSet):
         serializer = AvaliadoSerializer(avaliados, many=True)
         return Response(serializer.data)
     
+    @action(detail=False, methods=['get'],url_path='byAvaliador')
+    def byAvaliador(self, request):
+        avaliador_id = request.query_params.get('avaliador_id')
+        try:
+            avaliador = Avaliador.objects.get(id=avaliador_id)  # Busque o objeto Avaliador
+        except Avaliador.DoesNotExist:
+            raise NotFound('Avaliador não encontrado')  # type: ignore # Levante um erro se o Avaliador não existir
+        avaliados = avaliador.avaliados.all()
+        serializer = AvaliadoSerializer(avaliados, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='meus_avaliados_sem_avaliacao')
+    def meus_avaliados_sem_avaliacao(self, request):
+        try:
+            user = request.user
+            tipo_avaliacao_id = request.query_params.get('tipoAvaliacao')
+            periodo = request.query_params.get('periodo')
+
+            if not tipo_avaliacao_id:
+                return Response({'detail': 'TipoAvaliacao ID is required'}, status=status.HTTP_400_BAD_REQUEST)
+            if not periodo:
+                return Response({'status': 'error', 'message': 'Período não fornecido'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                tipo_avaliacao = TipoAvaliacao.objects.get(id=tipo_avaliacao_id)
+            except TipoAvaliacao.DoesNotExist:
+                return Response({'detail': 'TipoAvaliacao not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            avaliador = Avaliador.objects.get(user=user)
+            avaliados = avaliador.avaliados.all()
+
+            # Filtrar avaliados que não têm avaliação no período e tipo especificado
+            avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, tipoavaliacao_id=tipo_avaliacao, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
+            avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao)
+
+            serializer = AvaliadoSerializer(avaliados_sem_avaliacao, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Avaliador.DoesNotExist:
+            return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)     
+
+
 class ColaboradorViewSet(viewsets.ModelViewSet):
     queryset = Colaborador.objects.all()
     serializer_class = ColaboradorSerializer  
@@ -660,6 +705,19 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
+
+    @action(detail=False, methods=['get'])
+    def meInfo(self, request):
+        try:
+            user = request.user
+            colaborador = Colaborador.objects.get(user=user)
+            serializer = self.get_serializer(colaborador)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Colaborador.DoesNotExist:
+            return Response({"error": "Colaborador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
     def perform_update(self, serializer):
         username = self.request.data.get('username', None)
         password = self.request.data.get('password', None)
@@ -758,6 +816,8 @@ class AvaliadorViewSet(viewsets.ModelViewSet):
             return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+       
         
     @action(detail=False, methods=['get'])
     def me(self, request):
@@ -943,7 +1003,61 @@ class TipoAvaliacaoViewSet(viewsets.ModelViewSet):
 
 class AvaliacaoViewSet(viewsets.ModelViewSet):
     queryset = Avaliacao.objects.all()
-    serializer_class = AvaliacaoSerializer     
+    serializer_class = AvaliacaoSerializer 
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)  
+
+    def perform_create(self, serializer):
+        if 'feedback' not in self.request.data:
+            serializer.save(feedback=False)
+        else:
+            serializer.save()
+
+    @action(detail=True, methods=['post'])
+    def update_feedback(self, request, pk=None):
+        try:
+            avaliacao = self.get_object()
+            avaliacao.feedback = True
+            avaliacao.finished_at = timezone.now()
+            avaliacao.save()
+            return Response({'status': 'success'})
+        except Avaliacao.DoesNotExist:
+            return Response({'status': 'error', 'message': 'Avaliação não encontrada'}, status=404)
+        
+    @action(detail=False, methods=['get'], url_path='meus_avaliados_sem_avaliacao')
+    def meus_avaliados_sem_avaliacao(self, request):
+        try:
+            user = request.user
+            tipo_avaliacao_id = request.query_params.get('tipoAvaliacao')
+            periodo = request.query_params.get('periodo')
+
+            if not tipo_avaliacao_id:
+                return Response({'detail': 'TipoAvaliacao ID is required'}, status=status.HTTP_400_BAD_REQUEST)
+            if not periodo:
+                return Response({'status': 'error', 'message': 'Período não fornecido'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                tipo_avaliacao = TipoAvaliacao.objects.get(id=tipo_avaliacao_id)
+            except TipoAvaliacao.DoesNotExist:
+                return Response({'detail': 'TipoAvaliacao not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            avaliador = Avaliador.objects.get(user=user)
+            avaliados = avaliador.avaliados.filter(tipoAvaliacao=tipo_avaliacao_id)
+
+            # Filtrar avaliados que não têm avaliação no período e tipo especificado
+            avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, tipoavaliacao_id=tipo_avaliacao, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
+            avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao)
+
+            serializer = AvaliadoSerializer(avaliados_sem_avaliacao, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Avaliador.DoesNotExist:
+            return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class PerguntaViewSet(viewsets.ModelViewSet):
     queryset = Pergunta.objects.all()
@@ -1010,3 +1124,4 @@ class FormularioViewSet(viewsets.ModelViewSet):
         # Serializa o formulário atualizado para retornar na resposta
         serializer = FormularioSerializer(formulario)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    ##########################################################################################

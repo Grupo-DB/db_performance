@@ -166,11 +166,10 @@ class Avaliacao(models.Model):
     avaliado = models.ForeignKey(Avaliado, on_delete=models.CASCADE, related_name='avaliacoes_avaliado')
     periodo = models.CharField(max_length=60, null=True, blank=True)
     perguntasRespostas = models.JSONField(null=True,blank=True)
-    feedback = models.CharField(max_length=60, null=True, blank=True)
+    observacoes = models.TextField(max_length=500, null=True, blank=True)
     create_at = models.DateTimeField(auto_now_add=True)
-    edited_at = models.DateTimeField(auto_now=True,blank=True, null=True)
-    deleted_at = models.DateTimeField(auto_now=True,blank=True, null=True)
-
+    feedback = models.BooleanField(default=False, blank=True, null=False)
+    finished_at = models.DateField( null=True)
     class Meta:
         verbose_name = "Avaliacao"
         verbose_name_plural = "Avaliacoes"

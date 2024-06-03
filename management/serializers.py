@@ -203,6 +203,10 @@ class AvaliacaoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Avaliacao
         fields = '__all__'
+    def validate_feedback(self, value):
+        if value is None:
+            return False
+        return value    
 
 class PerguntaSerializer(serializers.ModelSerializer):
     class Meta:
