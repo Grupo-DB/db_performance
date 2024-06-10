@@ -3,7 +3,7 @@ from django.shortcuts import render,HttpResponse
 # Create your views here.
 def management(request):
     return HttpResponse(request,'ok')
-
+#import logging
 from django.utils import timezone
 from django.shortcuts import render, HttpResponse,get_object_or_404
 from django.contrib.auth.models import User,Group
@@ -17,14 +17,19 @@ from rest_framework.parsers import MultiPartParser,FormParser,FileUploadParser,J
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated,GroupPermission
 from rest_framework.decorators import api_view,authentication_classes, permission_classes,parser_classes,action
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework.response import Response
 from rest_framework import status, viewsets
-
 from .models import Ambiente, Empresa,Area,Cargo,Setor,Colaborador,Filial,TipoContrato,TipoAvaliacao,Avaliacao,Avaliador,Formulario,Pergunta,Avaliado
-
+from django.conf import settings
 from .serializers import LoginSerializer, UserSerializer,EmpresaSerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer,TipoContratoSerializer,TipoAvaliacaoSerializer,AvaliacaoSerializer,AvaliadorSerializer,PerguntaSerializer,AvaliadoSerializer,AmbienteSerializer
-from.serializers import FormularioCreateSerializer,FormularioUpdateSerializer,FormularioSerializer
-
+from.serializers import FormularioCreateSerializer,FormularioUpdateSerializer,FormularioSerializer,NotificationSerializer
+from .utils import send_custom_email
+from django.core.mail import send_mail
+from datetime import datetime
+from django.db.models import Q
+from notifications.signals import notify
+#logger = logging.getLogger(__name__)
 @api_view(['GET','POST'])
 def login(request):
     if request.method == "GET":
@@ -595,7 +600,8 @@ class AvaliadoViewSet(viewsets.ModelViewSet):
             data_troca_cargo=colaborador.data_troca_cargo,
             data_demissao=colaborador.data_demissao,
             create_at=colaborador.create_at,
-            image=colaborador.image
+            image=colaborador.image,
+            email=colaborador.email
         )
         avaliado.save()
 
@@ -633,36 +639,7 @@ class AvaliadoViewSet(viewsets.ModelViewSet):
         serializer = AvaliadoSerializer(avaliados, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    @action(detail=False, methods=['get'], url_path='meus_avaliados_sem_avaliacao')
-    def meus_avaliados_sem_avaliacao(self, request):
-        try:
-            user = request.user
-            tipo_avaliacao_id = request.query_params.get('tipoAvaliacao')
-            periodo = request.query_params.get('periodo')
-
-            if not tipo_avaliacao_id:
-                return Response({'detail': 'TipoAvaliacao ID is required'}, status=status.HTTP_400_BAD_REQUEST)
-            if not periodo:
-                return Response({'status': 'error', 'message': 'Período não fornecido'}, status=status.HTTP_400_BAD_REQUEST)
-
-            try:
-                tipo_avaliacao = TipoAvaliacao.objects.get(id=tipo_avaliacao_id)
-            except TipoAvaliacao.DoesNotExist:
-                return Response({'detail': 'TipoAvaliacao not found'}, status=status.HTTP_404_NOT_FOUND)
-
-            avaliador = Avaliador.objects.get(user=user)
-            avaliados = avaliador.avaliados.all()
-
-            # Filtrar avaliados que não têm avaliação no período e tipo especificado
-            avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, tipoavaliacao_id=tipo_avaliacao, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
-            avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao)
-
-            serializer = AvaliadoSerializer(avaliados_sem_avaliacao, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Avaliador.DoesNotExist:
-            return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)     
+     
 
 
 class ColaboradorViewSet(viewsets.ModelViewSet):
@@ -797,7 +774,8 @@ class AvaliadorViewSet(viewsets.ModelViewSet):
             data_troca_cargo=colaborador.data_troca_cargo,
             data_demissao=colaborador.data_demissao,
             create_at=colaborador.create_at,
-            image=colaborador.image
+            image=colaborador.image,
+            email=colaborador.email
         )
         avaliador.save()
 
@@ -972,26 +950,7 @@ class TipoAvaliacaoViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)   
-    @action(detail=True, methods=['post'], url_path='add_avaliado')
-    def add_avaliado(self, request, pk=None):
-        tipoavaliacao = self.get_object()
-        avaliado_id = request.data.get('avaliado_id')  # Supondo que você envia o ID da pergunta no corpo da requisição
-
-        try:
-            avaliado = Avaliado.objects.get(pk=avaliado_id)
-        except Avaliado.DoesNotExist:
-            return Response({'error': 'Avaliado não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
-
-        # Verifica se a pergunta já está associada ao formulário
-        if tipoavaliacao.avaliados.filter(pk=avaliado_id).exists():
-            return Response({'error': 'Este avaliado já está associada ao formulário.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Adiciona a pergunta ao formulário na tabela intermediária
-        tipoavaliacao.avaliados.add(avaliado)
-
-        # Serializa o formulário atualizado para retornar na resposta
-        serializer = TipoAvaliacaoSerializer(tipoavaliacao)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)    
+        
     @action(detail=False, methods=['get'], url_path='user/(?P<user_id>[^/.]+)')
     def get_by_user(self, request, user_id=None):
         try:
@@ -1027,29 +986,21 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
             return Response({'status': 'success'})
         except Avaliacao.DoesNotExist:
             return Response({'status': 'error', 'message': 'Avaliação não encontrada'}, status=404)
-        
+    
     @action(detail=False, methods=['get'], url_path='meus_avaliados_sem_avaliacao')
     def meus_avaliados_sem_avaliacao(self, request):
         try:
             user = request.user
-            tipo_avaliacao_id = request.query_params.get('tipoAvaliacao')
             periodo = request.query_params.get('periodo')
 
-            if not tipo_avaliacao_id:
-                return Response({'detail': 'TipoAvaliacao ID is required'}, status=status.HTTP_400_BAD_REQUEST)
             if not periodo:
                 return Response({'status': 'error', 'message': 'Período não fornecido'}, status=status.HTTP_400_BAD_REQUEST)
 
-            try:
-                tipo_avaliacao = TipoAvaliacao.objects.get(id=tipo_avaliacao_id)
-            except TipoAvaliacao.DoesNotExist:
-                return Response({'detail': 'TipoAvaliacao not found'}, status=status.HTTP_404_NOT_FOUND)
-
             avaliador = Avaliador.objects.get(user=user)
-            avaliados = avaliador.avaliados.filter(tipoAvaliacao=tipo_avaliacao_id)
+            avaliados = avaliador.avaliados.all()
 
-            # Filtrar avaliados que não têm avaliação no período e tipo especificado
-            avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, tipoavaliacao_id=tipo_avaliacao, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
+            # Filtrar avaliados que não têm avaliação no período especificado
+            avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
             avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao)
 
             serializer = AvaliadoSerializer(avaliados_sem_avaliacao, many=True)
@@ -1058,6 +1009,7 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
             return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
 
 class PerguntaViewSet(viewsets.ModelViewSet):
     queryset = Pergunta.objects.all()
@@ -1124,4 +1076,204 @@ class FormularioViewSet(viewsets.ModelViewSet):
         # Serializa o formulário atualizado para retornar na resposta
         serializer = FormularioSerializer(formulario)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['post'], url_path='add_avaliado')
+    def add_avaliado(self, request, pk=None):
+        formulario = self.get_object()
+        avaliado_id = request.data.get('avaliado_id')  # Supondo que você envia o ID da pergunta no corpo da requisição
+
+        try:
+            avaliado = Avaliado.objects.get(pk=avaliado_id)
+        except Avaliado.DoesNotExist:
+            return Response({'error': 'Avaliado não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Verifica se a pergunta já está associada ao formulário
+        if formulario.avaliados.filter(pk=avaliado_id).exists():
+            return Response({'error': 'Este avaliado já está associada ao formulário.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Adiciona a pergunta ao formulário na tabela intermediária
+        formulario.avaliados.add(avaliado)
+
+        # Serializa o formulário atualizado para retornar na resposta
+        serializer = FormularioSerializer(formulario)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
     ##########################################################################################
+   
+@api_view(['POST'])
+def send_email_view(request):
+    subject = request.data.get('subject')
+    message = request.data.get('message')
+    recipient_list = request.data.get('recipients')
+
+    # Converting recipient_list to a list if it's a string
+    if isinstance(recipient_list, str):
+        recipient_list = [recipient.strip() for recipient in recipient_list.split(',')]
+
+    if not subject or not message or not recipient_list:
+        return Response({"error": "All fields are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        send_custom_email(subject, message, recipient_list)
+        return Response({"success": "Email sent successfully"}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    #########################################################################################
+
+def obterTrimestre(data):
+    mes = data.month
+    if mes in [1, 2, 3]:
+        return 'Primeiro trimesmtre'
+    elif mes in [4, 5, 6]:
+        return 'Segundo trimesmtre'
+    elif mes in [7, 8, 9]:
+        return 'Terceiro trimesmtre'
+    elif mes in [10, 11, 12]:
+        return 'Quarto trimesmtre'
+
+
+
+@api_view(['POST'])
+def send_email_view2(request):
+    subject = request.data.get('subject')
+    message = request.data.get('message')
+
+    if not subject or not message:
+        return Response({"error": "Subject and message are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    now = timezone.now()
+    trimestre_atual = obterTrimestre(now)
+
+    # Encontrar todos os avaliados sem avaliação no trimestre atual
+    avaliados_sem_avaliacao = Avaliado.objects.filter(
+        ~Q(avaliacoes_avaliado__periodo=trimestre_atual)
+    ).distinct()
+
+    # Encontrar os avaliadores desses avaliados
+    avaliadores_sem_avaliacao = Avaliador.objects.filter(
+        avaliados__in=avaliados_sem_avaliacao
+    ).distinct()
+
+    # Construir a lista de destinatários
+    recipient_list = [avaliador.email for avaliador in avaliadores_sem_avaliacao]
+
+    if not recipient_list:
+        return Response({"error": "No evaluators found without evaluations"}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        send_custom_email(subject, message, recipient_list)
+        return Response({"success": "Email sent successfully"}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+###########################################################################################################################
+
+def obterTrimestre(data):
+    mes = data.month
+    if mes in [1, 2, 3]:
+        return 'Primeiro trimestre'
+    elif mes in [4, 5, 6]:
+        return 'Segundo trimestre'
+    elif mes in [7, 8, 9]:
+        return 'Terceiro trimestre'
+    elif mes in [10, 11, 12]:
+        return 'Quarto trimestre'
+
+class NotificationViewSet(viewsets.ViewSet):
+    def list(self, request):
+        notifications = request.user.notifications.unread()
+        serializer = NotificationSerializer(notifications, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['post'])
+    def enviar_notificacoes(self, request):
+        now = timezone.now()
+        trimestre_atual = obterTrimestre(now)
+        #logger.debug(f"Trimestre atual: {trimestre_atual}")
+
+        # Encontrar todos os avaliados que não foram avaliados no trimestre atual
+        avaliados_sem_avaliacao = Avaliado.objects.filter(
+            ~Q(avaliacoes_avaliado__periodo=trimestre_atual)
+        ).distinct()
+        #logger.debug(f"Avaliados sem avaliação: {[a.id for a in avaliados_sem_avaliacao]}")
+
+        # Encontrar os avaliadores desses avaliados
+        avaliadores_sem_avaliacao = Avaliador.objects.filter(
+            avaliados__in=avaliados_sem_avaliacao
+        ).distinct()
+        #logger.debug(f"Avaliadores sem avaliação: {[a.id for a in avaliadores_sem_avaliacao]}")
+
+        # Enviar notificações para os avaliadores sem avaliações no trimestre atual
+        for avaliador in avaliadores_sem_avaliacao:
+            for avaliado in avaliador.avaliados.filter(id__in=avaliados_sem_avaliacao).all():
+                notify.send(
+                    sender=request.user,  # Quem envia a notificação (o usuário autenticado)
+                    recipient=avaliador.user,  # Avaliador que receberá a notificação
+                    verb='Nova notificação',  # Verbo da notificação
+                    description=f'Nova avaliação pendente para {avaliado.nome}'  # Descrição da notificação
+                )
+
+        return Response({"success": "Notificações enviadas"}, status=status.HTTP_200_OK)
+
+        
+    @action(detail=False, methods=['post'])
+    def marcar_como_lidas(self, request):
+        request.user.notifications.mark_all_as_read()
+        return Response({"success": "Todas as notificações foram marcadas como lidas"}, status=status.HTTP_200_OK)
+
+
+
+    @action(detail=False, methods=['get'])
+    def contar_nao_lidas(self, request):
+        unread_count = request.user.notifications.unread().count()
+        return Response({"unread_count": unread_count}, status=status.HTTP_200_OK)
+
+
+
+
+class YourViewSet(viewsets.ViewSet):
+
+    @action(detail=False, methods=['get'], url_path='meus_avaliados_sem_avaliacao')
+    def meus_avaliados_sem_avaliacao(self, request):
+        try:
+            user = request.user
+            periodo = request.query_params.get('periodo')
+
+            if not periodo:
+                return Response({'status': 'error', 'message': 'Período não fornecido'}, status=status.HTTP_400_BAD_REQUEST)
+
+            avaliador = Avaliador.objects.get(user=user)
+            avaliados = avaliador.avaliados.filter(periodo=periodo)
+
+            avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
+            avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao)
+
+            if avaliados_sem_avaliacao.exists():
+                self.enviar_email_avaliador(avaliador, periodo, avaliados_sem_avaliacao)
+
+            serializer = AvaliadoSerializer(avaliados_sem_avaliacao, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Avaliador.DoesNotExist:
+            return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    # def enviar_email_avaliador(self, avaliador, periodo, avaliados_sem_avaliacao):
+    #     subject = f"Avaliações Pendentes para o Período {periodo}"
+    #     message = f"Prezado {avaliador.user.first_name},\n\nVocê possui os seguintes avaliados sem avaliação para o período {periodo}:\n"
+    #     for avaliado in avaliados_sem_avaliacao:
+    #         message += f"- {avaliado.nome}\n"
+    #     message += "\nPor favor, realize as avaliações pendentes o mais breve possível.\n\nAtenciosamente,\nEquipe de Gestão"
+
+    #     send_mail(
+    #         subject,
+    #         message,
+    #         settings.EMAIL_HOST_USER,
+    #         [avaliador.user.email],
+    #         fail_silently=False,
+    #     )
+
+
+  

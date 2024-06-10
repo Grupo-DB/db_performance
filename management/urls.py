@@ -3,7 +3,8 @@ from django.conf.urls.static import static
 from django.conf import settings
 from rest_framework import routers
 from . import views
-from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet,TipoContratoViewSet,PerguntaViewSet,FormularioViewSet,AvaliacaoViewSet,TipoAvaliacaoViewSet
+from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet,TipoContratoViewSet,PerguntaViewSet,FormularioViewSet,AvaliacaoViewSet,TipoAvaliacaoViewSet,send_email_view2,NotificationViewSet
+
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView,TokenVerifyView
 from rest_framework.routers import DefaultRouter
 router = DefaultRouter()
@@ -21,11 +22,14 @@ router.register(r'tipoavaliacoes', TipoAvaliacaoViewSet, basename='TipoAvaliacoe
 router.register(r'perguntas', PerguntaViewSet, basename='Perguntas')
 router.register(r'formularios', FormularioViewSet, basename='Formularios')
 router.register(r'avaliacoes', AvaliacaoViewSet, basename='Avaliacoes')
+router.register(r'notifications', NotificationViewSet, basename='notification')
+
+#router.register(r'email', EmailViewSet, basename='Email')
 urlpatterns = [
     
     #path('update_feedback/<int:avaliacao_id>/', UpdateFeedbackView.as_view(), name='update_feedback'),
     path('create_user/', views.create_user, name='create_user'),
-    #path('registercompany/', views.registercompany, name='registercompany'),
+    path('email/', send_email_view2, name='email'),
     #path('registerfilial/', views.registerfilial, name='registerfilial'),
     #path('get_filial/', views.get_filial, name='get_filial'),
     #path('registersetor/', views.registersetor, name='registersetor'),

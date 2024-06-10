@@ -95,13 +95,7 @@ class TipoContrato(models.Model):
         verbose_name = "TipoContrato"
         verbose_name_plural = "TiposContratos"
 
-class Formulario(models.Model):
-    id = models.AutoField(primary_key=True)
-    nome = models.CharField(max_length=80, null=False, blank=False)
-    perguntas = models.ManyToManyField('Pergunta',related_name='formularios')
-    class Meta:
-        verbose_name = "Formulario"
-        verbose_name_plural = "Formularios"
+
 
 class Colaborador(models.Model):
     id = models.AutoField(primary_key=True,)
@@ -122,6 +116,7 @@ class Colaborador(models.Model):
     data_troca_cargo = models.DateTimeField(blank=True,null=True)
     data_demissao = models.DateTimeField(blank=True,null=True)
     create_at = models.DateTimeField(auto_now_add=True)
+    email = models.EmailField(max_length=50, blank=True, null=True)
     image = models.FileField(upload_to=upload_image_colaborador,blank=True,null=True)
     user = models.OneToOneField(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='colaborador')  # Campo opcional para o usuário
     class Meta:
@@ -136,7 +131,7 @@ class Avaliador(Colaborador):
         verbose_name_plural = "Avaliadores"
 
 class Avaliado(Colaborador):
-    tipoAvaliacao = models.ManyToManyField('TipoAvaliacao',  related_name='avaliados')
+    formulario = models.ManyToManyField('Formulario',  related_name='avaliados')
 
     class Meta:
         verbose_name = "Avaliado"
@@ -146,10 +141,19 @@ class Avaliado(Colaborador):
 class TipoAvaliacao(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=60, null=False, blank=False)
-    formulario = models.ForeignKey(Formulario, on_delete=models.CASCADE,null=True,blank=True,related_name='TiposAvaliacoes')
+    
     class Meta:
         verbose_name = "TipoAvaliacao"
         verbose_name_plural = "TipoAvaliacoes"
+
+class Formulario(models.Model):
+    id = models.AutoField(primary_key=True)
+    nome = models.CharField(max_length=80, null=False, blank=False)
+    tipoavaliacao = models.ForeignKey(TipoAvaliacao, on_delete=models.CASCADE,null=True,blank=True,related_name='TiposAvaliacoes')
+    perguntas = models.ManyToManyField('Pergunta',related_name='formularios')
+    class Meta:
+        verbose_name = "Formulario"
+        verbose_name_plural = "Formularios"        
 
 class Pergunta(models.Model):
     texto = models.CharField(max_length=255)
@@ -165,7 +169,7 @@ class Avaliacao(models.Model):
     avaliador = models.ForeignKey(Avaliador, on_delete=models.CASCADE, related_name='avaliacoes_avaliador')
     avaliado = models.ForeignKey(Avaliado, on_delete=models.CASCADE, related_name='avaliacoes_avaliado')
     periodo = models.CharField(max_length=60, null=True, blank=True)
-    perguntasRespostas = models.JSONField(null=True,blank=True)
+    perguntasRespostas = models.JSONField(null=False,blank=False)
     observacoes = models.TextField(max_length=500, null=True, blank=True)
     create_at = models.DateTimeField(auto_now_add=True)
     feedback = models.BooleanField(default=False, blank=True, null=False)

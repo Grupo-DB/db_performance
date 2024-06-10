@@ -1,7 +1,7 @@
 from datetime import timedelta
 from pathlib import Path
 import os
-
+from celery.schedules import crontab
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CHARSET = 'utf-8'
@@ -17,7 +17,9 @@ SECRET_KEY_JWT = 'lkshdgkhjgfçhsdçgjkhskjdfghlshjgçlfs'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
+CORS_ORIGIN_ALLOW_ALL = True
+CORS_ALLOW_CREDENTIALS = True
 
 #AUTH_USER_MODEL = 'management.CustomUser'
 # Application definition
@@ -29,16 +31,19 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_extensions',
     'rolepermissions',
     'autenticacoes',
     "rest_framework",
     "corsheaders",
     'management',
     'rest_framework_simplejwt',
+    'django_celery_beat',
+    'notifications'
+    
     
 
 ]
-CORS_ORIGIN_ALLOW_ALL = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -132,7 +137,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=90),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     "BLACKLIST_AFTER_ROTATION": False,
     "SIGNING_KEY": SECRET_KEY,
@@ -160,6 +165,80 @@ MEDIA_URL = '/media/'
 ''
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'  # Altere isso de acordo com o seu cliente de e-mail
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'jian.goersch@gmail.com'  # Seu endereço de e-mail
+EMAIL_HOST_PASSWORD = 'pspzuizlmnrskysp'  # Sua senha de e-mail
+
+# CORS_ORIGIN_WHITELIST = [
+#     "http://localhost:4200",
+# ]
+
+
+# CELERY_BEAT_SCHEDULE = {
+#     'enviar-emails-avaliadores-sem-avaliacao': {
+#         'task': 'management.tasks.enviar_emails_avaliadores_sem_avaliacao',
+#         'schedule': crontab(hour=0, minute=0),  # Executa diariamente à meia-noite
+#         'args': ('current_period',)  # Passe o período atual como argumento, ajuste conforme necessário
+#     },
+# }
+
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+
+
+
+
+# LOGGING = {
+#     'version': 1,
+#     'disable_existing_loggers': False,
+#     'handlers': {
+#         'console': {
+#             'level': 'DEBUG',
+#             'class': 'logging.StreamHandler',
+#         },
+#     },
+#     'root': {
+#         'handlers': ['console'],
+#         'level': 'DEBUG',
+#     },
+#     'loggers': {
+#         'django': {
+#             'handlers': ['console'],
+#             'level': 'DEBUG',
+#             'propagate': True,
+#         },
+#         '': {
+#             'handlers': ['console'],
+#             'level': 'DEBUG',
+#         },
+#     },
+# }
+
+
+
+
 
 # ROLEPERMISSIONS_MODULE = "db_performance.roles"
 

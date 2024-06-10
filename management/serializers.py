@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User,Group
 from rest_framework import serializers
 from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Avaliacao,Formulario,Pergunta,Avaliado,Ambiente
-
+from notifications.models import Notification
 
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -45,7 +45,7 @@ class FormularioSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Formulario
-        fields = ['id', 'nome', 'perguntas']
+        fields = ['id', 'nome','tipoavaliacao', 'perguntas']
 
     def create(self, validated_data):
         perguntas_data = validated_data.pop('perguntas', [])
@@ -212,3 +212,8 @@ class PerguntaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Pergunta
         fields = '__all__'                                                    
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = '__all__'         
