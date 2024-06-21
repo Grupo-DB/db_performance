@@ -105,10 +105,10 @@ class Colaborador(models.Model):
     area = models.ForeignKey(Area,on_delete=models.CASCADE,related_name='colaboradores')
     cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE,related_name='colaboradores')
     ambiente = models.ForeignKey(Ambiente,on_delete=models.CASCADE,related_name='colaboradores')
-    tipocontrato = models.ForeignKey(TipoContrato, on_delete=models.CASCADE,related_name='colaboradores')
+    tipocontrato = models.CharField(max_length=50,blank=True,null=True)
     nome = models.CharField(max_length=100,blank=False,null=False)
     data_admissao = models.DateTimeField(blank=True,null=True)
-    situacao = models.BooleanField(blank=True,null=True)
+    situacao = models.BooleanField(default=False,blank=True,null=True)
     genero = models.CharField(max_length=15,null=True,blank=True)
     estado_civil = models.CharField(max_length=15,blank=True,null=True)
     data_nascimento = models.DateTimeField(blank=True,null=True)
@@ -117,6 +117,10 @@ class Colaborador(models.Model):
     data_demissao = models.DateTimeField(blank=True,null=True)
     create_at = models.DateTimeField(auto_now_add=True)
     email = models.EmailField(max_length=50, blank=True, null=True)
+    salario = models.DecimalField(blank=True,null=True,max_digits=10, decimal_places=2)
+    raca = models.CharField(max_length=50,blank=True,null=False)
+    instrucao = models.CharField(max_length=50,blank=True,null=False)
+    categoria = models.CharField(max_length=50,blank=True,null=False)
     image = models.FileField(upload_to=upload_image_colaborador,blank=True,null=True)
     user = models.OneToOneField(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='colaborador')  # Campo opcional para o usuário
     class Meta:
@@ -165,7 +169,7 @@ class Pergunta(models.Model):
 
 class Avaliacao(models.Model):
     id = models.AutoField(primary_key=True)
-    tipoavaliacao = models.ForeignKey(TipoAvaliacao, on_delete=models.CASCADE, related_name='avaliacoes')
+    tipo = models.CharField(max_length=60,blank=True,null=True)
     avaliador = models.ForeignKey(Avaliador, on_delete=models.CASCADE, related_name='avaliacoes_avaliador')
     avaliado = models.ForeignKey(Avaliado, on_delete=models.CASCADE, related_name='avaliacoes_avaliado')
     periodo = models.CharField(max_length=60, null=True, blank=True)

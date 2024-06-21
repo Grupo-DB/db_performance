@@ -24,7 +24,7 @@ class UserSerializer(serializers.ModelSerializer):
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField()
-
+    primeiro_acesso = serializers.BooleanField()
 
     
 class FormularioUpdateSerializer(serializers.ModelSerializer):
@@ -40,12 +40,7 @@ class FormularioCreateSerializer(serializers.ModelSerializer):
         fields = ['id', 'nome']
 
 
-class FormularioSerializer(serializers.ModelSerializer):
-    perguntas = serializers.PrimaryKeyRelatedField(queryset=Pergunta.objects.all(), many=True, required=False)
-    
-    class Meta:
-        model = Formulario
-        fields = ['id', 'nome','tipoavaliacao', 'perguntas']
+
 
     def create(self, validated_data):
         perguntas_data = validated_data.pop('perguntas', [])
@@ -146,7 +141,7 @@ class AvaliadoSerializer(serializers.ModelSerializer):
         
 class AvaliadorSerializer(serializers.ModelSerializer):
     colaborador_id = serializers.IntegerField(write_only=True)
-
+    avaliados = AvaliadoSerializer(many=True, read_only=True)
     class Meta:
         model = Avaliador
         fields = '__all__'  # Ou liste os campos que deseja incluir no serializer
@@ -211,7 +206,15 @@ class AvaliacaoSerializer(serializers.ModelSerializer):
 class PerguntaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Pergunta
-        fields = '__all__'                                                    
+        fields = '__all__'   
+
+class FormularioSerializer(serializers.ModelSerializer):
+    # perguntas = serializers.PrimaryKeyRelatedField(queryset=Pergunta.objects.all(), many=True, required=False)
+    perguntas = PerguntaSerializer(many=True, read_only=True)
+    avaliados = AvaliadoSerializer(many=True, read_only=True)
+    class Meta:
+        model = Formulario
+        fields = ['id', 'nome', 'tipoavaliacao', 'perguntas','avaliados']                                                         
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:

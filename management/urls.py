@@ -4,7 +4,7 @@ from django.conf import settings
 from rest_framework import routers
 from . import views
 from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet,TipoContratoViewSet,PerguntaViewSet,FormularioViewSet,AvaliacaoViewSet,TipoAvaliacaoViewSet,send_email_view2,NotificationViewSet
-
+from .views import update_password_first_login,CustomTokenObtainPairView,forgot_password,reset_password
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView,TokenVerifyView
 from rest_framework.routers import DefaultRouter
 router = DefaultRouter()
@@ -30,6 +30,9 @@ urlpatterns = [
     #path('update_feedback/<int:avaliacao_id>/', UpdateFeedbackView.as_view(), name='update_feedback'),
     path('create_user/', views.create_user, name='create_user'),
     path('email/', send_email_view2, name='email'),
+    path('update-password-first-login/', update_password_first_login, name='update_password_first_login'),
+    path('forgot-password/', forgot_password, name='forgot_password'),
+    path('reset-password/<uidb64>/<token>/', reset_password, name='reset_password'),
     #path('registerfilial/', views.registerfilial, name='registerfilial'),
     #path('get_filial/', views.get_filial, name='get_filial'),
     #path('registersetor/', views.registersetor, name='registersetor'),
@@ -60,8 +63,8 @@ urlpatterns = [
     #path('get_area/', views.get_area, name='get_area'),
     path('get_users/', views.get_users, name='get_users'),
     path('get_funcao/', views.get_funcao, name='get_funcao'),
-    path('login/',views.login, name='login'),
-    path('token/', TokenObtainPairView.as_view(),name='token_obtain_pair'),
+    #path('login/',views.login, name='login'),
+    path('token/', CustomTokenObtainPairView.as_view(),name='token_obtain_pair'),
     path('token/refresh/',TokenRefreshView.as_view(),name='token_refresh'),
     path('token/verify/',TokenVerifyView.as_view(),name='token_verify'),
     path('formulario/<int:formulario_id>/adicionar-pergunta/', views.add_pergunta_formulario, name='add_pergunta_formulario'),

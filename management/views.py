@@ -15,7 +15,7 @@ from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 from rest_framework.parsers import MultiPartParser,FormParser,FileUploadParser,JSONParser
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated,GroupPermission
+from rest_framework.permissions import IsAuthenticated,AllowAny,IsAdminUser,DjangoModelPermissions
 from rest_framework.decorators import api_view,authentication_classes, permission_classes,parser_classes,action
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.response import Response
@@ -29,27 +29,114 @@ from django.core.mail import send_mail
 from datetime import datetime
 from django.db.models import Q
 from notifications.signals import notify
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.views import TokenObtainPairView
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes
+from .permissions import IsInGroup
+
 #logger = logging.getLogger(__name__)
-@api_view(['GET','POST'])
-def login(request):
-    if request.method == "GET":
-        return render(request,'login.html')
-    else:    
-        serializer = LoginSerializer(data=request.data)
-        if serializer.is_valid():
-            username = serializer.validated_data['username']
-            password = serializer.validated_data['password']
-            user = authenticate(username=username, password=password)
-            if user is not None:
-                login(request, user)
+# @api_view(['GET','POST'])
+# def login(request):
+#     if request.method == "GET":
+#         return render(request,'login.html')
+#     else:    
+#         serializer = LoginSerializer(data=request.data)
+#         if serializer.is_valid():
+#             username = serializer.validated_data['username']
+#             password = serializer.validated_data['password']
+#             user = authenticate(username=username, password=password)
+#             if user is not None:
+#                 login(request, user)
                 
-                return Response({'message': 'Login bem-sucedido'}, status=status.HTTP_200_OK)
-            else:
-                # Credenciais inválidas
-                return Response({'message': 'Credenciais inválidas'}, status=status.HTTP_401_UNAUTHORIZED)
-        else:
-            # Dados inválidos
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+#                 return Response({'message': 'Login bem-sucedido'}, status=status.HTTP_200_OK)
+#             else:
+#                 # Credenciais inválidas
+#                 return Response({'message': 'Credenciais inválidas'}, status=status.HTTP_401_UNAUTHORIZED)
+#         else:
+#             # Dados inválidos
+#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# @api_view(['POST'])
+# def login(request):
+#         serializer = LoginSerializer(data=request.data)
+#         if serializer.is_valid():
+#             username = serializer.validated_data['username']
+#             password = serializer.validated_data['password']
+#             user = authenticate(username=username, password=password)
+#             if user is not None:
+#                 refresh = RefreshToken.for_user(user)
+#                 return Response({
+#                     'refresh': str(refresh),
+#                     'access': str(refresh.access_token),
+#                     'primeiro_acesso': user.primeiro_acesso,
+#                 })
+#             return Response({'detail': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+User = get_user_model()
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def update_password_first_login(request):
+    user = request.user
+    new_password = request.data.get('new_password')
+
+    if user.primeiro_acesso:
+        user.set_password(new_password)
+        user.primeiro_acesso = False
+        user.save()
+        return Response({"message": "Password updated successfully"}, status=status.HTTP_200_OK)
+    return Response({"error": "Password reset not required"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def forgot_password(request):
+    email = request.data.get('email')
+    try:
+        colaborador = Colaborador.objects.get(email=email)
+        user = colaborador.user
+    except Colaborador.DoesNotExist:
+        return Response({'error': 'Usuário não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    token = default_token_generator.make_token(user)
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    reset_link = f"{settings.FRONTEND_URL}/redefinirsenha/{uid}/{token}/"
+
+    send_mail(
+        'Redefinição de Senha',
+        f'Use o link abaixo para redefinir sua senha:\n{reset_link}',
+        settings.DEFAULT_FROM_EMAIL,
+        [email],
+    )
+
+    return Response({'message': 'Email enviado com sucesso.'}, status=status.HTTP_200_OK)
+
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_password(request, uidb64, token):
+    try:
+        uid = urlsafe_base64_decode(uidb64).decode()
+        user = User.objects.get(pk=uid)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        user = None
+
+    if user is not None and default_token_generator.check_token(user, token):
+        new_password = request.data.get('new_password')
+        user.set_password(new_password)
+        user.save()
+        return Response({'message': 'Senha redefinida com sucesso.'}, status=status.HTTP_200_OK)
+    else:
+        return Response({'error': 'Link inválido ou expirado.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 
@@ -112,7 +199,7 @@ def get_users(request):
 
 ## Cadsatra User
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+#@permission_classes([IsAuthenticated])
 def create_user(request):
     if request.method == 'POST':
         serializer = UserSerializer(data=request.data)
@@ -830,6 +917,23 @@ class AvaliadorViewSet(viewsets.ModelViewSet):
         serializer = AvaliadorSerializer(avaliador)
         return Response(serializer.data, status=status.HTTP_201_CREATED)    
     
+    @action(detail=True, methods=['post'], url_path='remove_avaliado')
+    def remove_avaliado(self, request, pk=None):
+        avaliador = self.get_object()
+        avaliado_id = request.data.get('avaliado_id')
+
+        try:
+            avaliado = Avaliado.objects.get(pk=avaliado_id)
+        except Avaliado.DoesNotExist:
+            return Response({'error': 'Avaliado não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not avaliador.avaliados.filter(pk=avaliado_id).exists():
+            return Response({'error': 'Este avaliado não está associado ao avaliador.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        avaliador.avaliados.remove(avaliado)
+        serializer = AvaliadorSerializer(avaliador)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
 class EmpresaViewSet(viewsets.ModelViewSet):
     queryset = Empresa.objects.all()
     serializer_class = EmpresaSerializer
@@ -910,6 +1014,7 @@ class AmbienteViewSet(viewsets.ModelViewSet):
 class CargoViewSet(viewsets.ModelViewSet):
     queryset = Cargo.objects.all()
     serializer_class = CargoSerializer
+    permission_classes = [DjangoModelPermissions]
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -1097,6 +1202,40 @@ class FormularioViewSet(viewsets.ModelViewSet):
         # Serializa o formulário atualizado para retornar na resposta
         serializer = FormularioSerializer(formulario)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['post'], url_path='remove_pergunta')
+    def remove_pergunta(self, request, pk=None):
+        formulario = self.get_object()
+        pergunta_id = request.data.get('pergunta_id')
+
+        try:
+            pergunta = Pergunta.objects.get(pk=pergunta_id)
+        except Pergunta.DoesNotExist:
+            return Response({'error': 'Pergunta não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not formulario.perguntas.filter(pk=pergunta_id).exists():
+            return Response({'error': 'Esta pergunta não está associada ao formulário.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        formulario.perguntas.remove(pergunta)
+        serializer = FormularioSerializer(formulario)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=['post'], url_path='remove_avaliado')
+    def remove_avaliado(self, request, pk=None):
+        formulario = self.get_object()
+        avaliado_id = request.data.get('avaliado_id')
+
+        try:
+            avaliado = Avaliado.objects.get(pk=avaliado_id)
+        except Avaliado.DoesNotExist:
+            return Response({'error': 'Avaliado não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not formulario.avaliados.filter(pk=avaliado_id).exists():
+            return Response({'error': 'Este avaliado não está associado ao formulário.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        formulario.avaliados.remove(avaliado)
+        serializer = FormularioSerializer(formulario)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     ##########################################################################################
    
@@ -1276,4 +1415,31 @@ class YourViewSet(viewsets.ViewSet):
     #     )
 
 
-  
+# class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+#     def validate(self, attrs):
+#         data = super().validate(attrs)
+#         refresh = self.get_token(self.user)
+        
+#         data['refresh'] = str(refresh)
+#         data['access'] = str(refresh.access_token)
+#         data['primeiro_acesso'] = self.user.primeiro_acesso  # Adicione o campo personalizado aqui
+
+#         return data
+
+# class CustomTokenObtainPairView(TokenObtainPairView):
+#     serializer_class = CustomTokenObtainPairSerializer  
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        refresh = self.get_token(self.user)
+        
+        data['refresh'] = str(refresh)
+        data['access'] = str(refresh.access_token)
+        data['primeiro_acesso'] = self.user.primeiro_acesso  # Adicione o campo personalizado aqui
+        data['groups'] = list(self.user.groups.values_list('name', flat=True))  # Adiciona a lista de grupos do usuário
+
+        return data
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
