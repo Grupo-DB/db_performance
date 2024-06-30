@@ -1114,6 +1114,31 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
             return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
+
+    @action(detail=False, methods=['get'],url_path='byAvaliador')
+    def byAvaliador(self, request):
+        avaliador_id = request.query_params.get('avaliador_id')
+        try:
+            avaliador = Avaliador.objects.get(id=avaliador_id)  # Busque o objeto Avaliador
+        except Avaliador.DoesNotExist:
+            raise NotFound('Avaliador não encontrado')  # type: ignore # Levante um erro se o Avaliador não existir
+        avaliados = avaliador.avaliados.all()
+        serializer = AvaliadoSerializer(avaliados, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='minhas_avaliacoes')
+    def minhas_avaliacoes(self, request):
+        try:
+            user = request.user
+            avaliador = Avaliador.objects.get(user=user)
+            avaliacoes = Avaliacao.objects.filter(avaliador=avaliador)
+            serializer = AvaliacaoSerializer(avaliacoes, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Avaliador.DoesNotExist:
+            return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)    
     
 
 class PerguntaViewSet(viewsets.ModelViewSet):
@@ -1305,6 +1330,9 @@ def send_email_view2(request):
         return Response({"success": "Email sent successfully"}, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
+    
 
 
 ###########################################################################################################################

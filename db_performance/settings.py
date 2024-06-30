@@ -39,8 +39,8 @@ INSTALLED_APPS = [
     'management',
     'rest_framework_simplejwt',
     'django_celery_beat',
-    'notifications'
-    
+    'notifications',
+    'datacalc'
     
 
 ]
@@ -93,6 +93,9 @@ DATABASES = {
         'PASSWORD': '!@#123qweQWE',
         'HOST': 'localhost',
         'PORT': '3306',
+        'OPTIONS': {
+            'charset': 'utf8mb4',  # para MySQL
+        },
     }
 }
 
