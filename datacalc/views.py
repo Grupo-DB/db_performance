@@ -7,9 +7,15 @@ from django.utils.decorators import method_decorator
 from rest_framework.views import APIView
 from django.http import JsonResponse
 import pandas as pd
-from management.models import Colaborador,Avaliacao,Ambiente
+from datacalc.serializers import PeriodoSerializer
+from management.models import Colaborador,Avaliacao,Ambiente,Avaliado,Avaliador
+from datacalc.models import Periodo
 from datetime import datetime
 from django.utils import timezone
+from rest_framework import generics
+from rest_framework.parsers import JSONParser
+from django.db.models import Q
+from management.utils import send_custom_email
 # Create your views here.
 
 
@@ -47,6 +53,8 @@ def filtrar_colaboradores(request):
         selected_cargos = data.get('selectedCargos', [])
         selected_ambientes = data.get('selectedAmbientes', [])
         selected_setores = data.get('selectedSetores', [])
+        data_inicio = data.get('data_inicio', None)
+        data_fim = data.get('data_fim', None)
         
         queryset = Colaborador.objects.all()
 
@@ -154,18 +162,18 @@ def filtrar_colaboradores(request):
 
         colaboradores_por_ambiente = df['ambiente_nome'].value_counts().to_dict()
         media_salario_por_ambiente = df.groupby('ambiente_id')['salario'].mean().to_dict()
-        # colaboradores_por_ambiente = {f'{k[0]}_{k[1]}': v for k, v in grouped3.items()}
-        # grouped4 = df.groupby('raca')['instrucao'].value_counts()
-        # instrucao_por_raca = {f'{k[0]}_{k[1]}': v for k, v in grouped2.items()}
-        #instrucao_por_raca = df.groupby('genero')['instrucao'].value_counts().to_dict()
-        # Filtrando a tabela Avaliacao com base nos IDs dos colaboradores filtrados
-        # avaliado_ids = df['id'].tolist()
-        # avaliacao_queryset = Avaliacao.objects.filter(avaliado_id__in=avaliado_ids)
-        # avaliacao_df = pd.DataFrame(avaliacao_queryset.values())
-
-
+       
         # Calcular a média das respostas das avaliações gerais
         avaliacoes = Avaliacao.objects.filter(avaliado_id__in=queryset.values_list('id', flat=True))
+
+        # Filtrar avaliações por data
+        if data_inicio:
+            data_inicio = pd.to_datetime(data_inicio)
+            avaliacoes = avaliacoes.filter(create_at__gte=data_inicio)
+        if data_fim:
+            data_fim = pd.to_datetime(data_fim)
+            avaliacoes = avaliacoes.filter(create_at__lte=data_fim)
+
         avaliacoes = avaliacoes.filter(tipo='Avaliação Geral')
         perguntas_respostas = []
         for avaliacao in avaliacoes:
@@ -314,26 +322,7 @@ def filtrar_avaliacoes(request):
             queryset = queryset.filter(setor_id__in=selected_setores)
 
         df = pd.DataFrame(queryset.values())
-
-        # if df.empty:
-        #     return JsonResponse({
-        #         'total_avaliacoes': len(avaliacoes),
-        #         'filtered_data': [],
-        #         'media_geral': 0,
-        #         'media_respostas': {}
-        #     })
-
-        # if 'salario' not in df.columns:
-        #     return JsonResponse({
-        #         'total_colaboradores': len(df),
-        #         'filtered_data': df.to_dict(orient='records'),
-        #         'media_geral': 0,
-        #         #'total_avaliacoes': len(avaliacoes),
-        #         'media_respostas': {}
-        #     })
-
-      
-        
+              
         campos_necessarios = ['id', 'tipo','avaliado_id','avaliador_id','periodo']
         filtered_data = df[campos_necessarios].to_dict(orient='records')
         # Calcular a média das respostas das avaliações gerais
@@ -412,6 +401,155 @@ def filtrar_avaliacoes(request):
             'media_geral':media_geral,
             'media_geral_avaliado':media_geral_avaliado,
             'total_avaliacoes_avaliados':total_avaliacoes_avaliados
+        }
+
+        return JsonResponse(response_data, safe=False)
+    
+
+########################################################################################################
+
+@csrf_exempt
+def periodo(request):
+    if request.method == 'GET':
+        try:
+            # Supondo que você só tenha um período salvo no banco de dados
+            periodo = Periodo.objects.latest('id')
+            serializer = PeriodoSerializer(periodo)
+            return JsonResponse(serializer.data)
+        except Periodo.DoesNotExist:
+            return JsonResponse({'dataInicio': None, 'dataFim': None})
+
+    if request.method == 'POST':
+        data = JSONParser().parse(request)
+        serializer = PeriodoSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return JsonResponse({'status': 'success'})
+        return JsonResponse(serializer.errors, status=400)
+    
+################################------------------------AVALIADOR----LOGADO-------------------------------------------------######################################
+
+@csrf_exempt
+@api_view(['POST'])
+def filtrar_avaliacoes_logado(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        selected_avaliadores = data.get('avaliadorSelecionadoId', [])
+        selected_avaliados = data.get('avaliadoSelecionadoId', [])
+        selected_areas = data.get('selectedAreas', [])
+        selected_cargos = data.get('selectedCargos', [])
+        selected_ambientes = data.get('selectedAmbientes', [])
+        selected_setores = data.get('selectedSetores', [])
+        periodo = data.get('periodo', '')
+
+        user = request.user
+
+        try:
+            avaliador_logado = Avaliador.objects.get(user=user)
+        except Avaliador.DoesNotExist:
+            return JsonResponse({'status': 'error', 'message': 'Avaliador logado não encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        queryset = Avaliacao.objects.filter(avaliador=avaliador_logado)
+
+        if selected_avaliadores:
+            queryset = queryset.filter(avaliador_id__in=selected_avaliadores)
+        if selected_avaliados:
+            queryset = queryset.filter(avaliado_id__in=selected_avaliados)
+        if selected_areas:
+            queryset = queryset.filter(area_id__in=selected_areas)
+        if selected_cargos:
+            queryset = queryset.filter(cargo_id__in=selected_cargos)
+        if selected_ambientes:
+            queryset = queryset.filter(ambiente_id__in=selected_ambientes)
+        if selected_setores:
+            queryset = queryset.filter(setor_id__in=selected_setores)
+        if periodo:
+            queryset = queryset.filter(periodo=periodo)
+
+        df = pd.DataFrame(queryset.values())
+
+        campos_necessarios = ['id', 'tipo', 'avaliado_id', 'avaliador_id', 'periodo']
+        filtered_data = df[campos_necessarios].to_dict(orient='records')
+
+        # Calcular a média das respostas das avaliações do avaliador logado
+        avaliacoes_logado = Avaliacao.objects.filter(avaliador=avaliador_logado)
+        perguntas_respostas_logado = []
+        for avaliacao in avaliacoes_logado:
+            if isinstance(avaliacao.perguntasRespostas, str):
+                perguntas_respostas_logado.append(json.loads(avaliacao.perguntasRespostas))
+            else:
+                perguntas_respostas_logado.append(avaliacao.perguntasRespostas)
+
+        media_respostas_logado = {}
+        count_respostas_logado = {}
+        total_respostas_logado = 0
+        soma_respostas_logado = 0
+
+        for pr in perguntas_respostas_logado:
+            for pergunta, dados in pr.items():
+                if pergunta not in media_respostas_logado:
+                    media_respostas_logado[pergunta] = 0
+                    count_respostas_logado[pergunta] = 0
+                resposta = dados.get('resposta', 0)
+                media_respostas_logado[pergunta] += resposta
+                count_respostas_logado[pergunta] += 1
+                soma_respostas_logado += resposta
+                total_respostas_logado += 1
+
+        for pergunta in media_respostas_logado:
+            if count_respostas_logado[pergunta] > 0:
+                media_respostas_logado[pergunta] /= count_respostas_logado[pergunta]
+
+        media_geral_logado = round((soma_respostas_logado / total_respostas_logado if total_respostas_logado > 0 else 0), 1)
+        total_avaliacoes_logado = len(avaliacoes_logado)
+
+        # Calcular a média das respostas dos avaliados pelo avaliador logado
+        avaliacoes_avaliados_logado = Avaliacao.objects.filter(avaliado_id__in=selected_avaliados, avaliador=avaliador_logado)
+        perguntas_respostas_avaliados_logado = []
+        for avaliacao in avaliacoes_avaliados_logado:
+            if isinstance(avaliacao.perguntasRespostas, str):
+                perguntas_respostas_avaliados_logado.append(json.loads(avaliacao.perguntasRespostas))
+            else:
+                perguntas_respostas_avaliados_logado.append(avaliacao.perguntasRespostas)
+
+        media_respostas_avaliados_logado = {}
+        count_respostas_avaliados_logado = {}
+        total_respostas_avaliados_logado = 0
+        soma_respostas_avaliados_logado = 0
+
+        for pr in perguntas_respostas_avaliados_logado:
+            for pergunta, dados in pr.items():
+                if pergunta not in media_respostas_avaliados_logado:
+                    media_respostas_avaliados_logado[pergunta] = 0
+                    count_respostas_avaliados_logado[pergunta] = 0
+                resposta = dados.get('resposta', 0)
+                media_respostas_avaliados_logado[pergunta] += resposta
+                count_respostas_avaliados_logado[pergunta] += 1
+                soma_respostas_avaliados_logado += resposta
+                total_respostas_avaliados_logado += 1
+
+        for pergunta in media_respostas_avaliados_logado:
+            if count_respostas_avaliados_logado[pergunta] > 0:
+                media_respostas_avaliados_logado[pergunta] /= count_respostas_avaliados_logado[pergunta]
+
+        media_geral_avaliados_logado = round((soma_respostas_avaliados_logado / total_respostas_avaliados_logado if total_respostas_avaliados_logado > 0 else 0), 1)
+        total_avaliacoes_avaliados_logado = len(avaliacoes_avaliados_logado)
+
+        # Calcular total de avaliados sem avaliação no período para o avaliador logado
+        avaliados = avaliador_logado.avaliados.all()
+        avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
+        avaliados_sem_avaliacao_logado = avaliados.exclude(id__in=avaliados_com_avaliacao)
+        total_avaliados_sem_avaliacao_logado = avaliados_sem_avaliacao_logado.count()
+
+        response_data = {
+            'media_respostas_logado': media_respostas_logado,
+            'total_avaliacoes_logado': total_avaliacoes_logado,
+            'filtered_data': filtered_data,
+            'media_respostas_avaliados_logado': media_respostas_avaliados_logado,
+            'media_geral_logado': media_geral_logado,
+            'media_geral_avaliados_logado': media_geral_avaliados_logado,
+            'total_avaliacoes_avaliados_logado': total_avaliacoes_avaliados_logado,
+            'total_avaliados_sem_avaliacao_logado': total_avaliados_sem_avaliacao_logado
         }
 
         return JsonResponse(response_data, safe=False)

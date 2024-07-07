@@ -17,7 +17,7 @@ SECRET_KEY_JWT = 'lkshdgkhjgfçhsdçgjkhskjdfghlshjgçlfs'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['172.50.10.79']
 CORS_ORIGIN_ALLOW_ALL = True
 CORS_ALLOW_CREDENTIALS = True
 
@@ -89,9 +89,9 @@ DATABASES = {
     'default':{
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'db_performance',
-        'USER':'root',
+        'USER':'grupodb',
         'PASSWORD': '!@#123qweQWE',
-        'HOST': 'localhost',
+        'HOST': '172.50.10.79',
         'PORT': '3306',
         'OPTIONS': {
             'charset': 'utf8mb4',  # para MySQL
@@ -192,8 +192,8 @@ EMAIL_HOST_PASSWORD = 'pspzuizlmnrskysp'  # Sua senha de e-mail
 #     },
 # }
 
-CELERY_BROKER_URL = 'redis://localhost:6379/0'
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_BROKER_URL = 'redis://172.50.10.79:6379/0'
+CELERY_RESULT_BACKEND = 'redis://172.50.10.79:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'

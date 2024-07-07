@@ -1378,8 +1378,8 @@ class NotificationViewSet(viewsets.ViewSet):
                 notify.send(
                     sender=request.user,  # Quem envia a notificação (o usuário autenticado)
                     recipient=avaliador.user,  # Avaliador que receberá a notificação
-                    verb='Nova notificação',  # Verbo da notificação
-                    description=f'Nova avaliação pendente para {avaliado.nome}'  # Descrição da notificação
+                    verb='Nova notificação!!',  # Verbo da notificação
+                    description=f'Nova avaliação pendente  no período atual para {avaliado.nome}'  # Descrição da notificação
                 )
 
         return Response({"success": "Notificações enviadas"}, status=status.HTTP_200_OK)
