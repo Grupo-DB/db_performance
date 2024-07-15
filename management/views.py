@@ -1340,13 +1340,13 @@ def send_email_view2(request):
 def obterTrimestre(data):
     mes = data.month
     if mes in [1, 2, 3]:
-        return 'Primeiro trimestre'
+        return 'Quarto Trimestre'
     elif mes in [4, 5, 6]:
-        return 'Segundo trimestre'
+        return 'Primeiro Trimestre'
     elif mes in [7, 8, 9]:
-        return 'Terceiro trimestre'
+        return 'Segundo Trimestre'
     elif mes in [10, 11, 12]:
-        return 'Quarto trimestre'
+        return 'Terceiro Trimestre'
 
 class NotificationViewSet(viewsets.ViewSet):
     def list(self, request):

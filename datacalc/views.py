@@ -79,15 +79,19 @@ def filtrar_colaboradores(request):
 
         hoje = timezone.now().date()
         # Converte a data de nascimento para a data local
+        hoje = timezone.now().date()
+    
         if 'data_nascimento' in df.columns:
-            df['data_nascimento'] = pd.to_datetime(df['data_nascimento']).dt.date
+            df['data_nascimento'] = pd.to_datetime(df['data_nascimento'], errors='coerce').dt.date
+            df['data_nascimento'].fillna(pd.to_datetime('1900-01-01').date(), inplace=True)  # Preenche NaNs com uma data padrão
             df['idade'] = (hoje - df['data_nascimento']).apply(lambda x: x.days // 365)
             media_idade = round(df['idade'].mean())
         else:
             media_idade = 0
 
         if 'data_admissao' in df.columns:
-            df['data_admissao'] = pd.to_datetime(df['data_admissao']).dt.date
+            df['data_admissao'] = pd.to_datetime(df['data_admissao'], errors='coerce').dt.date
+            df['data_admissao'].fillna(pd.to_datetime('1900-01-01').date(), inplace=True)  # Preenche NaNs com uma data padrão
             df['tempo'] = (hoje - df['data_admissao']).apply(lambda x: x.days // 365)
             media_tempo = round(df['tempo'].mean())
         else:
@@ -161,7 +165,7 @@ def filtrar_colaboradores(request):
             df['ambiente_nome'] = df['ambiente_id'].map(ambiente_dict)
 
         colaboradores_por_ambiente = df['ambiente_nome'].value_counts().to_dict()
-        media_salario_por_ambiente = df.groupby('ambiente_id')['salario'].mean().to_dict()
+        media_salario_por_ambiente = df.groupby('ambiente_nome')['salario'].mean().to_dict()
        
         # Calcular a média das respostas das avaliações gerais
         avaliacoes = Avaliacao.objects.filter(avaliado_id__in=queryset.values_list('id', flat=True))
@@ -182,23 +186,29 @@ def filtrar_colaboradores(request):
             else:
                 perguntas_respostas.append(avaliacao.perguntasRespostas)
 
+        # Inicializar dicionários para média e contagem das respostas
         media_respostas = {}
         count_respostas = {}
         total_respostas = 0
         soma_respostas = 0
 
+        # Processar as perguntas e respostas
         for pr in perguntas_respostas:
             for pergunta, dados in pr.items():
                 if pergunta not in media_respostas:
                     media_respostas[pergunta] = 0
                     count_respostas[pergunta] = 0
-                resposta = dados.get('resposta', 0)
+                try:
+                    resposta = int(dados.get('resposta', 0))
+                except ValueError:
+                    print(f"Não foi possível converter a resposta '{dados.get('resposta')}' para inteiro.")
+                    resposta = 0
                 media_respostas[pergunta] += resposta
                 count_respostas[pergunta] += 1
                 soma_respostas += resposta
                 total_respostas += 1
 
-
+        # Calcular a média das respostas
         for pergunta in media_respostas:
             if count_respostas[pergunta] > 0:
                 media_respostas[pergunta] /= count_respostas[pergunta]
@@ -231,7 +241,11 @@ def filtrar_colaboradores(request):
                 if pergunta not in media_respostas_gestor:
                     media_respostas_gestor[pergunta] = 0
                     count_respostas_gestor[pergunta] = 0
-                resposta = dados.get('resposta', 0)
+                try:
+                    resposta = int(dados.get('resposta', 0))
+                except ValueError:
+                    print(f"Não foi possível converter a resposta '{dados.get('resposta')}' para inteiro.")
+                    resposta = 0
                 media_respostas_gestor[pergunta] += resposta
                 count_respostas_gestor[pergunta] += 1
                 soma_respostas_gestor += resposta
@@ -329,6 +343,7 @@ def filtrar_avaliacoes(request):
 
         avaliacoes = Avaliacao.objects.filter(avaliador_id__in=selected_avaliadores)
         perguntas_respostas = []
+
         for avaliacao in avaliacoes:
             if isinstance(avaliacao.perguntasRespostas, str):
                 perguntas_respostas.append(json.loads(avaliacao.perguntasRespostas))
@@ -346,11 +361,14 @@ def filtrar_avaliacoes(request):
                     media_respostas[pergunta] = 0
                     count_respostas[pergunta] = 0
                 resposta = dados.get('resposta', 0)
+                try:
+                    resposta = float(resposta)
+                except ValueError:
+                    resposta = 0  # ou outro valor padrão que você considere apropriado
                 media_respostas[pergunta] += resposta
                 count_respostas[pergunta] += 1
                 soma_respostas += resposta
                 total_respostas += 1
-
 
         for pergunta in media_respostas:
             if count_respostas[pergunta] > 0:
@@ -380,6 +398,11 @@ def filtrar_avaliacoes(request):
                     media_respostas_avaliado[pergunta] = 0
                     count_respostas_avaliado[pergunta] = 0
                 resposta = dados.get('resposta', 0)
+                try:
+                    resposta = float(resposta)
+                except ValueError:
+                    resposta = 0  # ou outro valor padrão que você considere apropriado
+
                 media_respostas_avaliado[pergunta] += resposta
                 count_respostas_avaliado[pergunta] += 1
                 soma_respostas_avaliado += resposta
@@ -473,6 +496,7 @@ def filtrar_avaliacoes_logado(request):
 
         # Calcular a média das respostas das avaliações do avaliador logado
         avaliacoes_logado = Avaliacao.objects.filter(avaliador=avaliador_logado)
+        avaliacoes_logado = avaliacoes_logado.filter(tipo='Avaliação Geral')
         perguntas_respostas_logado = []
         for avaliacao in avaliacoes_logado:
             if isinstance(avaliacao.perguntasRespostas, str):
@@ -491,6 +515,11 @@ def filtrar_avaliacoes_logado(request):
                     media_respostas_logado[pergunta] = 0
                     count_respostas_logado[pergunta] = 0
                 resposta = dados.get('resposta', 0)
+                try:
+                    resposta = float(resposta)
+                except ValueError:
+                    resposta = 0  # ou outro valor padrão que você considere apropriado
+
                 media_respostas_logado[pergunta] += resposta
                 count_respostas_logado[pergunta] += 1
                 soma_respostas_logado += resposta
@@ -503,8 +532,57 @@ def filtrar_avaliacoes_logado(request):
         media_geral_logado = round((soma_respostas_logado / total_respostas_logado if total_respostas_logado > 0 else 0), 1)
         total_avaliacoes_logado = len(avaliacoes_logado)
 
+
+    ########################Gestor
+
+        avaliacoesGestorMe = Avaliacao.objects.filter(avaliador=avaliador_logado)
+        avaliacoesGestorMe = avaliacoesGestorMe.filter(tipo='Avaliação do Gestor')
+        perguntas_respostas_gestorMe = []
+        for avaliacao in avaliacoesGestorMe:
+            if isinstance(avaliacao.perguntasRespostas, str):
+                perguntas_respostas_gestorMe.append(json.loads(avaliacao.perguntasRespostas))
+            else:
+                perguntas_respostas_gestorMe.append(avaliacao.perguntasRespostas)
+
+        media_respostas_gestorMe = {}
+        count_respostas_gestorMe = {}
+        total_respostas_gestorMe = 0
+        soma_respostas_gestorMe = 0
+
+        for pr in perguntas_respostas_gestorMe:
+            for pergunta, dados in pr.items():
+                if pergunta not in media_respostas_gestorMe:
+                    media_respostas_gestorMe[pergunta] = 0
+                    count_respostas_gestorMe[pergunta] = 0
+                try:
+                    resposta = int(dados.get('resposta', 0))
+                except ValueError:
+                    print(f"Não foi possível converter a resposta '{dados.get('resposta')}' para inteiro.")
+                    resposta = 0
+                media_respostas_gestorMe[pergunta] += resposta
+                count_respostas_gestorMe[pergunta] += 1
+                soma_respostas_gestorMe += resposta
+                total_respostas_gestorMe += 1
+
+
+        for pergunta in media_respostas_gestorMe:
+            if count_respostas_gestorMe[pergunta] > 0:
+                media_respostas_gestorMe[pergunta] /= count_respostas_gestorMe[pergunta]
+
+
+        media_geral_gestorMe = round((soma_respostas_gestorMe / total_respostas_gestorMe if total_respostas_gestorMe > 0 else 0  ),1)
+
+        media_totalAv = round(((media_geral_gestorMe + media_geral_logado) / 2),2)
+
+        total_avaliacoes_gestorMe = len(avaliacoesGestorMe)
+
+
+#############################################################################
+
+
         # Calcular a média das respostas dos avaliados pelo avaliador logado
         avaliacoes_avaliados_logado = Avaliacao.objects.filter(avaliado_id__in=selected_avaliados, avaliador=avaliador_logado)
+        avaliacoes_avaliados_logado = avaliacoes_avaliados_logado.filter(tipo='Avaliação Geral')
         perguntas_respostas_avaliados_logado = []
         for avaliacao in avaliacoes_avaliados_logado:
             if isinstance(avaliacao.perguntasRespostas, str):
@@ -523,6 +601,11 @@ def filtrar_avaliacoes_logado(request):
                     media_respostas_avaliados_logado[pergunta] = 0
                     count_respostas_avaliados_logado[pergunta] = 0
                 resposta = dados.get('resposta', 0)
+                try:
+                    resposta = float(resposta)
+                except ValueError:
+                    resposta = 0  # ou outro valor padrão que você considere apropriado
+
                 media_respostas_avaliados_logado[pergunta] += resposta
                 count_respostas_avaliados_logado[pergunta] += 1
                 soma_respostas_avaliados_logado += resposta
@@ -534,6 +617,48 @@ def filtrar_avaliacoes_logado(request):
 
         media_geral_avaliados_logado = round((soma_respostas_avaliados_logado / total_respostas_avaliados_logado if total_respostas_avaliados_logado > 0 else 0), 1)
         total_avaliacoes_avaliados_logado = len(avaliacoes_avaliados_logado)
+
+##################Gestor
+        avaliacoes_avaliados_logadoMe = Avaliacao.objects.filter(avaliado_id__in=selected_avaliados, avaliador=avaliador_logado)
+        avaliacoes_avaliados_logadoMe = avaliacoes_avaliados_logadoMe.filter(tipo='Avaliação do Gestor') 
+            
+        perguntas_respostas_avaliados_logadoMe = []
+        for avaliacao in avaliacoes_avaliados_logadoMe:
+            if isinstance(avaliacao.perguntasRespostas, str):
+                perguntas_respostas_avaliados_logadoMe.append(json.loads(avaliacao.perguntasRespostas))
+            else:
+                perguntas_respostas_avaliados_logadoMe.append(avaliacao.perguntasRespostas)
+
+        media_respostas_avaliados_logadoMe = {}
+        count_respostas_avaliados_logadoMe = {}
+        total_respostas_avaliados_logadoMe = 0
+        soma_respostas_avaliados_logadoMe = 0
+
+        for pr in perguntas_respostas_avaliados_logadoMe:
+            for pergunta, dados in pr.items():
+                if pergunta not in media_respostas_avaliados_logadoMe:
+                    media_respostas_avaliados_logadoMe[pergunta] = 0
+                    count_respostas_avaliados_logadoMe[pergunta] = 0
+                resposta = dados.get('resposta', 0)
+                try:
+                    resposta = float(resposta)
+                except ValueError:
+                    resposta = 0  # ou outro valor padrão que você considere apropriado
+
+                media_respostas_avaliados_logadoMe[pergunta] += resposta
+                count_respostas_avaliados_logadoMe[pergunta] += 1
+                soma_respostas_avaliados_logadoMe += resposta
+                total_respostas_avaliados_logadoMe += 1
+
+        for pergunta in media_respostas_avaliados_logadoMe:
+            if count_respostas_avaliados_logadoMe[pergunta] > 0:
+                media_respostas_avaliados_logadoMe[pergunta] /= count_respostas_avaliados_logadoMe[pergunta]
+
+        media_geral_avaliados_logadoMe = round((soma_respostas_avaliados_logadoMe / total_respostas_avaliados_logadoMe if total_respostas_avaliados_logadoMe > 0 else 0), 1)
+        total_avaliacoes_avaliados_logadoMe = len(avaliacoes_avaliados_logadoMe)
+        
+        media_totalAva = round(((media_geral_avaliados_logado + media_geral_avaliados_logadoMe) / 2),2)
+
 
         # Calcular total de avaliados sem avaliação no período para o avaliador logado
         avaliados = avaliador_logado.avaliados.all()
@@ -549,7 +674,15 @@ def filtrar_avaliacoes_logado(request):
             'media_geral_logado': media_geral_logado,
             'media_geral_avaliados_logado': media_geral_avaliados_logado,
             'total_avaliacoes_avaliados_logado': total_avaliacoes_avaliados_logado,
-            'total_avaliados_sem_avaliacao_logado': total_avaliados_sem_avaliacao_logado
+            'total_avaliados_sem_avaliacao_logado': total_avaliados_sem_avaliacao_logado,
+            'media_geral_gestorMe': media_geral_gestorMe,
+            'total_avaliacoes_gestorMe': total_avaliacoes_gestorMe,
+            'media_respostas_gestorMe' : media_respostas_gestorMe,
+            'media_totalAv': media_totalAv,
+            'media_respostas_avaliados_logadoMe': media_respostas_avaliados_logadoMe,
+            'media_geral_avaliados_logadoMe' : media_geral_avaliados_logadoMe,
+            'total_avaliacoes_avaliados_logadoMe':total_avaliacoes_avaliados_logadoMe,
+            'media_totalAva':media_totalAva
         }
 
         return JsonResponse(response_data, safe=False)

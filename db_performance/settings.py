@@ -24,6 +24,9 @@ CORS_ALLOW_CREDENTIALS = True
 #AUTH_USER_MODEL = 'management.CustomUser'
 # Application definition
 
+
+CELERY_RESULT_BACKEND = 'django-db'
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -39,6 +42,7 @@ INSTALLED_APPS = [
     'management',
     'rest_framework_simplejwt',
     'django_celery_beat',
+    'django_celery_results',
     'notifications',
     'datacalc'
     
@@ -169,28 +173,17 @@ STATIC_URL = '/static/'
 MEDIA_ROOT = os.path.join(BASE_DIR,'media')
 MEDIA_URL = '/media/'
 ''
-FRONTEND_URL = 'http://localhost:4201'
+FRONTEND_URL = 'http://172.50.10.79:80'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'  # Altere isso de acordo com o seu cliente de e-mail
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'jian.goersch@gmail.com'  # Seu endereço de e-mail
-EMAIL_HOST_PASSWORD = 'pspzuizlmnrskysp'  # Sua senha de e-mail
-
-# CORS_ORIGIN_WHITELIST = [
-#     "http://localhost:4200",
-# ]
+EMAIL_HOST_USER = 'grupodagobertobarcellos@gmail.com'  # Seu endereço de e-mail
+EMAIL_HOST_PASSWORD = 'zrwehfczwugpsssp'  # Sua senha de e-mail
 
 
-# CELERY_BEAT_SCHEDULE = {
-#     'enviar-emails-avaliadores-sem-avaliacao': {
-#         'task': 'management.tasks.enviar_emails_avaliadores_sem_avaliacao',
-#         'schedule': crontab(hour=0, minute=0),  # Executa diariamente à meia-noite
-#         'args': ('current_period',)  # Passe o período atual como argumento, ajuste conforme necessário
-#     },
-# }
 
 CELERY_BROKER_URL = 'redis://172.50.10.79:6379/0'
 CELERY_RESULT_BACKEND = 'redis://172.50.10.79:6379/0'
