@@ -168,7 +168,7 @@ def verificar_media_avaliacoes():
             })
 
             # Verificar se a nota caiu mais de um ponto
-            if (media_ultima - media_anterior) < -0.5:
+            if (media_ultima - media_anterior) < -1:
                 avaliados_piora.append({
                     'avaliado': avaliado.nome,
                     'media_ultima': media_ultima,
@@ -311,7 +311,7 @@ def verificar_media_avaliacoes_email():
         })
 
         # Verificar se a nota caiu mais de um ponto
-        if (media_ultima - media_anterior) < -0.5:
+        if (media_ultima - media_anterior) < -1:
             avaliados_piora.append({
                 'avaliado': avaliado.nome,
                 'media_ultima': media_ultima,

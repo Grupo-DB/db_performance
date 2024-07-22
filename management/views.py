@@ -1092,6 +1092,29 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
         except Avaliacao.DoesNotExist:
             return Response({'status': 'error', 'message': 'Avaliação não encontrada'}, status=404)
     
+   # @action(detail=False, methods=['get'], url_path='meus_avaliados_sem_avaliacao')
+   # def meus_avaliados_sem_avaliacao(self, request):
+    #    try:
+     #       user = request.user
+      #      periodo = request.query_params.get('periodo')
+
+       #     if not periodo:
+        #        return Response({'status': 'error', 'message': 'Período não fornecido'}, status=status.HTTP_400_BAD_REQUEST)
+
+         #   avaliador = Avaliador.objects.get(user=user)
+          #  avaliados = avaliador.avaliados.all()
+
+            # Filtrar avaliados que não têm avaliação no período especificado
+           # avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
+            #avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao)
+
+            #serializer = AvaliadoSerializer(avaliados_sem_avaliacao, many=True)
+            #return Response(serializer.data, status=status.HTTP_200_OK)
+        #except Avaliador.DoesNotExist:
+            #return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        #except Exception as e:
+            #return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
     @action(detail=False, methods=['get'], url_path='meus_avaliados_sem_avaliacao')
     def meus_avaliados_sem_avaliacao(self, request):
         try:
@@ -1104,9 +1127,9 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
             avaliador = Avaliador.objects.get(user=user)
             avaliados = avaliador.avaliados.all()
 
-            # Filtrar avaliados que não têm avaliação no período especificado
-            avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
-            avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao)
+            # Filtrar avaliados que não têm avaliação pelo avaliador atual no período especificado
+            avaliados_com_avaliacao_pelo_avaliador = Avaliacao.objects.filter(periodo=periodo, avaliador=avaliador).values_list('avaliado_id', flat=True)
+            avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao_pelo_avaliador)
 
             serializer = AvaliadoSerializer(avaliados_sem_avaliacao, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -1114,7 +1137,8 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
             return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        
+
+
 
     @action(detail=False, methods=['get'],url_path='byAvaliador')
     def byAvaliador(self, request):

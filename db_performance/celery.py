@@ -36,19 +36,19 @@ app.conf.beat_schedule = {
     },
     'enviar-media-avaliações': {
         'task': 'db_performance.tasks.verificar_media_avaliacoes',
-        'schedule': crontab(hour=0, minute=0),
+        'schedule': crontab(month_of_year='1,4,7,10', day_of_month=28,hour=0, minute=0),
     },
      'enviar_notificacoes_experiencia': {
         'task': 'db_performance.tasks.enviar_notificacoes_experiencia',
-        'schedule': crontab(hour=0, minute=0),
+        'schedule': crontab(hour=0, minute=0, day_of_week='monday'),
     },
     'verificar_media_avaliacoes_email': {
         'task': 'db_performance.tasks.verificar_media_avaliacoes_email',
-        'schedule': crontab(hour=0, minute=0),
+        'schedule': crontab(month_of_year='1,4,7,10', day_of_month=28,hour=0, minute=0),
     }, 
     'verificar_contratos_experiencia_email': {
         'task': 'db_performance.tasks.verificar_contratos_experiencia_email',
-        'schedule': crontab(hour=0, minute=0),
+        'schedule': crontab(hour=0, minute=0, day_of_week='monday'),
     },
 }
 
