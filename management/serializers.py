@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User,Group
 from rest_framework import serializers
-from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Avaliacao,Formulario,Pergunta,Avaliado,Ambiente
+from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Avaliacao,Formulario,Pergunta,Avaliado,Ambiente,HistoricoAlteracao
 from notifications.models import Notification
 
 
@@ -62,6 +62,7 @@ class ColaboradorSerializer(serializers.ModelSerializer):
     # tornar_avaliado = serializers.BooleanField(write_only=True, required=False)
     # tornar_avaliador = serializers.BooleanField(write_only=True, required=False)
 
+
     class Meta:
         model = Colaborador
         fields = '__all__'
@@ -112,6 +113,8 @@ class ColaboradorSerializer(serializers.ModelSerializer):
 class AvaliadoSerializer(serializers.ModelSerializer):
     colaborador_id = serializers.IntegerField(write_only=True)
     tipoAvaliacao_id = serializers.IntegerField(write_only=True)
+    setor = serializers.CharField(source='ambiente.nome', read_only=True)
+    cargo = serializers.CharField(source='cargo.nome', read_only=True)
 
     class Meta:
         model = Avaliado
@@ -142,6 +145,8 @@ class AvaliadoSerializer(serializers.ModelSerializer):
 class AvaliadorSerializer(serializers.ModelSerializer):
     colaborador_id = serializers.IntegerField(write_only=True)
     avaliados = AvaliadoSerializer(many=True, read_only=True)
+    setor = serializers.CharField(source='ambiente.nome', read_only=True)
+    cargo = serializers.CharField(source='cargo.nome', read_only=True)
     class Meta:
         model = Avaliador
         fields = '__all__'  # Ou liste os campos que deseja incluir no serializer
@@ -220,3 +225,8 @@ class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
         fields = '__all__'         
+
+class HistoricoAlteracaoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HistoricoAlteracao
+        fields = '__all__'

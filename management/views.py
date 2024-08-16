@@ -20,9 +20,9 @@ from rest_framework.decorators import api_view,authentication_classes, permissio
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.response import Response
 from rest_framework import status, viewsets
-from .models import Ambiente, Empresa,Area,Cargo,Setor,Colaborador,Filial,TipoContrato,TipoAvaliacao,Avaliacao,Avaliador,Formulario,Pergunta,Avaliado
+from .models import Ambiente, Empresa,Area,Cargo,Setor,Colaborador,Filial,TipoContrato,TipoAvaliacao,Avaliacao,Avaliador,Formulario,Pergunta,Avaliado,HistoricoAlteracao
 from django.conf import settings
-from .serializers import LoginSerializer, UserSerializer,EmpresaSerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer,TipoContratoSerializer,TipoAvaliacaoSerializer,AvaliacaoSerializer,AvaliadorSerializer,PerguntaSerializer,AvaliadoSerializer,AmbienteSerializer
+from .serializers import LoginSerializer, UserSerializer,EmpresaSerializer,GroupSerializer,AreaSerializer,SetorSerializer,CargoSerializer,ColaboradorSerializer,FilialSerializer,TipoContratoSerializer,TipoAvaliacaoSerializer,AvaliacaoSerializer,AvaliadorSerializer,PerguntaSerializer,AvaliadoSerializer,AmbienteSerializer,HistoricoAlteracaoSerializer
 from.serializers import FormularioCreateSerializer,FormularioUpdateSerializer,FormularioSerializer,NotificationSerializer
 from .utils import send_custom_email
 from django.core.mail import send_mail
@@ -734,17 +734,21 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
     serializer_class = ColaboradorSerializer  
 
 
-    def partial_update(self, request, *args, **kwargs):
-        kwargs['partial'] = True
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-        if 'image' in serializer.validated_data:
-            image_url = request.build_absolute_uri(instance.image.url)
-            return Response({'image_url': image_url, **serializer.data})
+    # c
+
+
+
+    # def partial_update(self, request, *args, **kwargs):
+    #     kwargs['partial'] = True
+    #     instance = self.get_object()
+    #     serializer = self.get_serializer(instance, data=request.data, partial=True)
+    #     serializer.is_valid(raise_exception=True)
+    #     self.perform_update(serializer)
+    #     if 'image' in serializer.validated_data:
+    #         image_url = request.build_absolute_uri(instance.image.url)
+    #         return Response({'image_url': image_url, **serializer.data})
         
-        return Response(serializer.data)
+    #     return Response(serializer.data)
     
     def perform_create(self, serializer):
         username = self.request.data.get('username', None)
@@ -1495,3 +1499,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
+
+class HistoricoAlteracaoViewSet(viewsets.ModelViewSet):
+    queryset = HistoricoAlteracao.objects.all()
+    serializer_class = HistoricoAlteracaoSerializer

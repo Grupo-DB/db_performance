@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User, AbstractUser,Group,Permission
-
+from django.dispatch import receiver
+from django.db.models.signals import pre_save
 
 class PerfilUsuario(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
@@ -126,6 +127,36 @@ class Colaborador(models.Model):
     class Meta:
         verbose_name = "Colaborador"
         verbose_name_plural = "Colaboradores"
+
+
+@receiver(pre_save, sender=Colaborador)
+def salvar_historico_alteracoes(sender, instance, **kwargs):
+    if instance.pk:
+        colaborador_atual = Colaborador.objects.get(pk=instance.pk)
+        campos_alterados = []
+            
+        if colaborador_atual.nome != instance.nome:
+            campos_alterados.append(('nome', colaborador_atual.nome, instance.nome))
+        if colaborador_atual.email != instance.email:
+            campos_alterados.append(('email', colaborador_atual.email, instance.email))
+
+        # Verifica alteração no salário
+        if colaborador_atual.salario != instance.salario:
+            campos_alterados.append(('salario', str(colaborador_atual.salario), str(instance.salario)))
+        
+        # Verifica alteração em uma chave estrangeira, exemplo: cargo
+        if colaborador_atual.cargo_id != instance.cargo_id:
+            cargo_antigo = colaborador_atual.cargo.nome if colaborador_atual.cargo else 'None'
+            cargo_novo = instance.cargo.nome if instance.cargo else 'None'
+            campos_alterados.append(('cargo', cargo_antigo, cargo_novo))    
+            
+        for campo, valor_antigo, valor_novo in campos_alterados:
+            HistoricoAlteracao.objects.create(
+                colaborador=instance,
+                campo_alterado=campo,
+                valor_antigo=valor_antigo,
+                valor_novo=valor_novo,
+            )    
     
 
 class Avaliador(Colaborador):
@@ -183,3 +214,20 @@ class Avaliacao(models.Model):
         verbose_name_plural = "Avaliacoes"
 
 
+
+class HistoricoAlteracao(models.Model):
+    colaborador = models.ForeignKey(Colaborador, on_delete=models.CASCADE)
+    campo_alterado = models.CharField(max_length=110)
+    valor_antigo = models.CharField(max_length=255, null=True, blank=True)
+    valor_novo = models.CharField(max_length=255, null=True, blank=True)
+    usuario = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    data_alteracao = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        # Convertendo valores para string antes de salvar
+        self.valor_antigo = str(self.valor_antigo)
+        self.valor_novo = str(self.valor_novo)
+        super(HistoricoAlteracao, self).save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Alteração em {self.campo_alterado} do colaborador {self.colaborador.nome}"

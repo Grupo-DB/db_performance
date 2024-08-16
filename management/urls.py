@@ -4,7 +4,7 @@ from django.conf import settings
 from rest_framework import routers
 from . import views
 from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet,TipoContratoViewSet,PerguntaViewSet,FormularioViewSet,AvaliacaoViewSet,TipoAvaliacaoViewSet,send_email_view2,NotificationViewSet
-from .views import update_password_first_login,CustomTokenObtainPairView,forgot_password,reset_password
+from .views import update_password_first_login,CustomTokenObtainPairView,forgot_password,reset_password,HistoricoAlteracaoViewSet
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView,TokenVerifyView
 from rest_framework.routers import DefaultRouter
 router = DefaultRouter()
@@ -23,6 +23,7 @@ router.register(r'perguntas', PerguntaViewSet, basename='Perguntas')
 router.register(r'formularios', FormularioViewSet, basename='Formularios')
 router.register(r'avaliacoes', AvaliacaoViewSet, basename='Avaliacoes')
 router.register(r'notifications', NotificationViewSet, basename='notification')
+router.register(r'historico-alteracoes', HistoricoAlteracaoViewSet)
 
 #router.register(r'email', EmailViewSet, basename='Email')
 urlpatterns = [

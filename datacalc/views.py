@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from django.http import JsonResponse
 import pandas as pd
 from datacalc.serializers import PeriodoSerializer
-from management.models import Colaborador,Avaliacao,Ambiente,Avaliado,Avaliador
+from management.models import Colaborador,Avaliacao,Ambiente,Avaliado,Avaliador,HistoricoAlteracao
 from datacalc.models import Periodo
 from datetime import datetime
 from django.utils import timezone
@@ -380,12 +380,14 @@ def filtrar_avaliacoes(request):
             else:
                 perguntas_respostas.append(avaliacao.perguntasRespostas)
 
+        notas_individuais = []
         media_respostas = {}
         count_respostas = {}
         total_respostas = 0
         soma_respostas = 0
 
         for pr in perguntas_respostas:
+            nota_avaliacao = {'avaliacao': avaliacao.id, 'respostas': {}}
             for pergunta, dados in pr.items():
                 if pergunta not in media_respostas:
                     media_respostas[pergunta] = 0
@@ -402,6 +404,11 @@ def filtrar_avaliacoes(request):
                 count_respostas[pergunta] += 1
                 soma_respostas += resposta
                 total_respostas += 1
+
+                 # Armazenar a nota individual
+                nota_avaliacao['respostas'][pergunta] = resposta
+
+            notas_individuais.append(nota_avaliacao)
 
         for pergunta in media_respostas:
             if count_respostas[pergunta] > 0:
@@ -469,7 +476,8 @@ def filtrar_avaliacoes(request):
             'media_respostas': media_respostas,
             'media_geral':media_geral,
             'media_geral_avaliado':media_geral_avaliado,
-            'total_avaliacoes_avaliados':total_avaliacoes_avaliados
+            'total_avaliacoes_avaliados':total_avaliacoes_avaliados,
+            'notas_individuais': notas_individuais
         }
 
         return JsonResponse(response_data, safe=False)
@@ -784,6 +792,565 @@ def filtrar_avaliacoes_logado(request):
             'media_geral_avaliados_logadoMe' : media_geral_avaliados_logadoMe,
             'total_avaliacoes_avaliados_logadoMe':total_avaliacoes_avaliados_logadoMe,
             'media_totalAva':media_totalAva
+        }
+
+        return JsonResponse(response_data, safe=False)
+
+###############################################------------RElaTORIOS---------------------------#####################################
+
+
+@csrf_exempt
+def filtrar_avaliados(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        selected_empresas = data.get('selectedEmpresas', [])
+        selected_filiais = data.get('selectedFiliais', [])
+        selected_areas = data.get('selectedAreas', [])
+        selected_cargos = data.get('selectedCargos', [])
+        selected_ambientes = data.get('selectedAmbientes', [])
+        selected_setores = data.get('selectedSetores', [])
+        data_inicio = data.get('data_inicio', None)
+        data_fim = data.get('data_fim', None)
+        
+        queryset = Avaliado.objects.all()
+        if selected_empresas:
+            queryset = queryset.filter(empresa_id__in=selected_empresas)
+        if selected_filiais:
+            queryset = queryset.filter(filial_id__in=selected_filiais)
+        if selected_areas:
+            queryset = queryset.filter(area_id__in=selected_areas)    
+        if selected_cargos:
+            queryset = queryset.filter(cargo_id__in=selected_cargos)
+        if selected_ambientes:
+            queryset = queryset.filter(ambiente_id__in=selected_ambientes)    
+        if selected_setores:
+            queryset = queryset.filter(setor_id__in=selected_setores)
+        
+
+        # Use select_related to include related fields
+        queryset = queryset.select_related('empresa','filial', 'area', 'cargo', 'setor', 'ambiente')
+
+        filtered_data = [
+            {
+                'id': avaliado.id,
+                'nome': avaliado.nome,
+                'empresa_nome': avaliado.empresa.nome if avaliado.empresa else '',
+                'filial_nome': avaliado.filial.nome if avaliado.filial else '',
+                'area_nome': avaliado.area.nome if avaliado.area else '',
+                'cargo_nome': avaliado.cargo.nome if avaliado.cargo else '',
+                'setor_nome': avaliado.setor.nome if avaliado.setor else '',
+                'ambiente_nome': avaliado.ambiente.nome if avaliado.ambiente else '',
+                'salario': avaliado.salario,
+                'data_nascimento': avaliado.data_nascimento,
+                'data_admissao': avaliado.data_admissao,
+                'estado_civil': avaliado.estado_civil,
+                'instrucao': avaliado.instrucao,
+                'genero': avaliado.genero,
+                'numero_avaliacoes': Avaliacao.objects.filter(avaliado=avaliado).count()
+            }
+            for avaliado in queryset
+        ]
+
+        response_data = {
+            'filtered_data': filtered_data,
+        }
+
+        return JsonResponse(response_data, safe=False)
+    
+#################################-----------------------------------------------Graficos--------Trimestrais--------------------------------------------------------------------
+@csrf_exempt
+def filtrar_avaliacoes_periodo(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        selected_avaliados = data.get('avaliadoSelecionadoId', [])
+        selected_empresas = data.get('selectedEmpresas', [])
+        selected_filiais = data.get('selectedFiliais', [])
+        selected_areas = data.get('selectedAreas', [])
+        selected_cargos = data.get('selectedCargos', [])
+        selected_ambientes = data.get('selectedAmbientes', [])
+        selected_setores = data.get('selectedSetores', [])
+        data_inicio = data.get('data_inicio', None)
+        data_fim = data.get('data_fim', None)
+
+        queryset = Avaliacao.objects.all()
+        if selected_avaliados:
+            queryset = queryset.filter(avaliado_id__in=selected_avaliados)
+        if selected_empresas:
+            queryset = queryset.filter(empresa_id__in=selected_empresas)
+        if selected_filiais:
+            queryset = queryset.filter(filial_id__in=selected_filiais)
+        if selected_areas:
+            queryset = queryset.filter(area_id__in=selected_areas)
+        if selected_cargos:
+            queryset = queryset.filter(cargo_id__in=selected_cargos)
+        if selected_ambientes:
+            queryset = queryset.filter(ambiente_id__in=selected_ambientes)
+        if selected_setores:
+            queryset = queryset.filter(setor_id__in=selected_setores)
+        if data_inicio:
+            queryset = queryset.filter(create_at__gte=data_inicio)
+        if data_fim:
+            queryset = queryset.filter(create_at__lte=data_fim)
+
+        # Preparar dados filtrados
+        filtered_data = []
+        perguntas_respostas = []
+
+        for avaliacao in queryset:
+            periodo = avaliacao.periodo
+            filtered_data.append({
+                'id': avaliacao.id,
+                'tipo': avaliacao.tipo,
+                'avaliado_id': avaliacao.avaliado_id,
+                'avaliador_id': avaliacao.avaliador_id,
+                'periodo': periodo
+            })
+
+            if isinstance(avaliacao.perguntasRespostas, str):
+                perguntas_respostas.append({
+                    'avaliacao_id': avaliacao.id,
+                    'periodo': periodo,
+                    'perguntas_respostas': json.loads(avaliacao.perguntasRespostas)
+                })
+            else:
+                perguntas_respostas.append({
+                    'avaliacao_id': avaliacao.id,
+                    'periodo': periodo,
+                    'perguntas_respostas': avaliacao.perguntasRespostas
+                })
+
+        # Inicializar estruturas para armazenar as notas
+        media_respostas_por_periodo = {}
+        count_respostas_por_periodo = {}
+
+        for pr in perguntas_respostas:
+            periodo = pr['periodo']
+            if periodo not in media_respostas_por_periodo:
+                media_respostas_por_periodo[periodo] = {}
+                count_respostas_por_periodo[periodo] = {}
+
+            for pergunta, dados in pr['perguntas_respostas'].items():
+                if pergunta not in media_respostas_por_periodo[periodo]:
+                    media_respostas_por_periodo[periodo][pergunta] = 0
+                    count_respostas_por_periodo[periodo][pergunta] = 0
+
+                resposta = dados.get('resposta', None)
+                if resposta == "" or resposta is None or resposta == "nao_se_aplica":
+                    # Ignora respostas vazias ou None
+                    continue
+                try:
+                    resposta = float(resposta)
+                except ValueError:
+                    resposta = 0  # ou outro valor padrão que você considere apropriado
+
+                media_respostas_por_periodo[periodo][pergunta] += resposta
+                count_respostas_por_periodo[periodo][pergunta] += 1
+
+        # Calcular a média das respostas por período
+        for periodo in media_respostas_por_periodo:
+            for pergunta in media_respostas_por_periodo[periodo]:
+                if count_respostas_por_periodo[periodo][pergunta] > 0:
+                    media_respostas_por_periodo[periodo][pergunta] /= count_respostas_por_periodo[periodo][pergunta]
+
+        # Preparar resposta JSON com médias e notas individuais
+        response_data = {
+            'filtered_data': filtered_data,
+            'media_respostas_por_periodo': media_respostas_por_periodo,
+        }
+
+        return JsonResponse(response_data)
+
+###############-------------------------------------------Avaliador-----------------------######################
+# @csrf_exempt
+# def filtrar_avaliacoes_avaliador_periodo(request):
+#     if request.method == 'POST':
+#         data = json.loads(request.body)
+#         selected_avaliadores = data.get('avaliadorSelecionadoId', [])
+#         selected_periodos = data.get('periodoSelecionado', [])
+#         selected_empresas = data.get('selectedEmpresas', [])
+#         selected_filiais = data.get('selectedFiliais', [])
+#         selected_areas = data.get('selectedAreas', [])
+#         selected_cargos = data.get('selectedCargos', [])
+#         selected_ambientes = data.get('selectedAmbientes', [])
+#         selected_setores = data.get('selectedSetores', [])
+#         data_inicio = data.get('data_inicio', None)
+#         data_fim = data.get('data_fim', None)
+
+#         queryset = Avaliacao.objects.all()
+#         if selected_avaliadores:
+#             queryset = queryset.filter(avaliador_id__in=selected_avaliadores)
+#         if selected_periodos:
+#             queryset = queryset.filter(periodo__in=selected_periodos)    
+#         if selected_empresas:
+#             queryset = queryset.filter(empresa_id__in=selected_empresas)
+#         if selected_filiais:
+#             queryset = queryset.filter(filial_id__in=selected_filiais)
+#         if selected_areas:
+#             queryset = queryset.filter(area_id__in=selected_areas)
+#         if selected_cargos:
+#             queryset = queryset.filter(cargo_id__in=selected_cargos)
+#         if selected_ambientes:
+#             queryset = queryset.filter(ambiente_id__in=selected_ambientes)
+#         if selected_setores:
+#             queryset = queryset.filter(setor_id__in=selected_setores)
+#         if data_inicio:
+#             queryset = queryset.filter(create_at__gte=data_inicio)
+#         if data_fim:
+#             queryset = queryset.filter(create_at__lte=data_fim)
+
+#         # Preparar dados filtrados
+#         filtered_data = []
+#         perguntas_respostas = []
+#         avaliadores_nomes = {}
+
+#         for avaliacao in queryset:
+#             periodo = avaliacao.periodo
+#             avaliador_id = avaliacao.avaliador_id
+#             avaliador_nome = avaliacao.avaliador.nome
+#             filtered_data.append({
+#                 'id': avaliacao.id,
+#                 'tipo': avaliacao.tipo,
+#                 'avaliado_id': avaliacao.avaliado_id,
+#                 'avaliador_id': avaliacao.avaliador_id,
+#                 'periodo': periodo
+#             })
+
+#             # Adicionar nome do avaliador ao dicionário se não estiver presente
+#             if avaliador_id not in avaliadores_nomes:
+#                 avaliadores_nomes[avaliador_id] = avaliador_nome
+
+#             if isinstance(avaliacao.perguntasRespostas, str):
+#                 perguntas_respostas.append({
+#                     'avaliador_id': avaliador_id,
+#                     'avaliacao_id': avaliacao.id,
+#                     'periodo': periodo,
+#                     'perguntas_respostas': json.loads(avaliacao.perguntasRespostas)
+#                 })
+#             else:
+#                 perguntas_respostas.append({
+#                     'avaliador_id': avaliador_id,
+#                     'avaliacao_id': avaliacao.id,
+#                     'periodo': periodo,
+#                     'perguntas_respostas': avaliacao.perguntasRespostas
+#                 })
+
+#         # Inicializar estruturas para armazenar as notas
+#         media_respostas_avaliador_por_periodo = {}
+#         count_respostas_por_periodo = {}
+
+#         for pr in perguntas_respostas:
+#             avaliador_id = pr['avaliador_id']
+#             periodo = pr['periodo']
+#             if avaliador_id not in media_respostas_avaliador_por_periodo:
+#                 media_respostas_avaliador_por_periodo[avaliador_id] = {}
+#                 count_respostas_por_periodo[avaliador_id] = {}
+
+#             if periodo not in media_respostas_avaliador_por_periodo[avaliador_id]:
+#                 media_respostas_avaliador_por_periodo[avaliador_id][periodo] = {}
+#                 count_respostas_por_periodo[avaliador_id][periodo] = {}
+
+#             for pergunta, dados in pr['perguntas_respostas'].items():
+#                 if pergunta not in media_respostas_avaliador_por_periodo[avaliador_id][periodo]:
+#                     media_respostas_avaliador_por_periodo[avaliador_id][periodo][pergunta] = 0
+#                     count_respostas_por_periodo[avaliador_id][periodo][pergunta] = 0
+
+#                 resposta = dados.get('resposta', None)
+#                 if resposta == "" or resposta is None or resposta == "nao_se_aplica":
+#                     # Ignora respostas vazias ou None
+#                     continue
+#                 try:
+#                     resposta = float(resposta)
+#                 except ValueError:
+#                     resposta = 0  # ou outro valor padrão que você considere apropriado
+
+#                 media_respostas_avaliador_por_periodo[avaliador_id][periodo][pergunta] += resposta
+#                 count_respostas_por_periodo[avaliador_id][periodo][pergunta] += 1
+
+#         # Calcular a média das respostas por avaliador e período
+#         for avaliador_id in media_respostas_avaliador_por_periodo:
+#             for periodo in media_respostas_avaliador_por_periodo[avaliador_id]:
+#                 for pergunta in media_respostas_avaliador_por_periodo[avaliador_id][periodo]:
+#                     if count_respostas_por_periodo[avaliador_id][periodo][pergunta] > 0:
+#                         media_respostas_avaliador_por_periodo[avaliador_id][periodo][pergunta] /= count_respostas_por_periodo[avaliador_id][periodo][pergunta]
+
+#         # Preparar resposta JSON com médias e notas individuais
+#         response_data = {
+#             'filtered_data': filtered_data,
+#             'media_respostas_avaliador_por_periodo': media_respostas_avaliador_por_periodo,
+#             'avaliadores_nomes': avaliadores_nomes 
+#         }
+
+#         return JsonResponse(response_data)
+
+
+@csrf_exempt
+def filtrar_avaliacoes_avaliador_periodo(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        selected_avaliadores = data.get('avaliadorSelecionadoId', [])
+        selected_periodos = data.get('periodoSelecionado', [])
+        selected_empresas = data.get('selectedEmpresas', [])
+        selected_filiais = data.get('selectedFiliais', [])
+        selected_areas = data.get('selectedAreas', [])
+        selected_cargos = data.get('selectedCargos', [])
+        selected_ambientes = data.get('selectedAmbientes', [])
+        selected_setores = data.get('selectedSetores', [])
+        selected_tipos = data.get('tipoSelecionado', [])  # Novo filtro
+        data_inicio = data.get('data_inicio', None)
+        data_fim = data.get('data_fim', None)
+
+        queryset = Avaliacao.objects.all()
+        if selected_avaliadores:
+            queryset = queryset.filter(avaliador_id__in=selected_avaliadores)
+        if selected_periodos:
+            queryset = queryset.filter(periodo__in=selected_periodos)
+        if selected_empresas:
+            queryset = queryset.filter(empresa_id__in=selected_empresas)
+        if selected_filiais:
+            queryset = queryset.filter(filial_id__in=selected_filiais)
+        if selected_areas:
+            queryset = queryset.filter(area_id__in=selected_areas)
+        if selected_cargos:
+            queryset = queryset.filter(cargo_id__in=selected_cargos)
+        if selected_ambientes:
+            queryset = queryset.filter(ambiente_id__in=selected_ambientes)
+        if selected_setores:
+            queryset = queryset.filter(setor_id__in=selected_setores)
+        if selected_tipos:
+            queryset = queryset.filter(tipo__in=selected_tipos)  # Aplicar o filtro de tipos
+        if data_inicio:
+            queryset = queryset.filter(create_at__gte=data_inicio)
+        if data_fim:
+            queryset = queryset.filter(create_at__lte=data_fim)
+
+        # Preparar dados filtrados
+        filtered_data = []
+        perguntas_respostas = []
+        avaliadores_nomes = {}
+
+        for avaliacao in queryset:
+            periodo = avaliacao.periodo
+            tipo = avaliacao.tipo
+            avaliador_id = avaliacao.avaliador_id
+            avaliador_nome = avaliacao.avaliador.nome
+            filtered_data.append({
+                'id': avaliacao.id,
+                'tipo': tipo,
+                'avaliado_id': avaliacao.avaliado_id,
+                'avaliador_id': avaliacao.avaliador_id,
+                'periodo': periodo
+            })
+
+            # Adicionar nome do avaliador ao dicionário se não estiver presente
+            if avaliador_id not in avaliadores_nomes:
+                avaliadores_nomes[avaliador_id] = avaliador_nome
+
+            if isinstance(avaliacao.perguntasRespostas, str):
+                perguntas_respostas.append({
+                    'avaliador_id': avaliador_id,
+                    'avaliacao_id': avaliacao.id,
+                    'periodo': periodo,
+                    'tipo': tipo,
+                    'perguntas_respostas': json.loads(avaliacao.perguntasRespostas)
+                })
+            else:
+                perguntas_respostas.append({
+                    'avaliador_id': avaliador_id,
+                    'avaliacao_id': avaliacao.id,
+                    'periodo': periodo,
+                    'tipo': tipo,
+                    'perguntas_respostas': avaliacao.perguntasRespostas
+                })
+
+        # Inicializar estruturas para armazenar as notas
+        media_respostas_avaliador_por_periodo_tipo = {}
+        count_respostas_por_periodo_tipo = {}
+
+        for pr in perguntas_respostas:
+            avaliador_id = pr['avaliador_id']
+            periodo = pr['periodo']
+            tipo = pr['tipo']
+            if avaliador_id not in media_respostas_avaliador_por_periodo_tipo:
+                media_respostas_avaliador_por_periodo_tipo[avaliador_id] = {}
+                count_respostas_por_periodo_tipo[avaliador_id] = {}
+
+            if periodo not in media_respostas_avaliador_por_periodo_tipo[avaliador_id]:
+                media_respostas_avaliador_por_periodo_tipo[avaliador_id][periodo] = {}
+                count_respostas_por_periodo_tipo[avaliador_id][periodo] = {}
+
+            if tipo not in media_respostas_avaliador_por_periodo_tipo[avaliador_id][periodo]:
+                media_respostas_avaliador_por_periodo_tipo[avaliador_id][periodo][tipo] = {}
+                count_respostas_por_periodo_tipo[avaliador_id][periodo][tipo] = {}
+
+            for pergunta, dados in pr['perguntas_respostas'].items():
+                if pergunta not in media_respostas_avaliador_por_periodo_tipo[avaliador_id][periodo][tipo]:
+                    media_respostas_avaliador_por_periodo_tipo[avaliador_id][periodo][tipo][pergunta] = 0
+                    count_respostas_por_periodo_tipo[avaliador_id][periodo][tipo][pergunta] = 0
+
+                resposta = dados.get('resposta', None)
+                if resposta == "" or resposta is None or resposta == "nao_se_aplica":
+                    # Ignora respostas vazias ou None
+                    continue
+                try:
+                    resposta = float(resposta)
+                except ValueError:
+                    resposta = 0  # ou outro valor padrão que você considere apropriado
+
+                media_respostas_avaliador_por_periodo_tipo[avaliador_id][periodo][tipo][pergunta] += resposta
+                count_respostas_por_periodo_tipo[avaliador_id][periodo][tipo][pergunta] += 1
+
+        # Calcular a média das respostas por avaliador, período e tipo
+        for avaliador_id in media_respostas_avaliador_por_periodo_tipo:
+            for periodo in media_respostas_avaliador_por_periodo_tipo[avaliador_id]:
+                for tipo in media_respostas_avaliador_por_periodo_tipo[avaliador_id][periodo]:
+                    for pergunta in media_respostas_avaliador_por_periodo_tipo[avaliador_id][periodo][tipo]:
+                        if count_respostas_por_periodo_tipo[avaliador_id][periodo][tipo][pergunta] > 0:
+                            media_respostas_avaliador_por_periodo_tipo[avaliador_id][periodo][tipo][pergunta] /= count_respostas_por_periodo_tipo[avaliador_id][periodo][tipo][pergunta]
+        # Preparar resposta JSON com médias e notas individuais
+        response_data = {
+            'filtered_data': filtered_data,
+            'media_respostas_avaliador_por_periodo': media_respostas_avaliador_por_periodo_tipo,
+            'avaliadores_nomes': avaliadores_nomes 
+        }
+
+        return JsonResponse(response_data)
+
+
+##################-----------------------Pegar Períodos únicos---------------------#########################################
+
+@api_view(['GET'])
+def get_unique_periodos(request):
+    periodos = Avaliacao.objects.values_list('periodo', flat=True).distinct()
+    return Response(periodos)
+
+@api_view(['GET'])
+def get_unique_tipos(request):
+    tipos = Avaliacao.objects.values_list('tipo', flat=True).distinct()
+    return Response(tipos)
+
+###################--------------------------- FILTRAR HISTÓRICO COLABORADOR -------------######################################
+@csrf_exempt
+def filtrar_historico(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        selected_avaliados = data.get('avaliadoSelecionadoId', None)
+        selected_empresas = data.get('selectedEmpresas', [])
+        selected_filiais = data.get('selectedFiliais', [])
+        selected_areas = data.get('selectedAreas', [])
+        selected_cargos = data.get('selectedCargos', [])
+        selected_ambientes = data.get('selectedAmbientes', [])
+        selected_setores = data.get('selectedSetores', [])
+        data_inicio = data.get('data_inicio', None)
+        data_fim = data.get('data_fim', None)
+
+        queryset = Avaliado.objects.all()
+        
+        if selected_avaliados:
+            queryset = queryset.filter(id=selected_avaliados)
+        if isinstance(selected_empresas, list) and selected_empresas:
+            queryset = queryset.filter(empresa_id__in=selected_empresas)
+        if isinstance(selected_filiais, list) and selected_filiais:
+            queryset = queryset.filter(filial_id__in=selected_filiais)
+        if isinstance(selected_areas, list) and selected_areas:
+            queryset = queryset.filter(area_id__in=selected_areas)
+        if isinstance(selected_cargos, list) and selected_cargos:
+            queryset = queryset.filter(cargo_id__in=selected_cargos)
+        if isinstance(selected_ambientes, list) and selected_ambientes:
+            queryset = queryset.filter(ambiente_id__in=selected_ambientes)
+        if isinstance(selected_setores, list) and selected_setores:
+            queryset = queryset.filter(setor_id__in=selected_setores)
+
+        if data_inicio and data_fim:
+            queryset = queryset.filter(data_admissao__range=[data_inicio, data_fim])
+
+        queryset = queryset.select_related('empresa', 'filial', 'area', 'cargo', 'setor', 'ambiente')
+
+        filtered_data_historico = [
+            {
+                'id': avaliado.id,
+                'nome': avaliado.nome,
+                'empresa_nome': avaliado.empresa.nome if avaliado.empresa else '',
+                'filial_nome': avaliado.filial.nome if avaliado.filial else '',
+                'area_nome': avaliado.area.nome if avaliado.area else '',
+                'cargo_nome': avaliado.cargo.nome if avaliado.cargo else '',
+                'setor_nome': avaliado.setor.nome if avaliado.setor else '',
+                'ambiente_nome': avaliado.ambiente.nome if avaliado.ambiente else '',
+                'salario': avaliado.salario,
+                'data_nascimento': avaliado.data_nascimento,
+                'data_admissao': avaliado.data_admissao,
+                'estado_civil': avaliado.estado_civil,
+                'instrucao': avaliado.instrucao,
+                'genero': avaliado.genero,
+                'numero_avaliacoes': Avaliacao.objects.filter(avaliado=avaliado).count()
+            }
+            for avaliado in queryset
+        ]
+
+        historico_queryset = HistoricoAlteracao.objects.filter(colaborador_id=selected_avaliados)
+        historico_data = list(historico_queryset.values())
+
+        # Corrigindo a parte que filtra as alterações de salário
+        historico_salario = HistoricoAlteracao.objects.filter(
+            colaborador_id=selected_avaliados,
+            campo_alterado='salario'
+        )
+        historico_salario = list(historico_salario.values())  # Correto: utilizando o filtro adequado
+
+        # Cálculos de média geral por período
+        media_geral_por_periodo = {}
+        media_respostas_por_periodo = {}
+        count_respostas_por_periodo = {}
+
+        for avaliado in queryset:
+            avaliacoes = Avaliacao.objects.filter(avaliado=avaliado)
+            for avaliacao in avaliacoes:
+                periodo = avaliacao.periodo
+                if periodo not in media_respostas_por_periodo:
+                    media_respostas_por_periodo[periodo] = {}
+                    count_respostas_por_periodo[periodo] = {}
+
+                if isinstance(avaliacao.perguntasRespostas, str):
+                    perguntas_respostas = json.loads(avaliacao.perguntasRespostas)
+                else:
+                    perguntas_respostas = avaliacao.perguntasRespostas
+
+                for pergunta, dados in perguntas_respostas.items():
+                    if pergunta not in media_respostas_por_periodo[periodo]:
+                        media_respostas_por_periodo[periodo][pergunta] = 0
+                        count_respostas_por_periodo[periodo][pergunta] = 0
+
+                    resposta = dados.get('resposta', None)
+                    if resposta == "" or resposta is None or resposta == "nao_se_aplica":
+                        continue
+                    try:
+                        resposta = float(resposta)
+                    except ValueError:
+                        resposta = 0
+
+                    media_respostas_por_periodo[periodo][pergunta] += resposta
+                    count_respostas_por_periodo[periodo][pergunta] += 1
+
+        for periodo in media_respostas_por_periodo:
+            for pergunta in media_respostas_por_periodo[periodo]:
+                if count_respostas_por_periodo[periodo][pergunta] > 0:
+                    media_respostas_por_periodo[periodo][pergunta] /= count_respostas_por_periodo[periodo][pergunta]
+
+        for periodo, perguntas in media_respostas_por_periodo.items():
+            total_respostas = 0
+            soma_respostas = 0
+            for pergunta, media in perguntas.items():
+                soma_respostas += media * count_respostas_por_periodo[periodo][pergunta]
+                total_respostas += count_respostas_por_periodo[periodo][pergunta]
+            if total_respostas > 0:
+                media_geral_por_periodo[periodo] = round((soma_respostas / total_respostas),2)
+            else:
+                media_geral_por_periodo[periodo] = 0
+
+        response_data = {
+            'filtered_data_historico': filtered_data_historico,
+            'historico': historico_data,
+            'media_geral_por_periodo': media_geral_por_periodo,
+            'historico_salario': historico_salario
         }
 
         return JsonResponse(response_data, safe=False)
