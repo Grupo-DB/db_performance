@@ -39,13 +39,14 @@ INSTALLED_APPS = [
     'autenticacoes',
     "rest_framework",
     "corsheaders",
-    'management',
+    'avaliacoes.management',
     'rest_framework_simplejwt',
     'django_celery_beat',
     'django_celery_results',
     'notifications',
-    'datacalc'
-    
+    'avaliacoes.datacalc',
+    'bisGerenciais.cal',
+    'bisGerenciais.dashboardOperacoes.home'
 
 ]
 
@@ -85,10 +86,17 @@ WSGI_APPLICATION = 'db_performance.wsgi.application'
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 #autenticações
 DATABASES = {
-    # 'default': {
-    #     'ENGINE': 'django.db.backends.sqlite3',
-    #     'NAME': BASE_DIR / 'db.sqlite3',
-    # },
+   'sga': {
+        'ENGINE': 'mssql',
+        'NAME': 'DB',
+        'USER': 'DBCONSULTA',
+        'PASSWORD': 'DB@@2023**',
+        'HOST': '172.50.10.5',
+        'PORT': '',
+        'OPTIONS': {
+            'driver': 'ODBC Driver 17 for SQL Server',
+        }
+    },
 
     'default':{
         'ENGINE': 'django.db.backends.mysql',

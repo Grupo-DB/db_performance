@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class ManagementConfig(AppConfig):
+class DatacalcConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'management'
+    name = 'avaliacoes.datacalc'

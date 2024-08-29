@@ -7,15 +7,15 @@ from django.utils.decorators import method_decorator
 from rest_framework.views import APIView
 from django.http import JsonResponse
 import pandas as pd
-from datacalc.serializers import PeriodoSerializer
-from management.models import Colaborador,Avaliacao,Ambiente,Avaliado,Avaliador,HistoricoAlteracao
-from datacalc.models import Periodo
+from avaliacoes.datacalc.serializers import PeriodoSerializer
+from avaliacoes.management.models import Colaborador,Avaliacao,Ambiente,Avaliado,Avaliador,HistoricoAlteracao
+from avaliacoes.datacalc.models import Periodo
 from datetime import datetime
 from django.utils import timezone
 from rest_framework import generics
 from rest_framework.parsers import JSONParser
 from django.db.models import Q
-from management.utils import send_custom_email
+from avaliacoes.management.utils import send_custom_email
 # Create your views here.
 
 

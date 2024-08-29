@@ -1,0 +1,278 @@
+from datetime import datetime, timedelta  # Importa as classes necessárias
+from django.shortcuts import render
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from rest_framework.decorators import api_view
+from django.db import connections
+import pandas as pd
+import locale
+
+# @csrf_exempt
+# @api_view(['POST'])
+# def calculos_calcario(request):
+#     connection_name = 'sga'
+    
+#     # Recuperando o tipo de cálculo do corpo da requisição
+#     tipo_calculo = request.data.get('tipo_calculo')
+
+#     # Definindo as datas com base no tipo de cálculo
+#     if tipo_calculo == 'atual':
+#         data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
+#         data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
+#     elif tipo_calculo == 'mensal':
+#         data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
+#         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+#     elif tipo_calculo == 'anual':
+#         data_inicio = datetime.now().strftime('%Y-01-01 00:00:00')  # Início do ano
+#         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+#     else:
+#         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
+
+#     consulta_calcario = pd.read_sql(f"""
+#        SELECT
+#         BPROCOD, 
+#         FORMAT(BPRODATA, 'dd/MM/yyyy HH:mm:ss') AS DATA_PRODUCAO, 
+#         ESTQCOD, 
+#         ESTQAPELIDO,
+#         IBPROQUANT, 
+#         (IBPROQUANT * ISNULL(ESTQPESO, 0) / 1000.0) AS PESO,
+#         CASE
+#             WHEN CAST(BPRODATA AS time) BETWEEN '07:11:00' AND '15:10:00' THEN '1º Turno'
+#             WHEN CAST(BPRODATA AS time) BETWEEN '15:11:00' AND '23:30:00' THEN '2º Turno'
+#             WHEN CAST(BPRODATA AS time) >= '23:31:00' OR CAST(BPRODATA AS time) <= '07:10:00' THEN '3º Turno'
+#             ELSE 'Fora do turno'
+#         END AS TURNO
+#         FROM BAIXAPRODUCAO
+#         JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
+#         JOIN ESTOQUE ON ESTQCOD = IBPROREF
+#         LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+#         WHERE BPRODATA BETWEEN 
+#             '{data_inicio}' 
+#             AND '{data_fim}' 
+#         AND BPROEMP = 1
+#         AND BPROFIL = 0
+#         AND BPROSIT = 1
+#         AND IBPROTIPO = 'D'
+#         AND BPROEP = 6
+#         ORDER BY BPRODATA, BPROCOD, ESTQAPELIDO, PESO;
+#     """, connections[connection_name])
+
+#     total_calcario = round(consulta_calcario['PESO'].sum(), 1)
+#     total_calcario = locale.format_string("%.2f", total_calcario, grouping=True)
+
+#     response_data = {
+#         'total_calcario': total_calcario,
+#         'tipo_calculo': tipo_calculo,
+#     }
+
+#     return JsonResponse(response_data, safe=False)
+
+# @csrf_exempt
+# @api_view(['POST'])
+# def calculos_produtos(request):
+#     connection_name = 'sga'
+    
+#     # Recuperando o tipo de cálculo do corpo da requisição
+#     tipo_calculo = request.data.get('tipo_calculo')
+
+#     # Definindo as datas com base no tipo de cálculo
+#     if tipo_calculo == 'atual':
+#         data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
+#         data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
+#     elif tipo_calculo == 'mensal':
+#         data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
+#         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+#     elif tipo_calculo == 'anual':
+#         data_inicio = datetime.now().strftime('%Y-01-01 00:00:00')  # Início do ano
+#         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+#     else:
+#         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
+
+#     # Função para realizar a consulta com base no BPROEP
+#     def consulta_produto(bproep):
+#         return pd.read_sql(f"""
+#             SELECT SUM(IBPROQUANT * ISNULL(ESTQPESO, 0) / 1000.0) AS PESO
+#             FROM BAIXAPRODUCAO
+#             JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
+#             JOIN ESTOQUE ON ESTQCOD = IBPROREF
+#             WHERE BPRODATA BETWEEN '{data_inicio}' AND '{data_fim}'
+#             AND BPROEMP = 1 AND BPROFIL = 0 AND BPROSIT = 1
+#             AND IBPROTIPO = 'D' AND BPROEP = {bproep};
+#         """, connections[connection_name])
+
+#     # Consultas para diferentes produtos
+#     total_cal = consulta_produto(3)
+#     total_calcario = consulta_produto(6)
+#     total_fertilizante = consulta_produto(8)
+    
+#     # Formatando os resultados
+#     total_cal = locale.format_string("%.2f", total_cal['PESO'].sum(), grouping=True)
+#     total_calcario = locale.format_string("%.2f", total_calcario['PESO'].sum(), grouping=True)
+#     total_fertilizante = locale.format_string("%.2f", total_fertilizante['PESO'].sum(), grouping=True)
+
+#     response_data = {
+#         'total_cal': total_cal,
+#         'total_calcario': total_calcario,
+#         'total_fertilizante': total_fertilizante,
+#         'tipo_calculo': tipo_calculo,
+#     }
+
+#     return JsonResponse(response_data, safe=False)
+locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')  # Exemplo de locale brasileiro
+
+@csrf_exempt
+@api_view(['POST'])
+def calculos_calcario(request):
+    connection_name = 'sga'
+    
+    # Recuperando o tipo de cálculo do corpo da requisição
+    tipo_calculo = request.data.get('tipo_calculo')
+
+    # Definindo as datas com base no tipo de cálculo
+    if tipo_calculo == 'atual':
+        data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
+        data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
+    elif tipo_calculo == 'mensal':
+        data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
+        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+    elif tipo_calculo == 'anual':
+        data_inicio = datetime.now().strftime('%Y-01-01 00:00:00')  # Início do ano
+        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+    else:
+        return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
+
+    # Função para realizar a consulta com base no BPROEP
+    def consulta_produto(bproep):
+        return pd.read_sql(f"""
+            SELECT SUM(IBPROQUANT * ISNULL(ESTQPESO, 0) / 1000.0) AS PESO
+            FROM BAIXAPRODUCAO
+            JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
+            JOIN ESTOQUE ON ESTQCOD = IBPROREF
+            WHERE BPRODATA BETWEEN '{data_inicio}' AND '{data_fim}'
+            AND BPROEMP = 1 AND BPROFIL = 0 AND BPROSIT = 1
+            AND IBPROTIPO = 'D' AND BPROEP = {bproep};
+        """, connections[connection_name])
+
+    # Consultas para diferentes produtos com BPROEP fixos
+    produtos = {
+        'cal': consulta_produto(3),
+        'calcario': consulta_produto(6),
+        'fertilizante': consulta_produto(8),
+        'argamassa': consulta_produto(1),
+        # 'produto4': consulta_produto(4),
+        # 'produto9': consulta_produto(9),
+    }
+
+    # Formatando os resultados
+    for key in produtos:
+        produtos[key] = locale.format_string("%.2f", produtos[key]['PESO'].sum(), grouping=True)
+
+    # Adicionando a nova consulta
+    consulta_rom = pd.read_sql(f"""
+        SELECT 
+            C.PPDADOCHAR CLIMA, 
+            M.PPDADOCHAR MATERIAL, 
+            SUM(CAL.P) CAL, 
+            SUM(CALCARIO.P) CALCARIO, 
+            SUM(DPRHRPROD) HR, 
+            (ISNULL(SUM(CAL.P), 0) + ISNULL(SUM(CALCARIO.P), 0)) / CASE WHEN SUM(DPRHRPROD) = 0 THEN 1 ELSE SUM(DPRHRPROD) END TN_HR
+        FROM DIARIAPROD DPR
+        LEFT OUTER JOIN PESPARAMETRO C ON C.PPTPP = 4 AND C.PPREF = DPR.DPRCOD 
+        LEFT OUTER JOIN PESPARAMETRO M ON M.PPTPP = 5 AND M.PPREF = DPR.DPRCOD 
+        OUTER APPLY(
+            SELECT SUM(ADTRPESOTOT) P 
+            FROM ALIMDIARIATRANSP
+            JOIN ITEMDIARIATRANSP ON IDTRCOD = ADTRIDTR
+            JOIN DIARIATRANSP ON DTRCOD = IDTRDTR
+            JOIN LOCAL LD ON LD.LOCCOD = ADTRLOC
+            JOIN PRODUCAOPRODUTO ON PPROCOD = LOCPPRO
+            WHERE DTRSIT = 1
+            AND IDTRTIPODEST = 1
+            AND DTREMP = DPR.DPREMP
+            AND DTRFIL = DPR.DPRFIL
+            AND IDTRDPR = DPR.DPRCOD
+            AND CAST(DTRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+            AND PPROCOD = 4) CAL
+        OUTER APPLY(
+            SELECT SUM(ADTRPESOTOT) P 
+            FROM ALIMDIARIATRANSP
+            JOIN ITEMDIARIATRANSP ON IDTRCOD = ADTRIDTR
+            JOIN DIARIATRANSP ON DTRCOD = IDTRDTR
+            JOIN LOCAL LD ON LD.LOCCOD = ADTRLOC
+            JOIN PRODUCAOPRODUTO ON PPROCOD = LOCPPRO
+            WHERE DTRSIT = 1
+            AND IDTRTIPODEST = 1
+            AND DTREMP = DPR.DPREMP
+            AND DTRFIL = DPR.DPRFIL
+            AND IDTRDPR = DPR.DPRCOD
+            AND CAST(DTRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+            AND PPROCOD = 5) CALCARIO
+        WHERE DPRSIT = 1
+        AND DPREMP = 1
+        AND DPRFIL = 0
+        AND CAST(DPRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND DPREQP = 66
+        GROUP BY C.PPDADOCHAR, M.PPDADOCHAR
+    """, connections[connection_name])
+
+    #REBRITAGEM
+
+    consulta_volume_britado = pd.read_sql(f"""
+        SELECT 0 TIPO, DPRCOD, DPRREF, EQPCOD, EQPNOME, LOCCOD, LOCNOME, SUM(ADPRPESOTOT) TOTAL, (DPRHROPER) TOTAL_HORAS FROM ALIMDIARIAPROD
+            JOIN DIARIAPROD ON DPRCOD = ADPRDPR
+            JOIN LOCAL LD ON LD.LOCCOD = ADPRLOC
+            JOIN EQUIPAMENTO ON EQPCOD = DPREQP
+            WHERE DPRSIT = 1
+            AND DPREMP = 1
+            AND DPRFIL = 0
+            AND CAST(DPRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+            AND ADPRLOC <> 0
+
+            GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHROPER
+
+            UNION
+
+            SELECT 0 TIPO, DPRCOD, DPRREF, EQPCOD, EQPNOME, LOCCOD, LOCNOME, SUM(ADTRPESOTOT) TOTAL, (DPRHRPROD) TOTAL_HORAS FROM ALIMDIARIATRANSP
+            JOIN ITEMDIARIATRANSP ON IDTRCOD = ADTRIDTR
+            JOIN DIARIATRANSP ON DTRCOD = IDTRDTR
+            JOIN LOCAL LD ON LD.LOCCOD = ADTRLOC
+            JOIN DIARIAPROD ON DPRCOD = IDTRDPR
+            JOIN EQUIPAMENTO ON EQPCOD = DPREQP
+            WHERE DTRSIT = 1
+            AND CAST(DTRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+            AND IDTRTIPODEST = 1
+            AND DTREMP = 1
+            AND DTRFIL = 0
+
+            GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHRPROD
+
+            ORDER BY 5,7
+                             """,connections[connection_name])
+    
+    volume_britado_por_loc = round((consulta_volume_britado.groupby('LOCCOD')['TOTAL'].sum()),2)
+
+    # Somando os valores dos códigos 44, 62 e 66
+    volume_britado_total = round(volume_britado_por_loc.loc[[44, 62, 66]].sum(),2)
+    volume_britado_total = locale.format_string("%.2f",volume_britado_total,grouping=True)
+    # Convertendo para dicionário para serialização
+    volume_britado_dict = volume_britado_por_loc.to_dict()
+    
+    producao_britador = round(volume_britado_por_loc.loc[[44, 62]].sum(),2)
+    producao_britador = locale.format_string("%.2f",producao_britador,grouping=True)
+    
+
+    rom_calcario_dia = round(consulta_rom['CALCARIO'].sum(),2)
+    rom_cal_dia = round(consulta_rom['CAL'].sum(),2)
+    vol_brit = rom_cal_dia + rom_calcario_dia
+    vol_brit = locale.format_string("%.2f",vol_brit,grouping=True)    
+
+    response_data = {
+        'producao_britador': producao_britador,
+        'volume_britado_total': volume_britado_total,
+        'volume_britado': volume_britado_dict,
+        'vol_brit':vol_brit,
+        'resultados': produtos,
+        'tipo_calculo': tipo_calculo,
+    }
+
+    return JsonResponse(response_data, safe=False)

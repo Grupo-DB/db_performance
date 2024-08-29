@@ -10,7 +10,7 @@ import locale
 @csrf_exempt
 @api_view(['GET'])
 def calculos_cal(request):
-    connection_name = 'sga_db'
+    connection_name = 'sga'
     consulta_ultimo_dia_azbe = pd.read_sql(f"""
 
         SELECT
