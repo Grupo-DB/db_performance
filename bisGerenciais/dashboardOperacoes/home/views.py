@@ -165,7 +165,7 @@ def calculos_calcario(request):
 
     # Formatando os resultados
     for key in produtos:
-        produtos[key] = locale.format_string("%.2f", produtos[key]['PESO'].sum(), grouping=True)
+        produtos[key] = locale.format_string("%.0f", produtos[key]['PESO'].sum(), grouping=True)
 
     # Adicionando a nova consulta
     consulta_rom = pd.read_sql(f"""
@@ -248,31 +248,44 @@ def calculos_calcario(request):
 
             ORDER BY 5,7
                              """,connections[connection_name])
+
     
-    volume_britado_por_loc = round((consulta_volume_britado.groupby('LOCCOD')['TOTAL'].sum()),2)
+    #volume_britado_por_loc = locale.format_string("%.2f",consulta_volume_britado.groupby('LOCCOD')['TOTAL'].sum(),grouping=True)
+  
+    # Primeiro, arredonde os valores da Series para 2 casas decimais
+    volume_britado_por_loc = consulta_volume_britado.groupby('LOCCOD')['TOTAL'].sum().round(0)
+
+    # Em seguida, aplique a formatação local a cada valor da Series
+    volume_britado_por_loc_formatado = volume_britado_por_loc.apply(lambda x: locale.format_string("%.0f", x, grouping=True))
+
+    volume_britado_por_loc_formatado = volume_britado_por_loc_formatado.to_dict()
+    
+
+
 
     # Somando os valores dos códigos 44, 62 e 66
     volume_britado_total = round(volume_britado_por_loc.loc[[44, 62, 66]].sum(),2)
-    volume_britado_total = locale.format_string("%.2f",volume_britado_total,grouping=True)
+    volume_britado_total = locale.format_string("%.0f",volume_britado_total,grouping=True)
     # Convertendo para dicionário para serialização
     volume_britado_dict = volume_britado_por_loc.to_dict()
     
     producao_britador = round(volume_britado_por_loc.loc[[44, 62]].sum(),2)
-    producao_britador = locale.format_string("%.2f",producao_britador,grouping=True)
+    producao_britador = locale.format_string("%.0f",producao_britador,grouping=True)
     
 
     rom_calcario_dia = round(consulta_rom['CALCARIO'].sum(),2)
     rom_cal_dia = round(consulta_rom['CAL'].sum(),2)
     vol_brit = rom_cal_dia + rom_calcario_dia
-    vol_brit = locale.format_string("%.2f",vol_brit,grouping=True)    
+    vol_brit = locale.format_string("%.0f",vol_brit,grouping=True)    
 
     response_data = {
         'producao_britador': producao_britador,
         'volume_britado_total': volume_britado_total,
-        'volume_britado': volume_britado_dict,
+        
         'vol_brit':vol_brit,
         'resultados': produtos,
         'tipo_calculo': tipo_calculo,
+        'volume_britado':volume_britado_por_loc_formatado
     }
 
     return JsonResponse(response_data, safe=False)
