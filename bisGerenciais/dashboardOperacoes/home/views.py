@@ -7,117 +7,7 @@ from django.db import connections
 import pandas as pd
 import locale
 
-# @csrf_exempt
-# @api_view(['POST'])
-# def calculos_calcario(request):
-#     connection_name = 'sga'
-    
-#     # Recuperando o tipo de cálculo do corpo da requisição
-#     tipo_calculo = request.data.get('tipo_calculo')
 
-#     # Definindo as datas com base no tipo de cálculo
-#     if tipo_calculo == 'atual':
-#         data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
-#         data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
-#     elif tipo_calculo == 'mensal':
-#         data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
-#         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
-#     elif tipo_calculo == 'anual':
-#         data_inicio = datetime.now().strftime('%Y-01-01 00:00:00')  # Início do ano
-#         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
-#     else:
-#         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
-
-#     consulta_calcario = pd.read_sql(f"""
-#        SELECT
-#         BPROCOD, 
-#         FORMAT(BPRODATA, 'dd/MM/yyyy HH:mm:ss') AS DATA_PRODUCAO, 
-#         ESTQCOD, 
-#         ESTQAPELIDO,
-#         IBPROQUANT, 
-#         (IBPROQUANT * ISNULL(ESTQPESO, 0) / 1000.0) AS PESO,
-#         CASE
-#             WHEN CAST(BPRODATA AS time) BETWEEN '07:11:00' AND '15:10:00' THEN '1º Turno'
-#             WHEN CAST(BPRODATA AS time) BETWEEN '15:11:00' AND '23:30:00' THEN '2º Turno'
-#             WHEN CAST(BPRODATA AS time) >= '23:31:00' OR CAST(BPRODATA AS time) <= '07:10:00' THEN '3º Turno'
-#             ELSE 'Fora do turno'
-#         END AS TURNO
-#         FROM BAIXAPRODUCAO
-#         JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
-#         JOIN ESTOQUE ON ESTQCOD = IBPROREF
-#         LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
-#         WHERE BPRODATA BETWEEN 
-#             '{data_inicio}' 
-#             AND '{data_fim}' 
-#         AND BPROEMP = 1
-#         AND BPROFIL = 0
-#         AND BPROSIT = 1
-#         AND IBPROTIPO = 'D'
-#         AND BPROEP = 6
-#         ORDER BY BPRODATA, BPROCOD, ESTQAPELIDO, PESO;
-#     """, connections[connection_name])
-
-#     total_calcario = round(consulta_calcario['PESO'].sum(), 1)
-#     total_calcario = locale.format_string("%.2f", total_calcario, grouping=True)
-
-#     response_data = {
-#         'total_calcario': total_calcario,
-#         'tipo_calculo': tipo_calculo,
-#     }
-
-#     return JsonResponse(response_data, safe=False)
-
-# @csrf_exempt
-# @api_view(['POST'])
-# def calculos_produtos(request):
-#     connection_name = 'sga'
-    
-#     # Recuperando o tipo de cálculo do corpo da requisição
-#     tipo_calculo = request.data.get('tipo_calculo')
-
-#     # Definindo as datas com base no tipo de cálculo
-#     if tipo_calculo == 'atual':
-#         data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
-#         data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
-#     elif tipo_calculo == 'mensal':
-#         data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
-#         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
-#     elif tipo_calculo == 'anual':
-#         data_inicio = datetime.now().strftime('%Y-01-01 00:00:00')  # Início do ano
-#         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
-#     else:
-#         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
-
-#     # Função para realizar a consulta com base no BPROEP
-#     def consulta_produto(bproep):
-#         return pd.read_sql(f"""
-#             SELECT SUM(IBPROQUANT * ISNULL(ESTQPESO, 0) / 1000.0) AS PESO
-#             FROM BAIXAPRODUCAO
-#             JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
-#             JOIN ESTOQUE ON ESTQCOD = IBPROREF
-#             WHERE BPRODATA BETWEEN '{data_inicio}' AND '{data_fim}'
-#             AND BPROEMP = 1 AND BPROFIL = 0 AND BPROSIT = 1
-#             AND IBPROTIPO = 'D' AND BPROEP = {bproep};
-#         """, connections[connection_name])
-
-#     # Consultas para diferentes produtos
-#     total_cal = consulta_produto(3)
-#     total_calcario = consulta_produto(6)
-#     total_fertilizante = consulta_produto(8)
-    
-#     # Formatando os resultados
-#     total_cal = locale.format_string("%.2f", total_cal['PESO'].sum(), grouping=True)
-#     total_calcario = locale.format_string("%.2f", total_calcario['PESO'].sum(), grouping=True)
-#     total_fertilizante = locale.format_string("%.2f", total_fertilizante['PESO'].sum(), grouping=True)
-
-#     response_data = {
-#         'total_cal': total_cal,
-#         'total_calcario': total_calcario,
-#         'total_fertilizante': total_fertilizante,
-#         'tipo_calculo': tipo_calculo,
-#     }
-
-#     return JsonResponse(response_data, safe=False)
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')  # Exemplo de locale brasileiro
 
 @csrf_exempt
@@ -253,8 +143,8 @@ def calculos_calcario(request):
     #volume_britado_por_loc = locale.format_string("%.2f",consulta_volume_britado.groupby('LOCCOD')['TOTAL'].sum(),grouping=True)
   
     # Primeiro, arredonde os valores da Series para 2 casas decimais
-    volume_britado_por_loc = consulta_volume_britado.groupby('LOCCOD')['TOTAL'].sum().round(0)
-
+    volume_britado_por_loc = consulta_volume_britado.groupby('LOCCOD')['TOTAL'].sum()
+    volume_britado_por_loc = volume_britado_por_loc.reindex([44, 62, 66], fill_value=0)
     # Em seguida, aplique a formatação local a cada valor da Series
     volume_britado_por_loc_formatado = volume_britado_por_loc.apply(lambda x: locale.format_string("%.0f", x, grouping=True))
 
@@ -265,6 +155,7 @@ def calculos_calcario(request):
 
     # Somando os valores dos códigos 44, 62 e 66
     volume_britado_total = round(volume_britado_por_loc.loc[[44, 62, 66]].sum(),2)
+    
     volume_britado_total = locale.format_string("%.0f",volume_britado_total,grouping=True)
     # Convertendo para dicionário para serialização
     volume_britado_dict = volume_britado_por_loc.to_dict()

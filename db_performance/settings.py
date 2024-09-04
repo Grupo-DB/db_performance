@@ -46,7 +46,8 @@ INSTALLED_APPS = [
     'notifications',
     'avaliacoes.datacalc',
     'bisGerenciais.cal',
-    'bisGerenciais.dashboardOperacoes.home'
+    'bisGerenciais.dashboardOperacoes.home',
+    'bisGerenciais.dashboardOperacoes.britagem'
 
 ]
 

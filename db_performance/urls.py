@@ -12,6 +12,8 @@ urlpatterns = [
     path('datacalc/', include('avaliacoes.datacalc.urls')),
     path('cal/', include('bisGerenciais.cal.urls')),
     path('home/', include('bisGerenciais.dashboardOperacoes.home.urls')),
+    path('britagem/', include('bisGerenciais.dashboardOperacoes.britagem.urls')),
+
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
