@@ -59,7 +59,7 @@ def calculos_britagem(request):
     JOIN EVENTODIARIA ON EVDCOD = EDPREVD
 
     WHERE 
-    CAST(DPRDATA1 as date) BETWEEN '2024-09-01 ' AND '2024-09-03'
+    CAST(DPRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
     AND DPRSIT = 1
     AND DPREMP =1
     AND DPRFIL = 0
@@ -431,7 +431,7 @@ GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
         (consulta_mov['PPROCOD'].isin([1,2,21]))
     )
 ]
-    mina_britador = round(mina_britador['PESO'].sum(),1)
+    mina_britador = round(mina_britador['PESO'].sum(),1) or 0
     mina_britador = locale.format_string("%.0f",mina_britador,grouping=True)
 
     ####################----MINA ESTOQUE---------------------####################################
@@ -450,7 +450,7 @@ GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
         (consulta_mov['PPROCOD'].isin([1,2,21]))
     )
 ]
-    mina_estoque = round(mina_estoque['PESO'].sum(),1)
+    mina_estoque = round(mina_estoque['PESO'].sum(),1) or 0
     mina_estoque = locale.format_string("%.0f",mina_estoque,grouping=True)
 
         ####################----ESTOQUE--BRITADOR---------------------####################################
@@ -469,7 +469,7 @@ GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
         (consulta_mov['PPROCOD'].isin([1,2,21]))
     )
 ]
-    estoque_britador = round(estoque_britador['PESO'].sum(),1)
+    estoque_britador = round(estoque_britador['PESO'].sum(),1) or 0
     estoque_britador = locale.format_string("%.0f",estoque_britador,grouping=True)
 
 ###########--------MINA---REJEITO---------------###############################################################
@@ -489,7 +489,7 @@ GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
             (consulta_mov['PPROCOD'] == 3)
         )
     ]
-    mina_rejeito = round(mina_rejeito['PESO'].sum(),1)
+    mina_rejeito = round(mina_rejeito['PESO'].sum(),1) or 0
     mina_rejeito = locale.format_string("%.0f",mina_rejeito,grouping=True)
 
     
@@ -609,6 +609,16 @@ def calculos_graficos(request):
             dias_no_mes = (consulta_volume_britado['DPRDATA1'].max().replace(day=1) + pd.DateOffset(months=1) - pd.DateOffset(days=1)).day
 
             if dias_corridos > 0:
+                volume_ultimo_dia_loc_44 = consulta_volume_britado[(consulta_volume_britado['LOCCOD'] == 44) & (consulta_volume_britado['DIA'] == dias_corridos)]
+                volume_ultimo_dia_loc_62 = consulta_volume_britado[(consulta_volume_britado['LOCCOD'] == 62) & (consulta_volume_britado['DIA'] == dias_corridos)]
+
+                 # Total do último dia
+                total_ultimo_dia_calcario = volume_ultimo_dia_loc_44['TOTAL'].sum()
+                total_ultimo_dia_calcario = locale.format_string("%.0f", total_ultimo_dia_calcario, grouping=True)
+
+                total_ultimo_dia_cal = volume_ultimo_dia_loc_62['TOTAL'].sum()
+                total_ultimo_dia_cal = locale.format_string("%.0f", total_ultimo_dia_cal, grouping=True)
+
                 # Projeção Calcário (LOCCOD 44)
                 producao_acumulada_calcario = volume_diario_loc_44['TOTAL'].sum()
                 projecao_calcario = (producao_acumulada_calcario / dias_corridos) * dias_no_mes
@@ -628,7 +638,9 @@ def calculos_graficos(request):
                 'media_diaria_calcario': media_diaria_calcario,
                 'media_diaria_cal': media_diaria_cal,
                 'projecao_calcario': projecao_calcario,
-                'projecao_cal': projecao_cal
+                'projecao_cal': projecao_cal,
+                'total_ultimo_dia_calcario': total_ultimo_dia_calcario,
+                'total_ultimo_dia_cal': total_ultimo_dia_cal
             }
 
         # Quebrando o cálculo anual em meses
@@ -653,6 +665,16 @@ def calculos_graficos(request):
             meses_no_ano = 12  # Número total de meses no ano
 
             if meses_corridos > 0:
+                volume_ultimo_mes_loc_44 = consulta_volume_britado[(consulta_volume_britado['LOCCOD'] == 44) & (consulta_volume_britado['MES'] == meses_corridos)]
+                volume_ultimo_mes_loc_62 = consulta_volume_britado[(consulta_volume_britado['LOCCOD'] == 62) & (consulta_volume_britado['MES'] == meses_corridos)]
+
+                # Total do último mes
+                total_ultimo_mes_calcario = volume_ultimo_mes_loc_44['TOTAL'].sum()
+                total_ultimo_mes_calcario = locale.format_string("%.0f", total_ultimo_mes_calcario, grouping=True)
+
+                total_ultimo_mes_cal = volume_ultimo_mes_loc_62['TOTAL'].sum()
+                total_ultimo_mes_cal = locale.format_string("%.0f", total_ultimo_mes_cal, grouping=True)
+
                 # Projeção Calcário (LOCCOD 44)
                 producao_acumulada_calcario = volume_mensal_loc_44['TOTAL'].sum()
                 projecao_anual_calcario = (producao_acumulada_calcario / meses_corridos) * meses_no_ano
@@ -672,7 +694,10 @@ def calculos_graficos(request):
                 'media_mensal_calcario': media_mensal_calcario,
                 'media_mensal_cal': media_mensal_cal,
                 'projecao_anual_calcario': projecao_anual_calcario,
-                'projecao_anual_cal': projecao_anual_cal
+                'projecao_anual_cal': projecao_anual_cal,
+                #'meses_corridos': meses_corridos,
+                'total_ultimo_mes_calcario': total_ultimo_mes_calcario,
+                'total_ultimo_mes_cal': total_ultimo_mes_cal
             }
 
     # Calcular volumes por local

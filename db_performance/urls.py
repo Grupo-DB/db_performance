@@ -13,6 +13,8 @@ urlpatterns = [
     path('cal/', include('bisGerenciais.cal.urls')),
     path('home/', include('bisGerenciais.dashboardOperacoes.home.urls')),
     path('britagem/', include('bisGerenciais.dashboardOperacoes.britagem.urls')),
+    path('rebritagem/', include('bisGerenciais.dashboardOperacoes.rebritagem.urls')),
+    path('calcario/', include('bisGerenciais.dashboardOperacoes.calcario.urls')),
 
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

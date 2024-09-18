@@ -47,7 +47,9 @@ INSTALLED_APPS = [
     'avaliacoes.datacalc',
     'bisGerenciais.cal',
     'bisGerenciais.dashboardOperacoes.home',
-    'bisGerenciais.dashboardOperacoes.britagem'
+    'bisGerenciais.dashboardOperacoes.britagem',
+    'bisGerenciais.dashboardOperacoes.rebritagem',
+    'bisGerenciais.dashboardOperacoes.calcario'
 
 ]
 
