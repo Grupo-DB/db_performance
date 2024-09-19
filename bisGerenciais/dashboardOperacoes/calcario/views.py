@@ -32,7 +32,7 @@ def calculos_calcario(request):
     else:
         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
 
-    consulta_fcm1 = pd.read_sql(f"""
+    consulta_fcm = pd.read_sql(f"""
 
             SELECT BPROCOD, BPRODATA, ESTQCOD, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
                 IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
@@ -55,20 +55,61 @@ def calculos_calcario(request):
             """,connections[connection_name])
 
     #KPI´S
-    total_fcm1 = consulta_fcm1['PESO'].sum()
-    total_fcm1_formatado = locale.format_string("%.0f",total_fcm1,grouping=True)
+    total_fcm = consulta_fcm['PESO'].sum()
+    total_fcm_formatado = locale.format_string("%.0f",total_fcm,grouping=True)
 
     #HS
-    tot_hs_dia = consulta_fcm1['BPROHRPROD'].sum()
-    if tot_hs_dia != 0 :
-        tn_hora_dia_fcm1 = total_fcm1 / tot_hs_dia
+    tot_hs = consulta_fcm['BPROHRPROD'].sum()
+    if tot_hs != 0 :
+        tn_hora = total_fcm / tot_hs
     else:
-        tn_hora_dia_fcm1 = 0
-    tn_hora_dia_fcm1 = locale.format_string("%.2f",tn_hora_dia_fcm1,grouping=True)
+        tn_hora = 0
+    tn_hora = locale.format_string("%.2f",tn_hora,grouping=True)
+    tot_hs = locale.format_string("%.2f",tot_hs,grouping=True)
+
+########----------------MOVIMENTACAO DE CARGA----------############################################
+
+    consulta_movimentacao = pd.read_sql(f"""
+    SELECT CLINOME, CLICOD, TRANNOME, TRANCOD, NFPLACA, ESTUF, NFPED, NFNUM, SDSSERIE, NFDATA, 
+
+        ESTQCOD, ESTQNOME, ESPSIGLA,
+
+        ((INFQUANT * INFPESO) /1000) QUANT, 
+        (INFTOTAL / (NFTOTPRO + NFTOTSERV) * (NFTOTPRO + NFTOTSERV)) TOTAL_PRODUTO,
+        (INFTOTAL / (NFTOTPRO + NFTOTSERV) * NFTOTAL) TOTAL,
+        INFDAFRETE FRETE
+
+        FROM NOTAFISCAL
+        JOIN SERIEDOCSAIDA ON SDSCOD = NFSNF
+        JOIN NATUREZAOPERACAO ON NOPCOD = NFNOP
+        JOIN CLIENTE ON CLICOD = NFCLI
+        JOIN ITEMNOTAFISCAL ON INFNFCOD = NFCOD 
+        JOIN ESTOQUE ON ESTQCOD = INFESTQ
+        JOIN ESPECIE ON ESPCOD = ESTQESP
+        LEFT OUTER JOIN TRANSPORTADOR ON TRANCOD = NFTRAN
+        LEFT OUTER JOIN PEDIDO ON PEDNUM = INFPED
+        LEFT OUTER JOIN ESTADO ON ESTCOD = NFEST
+
+        WHERE NFSIT = 1
+        AND NFSNF NOT IN (8) -- Serie Acerto
+        AND NFEMP = 1
+        AND NFFIL = 0
+        AND NOPFLAGNF LIKE '_S%'
+        AND CAST (NFDATA as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND ESTQCOD IN (1,4,5,104,37,2785)
+
+    ORDER BY NFDATA, NFNUM                            
+                 """,connections[connection_name])    
+
+    #KPI'S
+    total_movimentacao = consulta_movimentacao['QUANT'].sum()
+    total_movimentacao = locale.format_string("%.0f",total_movimentacao, grouping=True)
 
     response_data = {
-        'total_fcm1':total_fcm1_formatado,
-        'tn_hora_dia_fcm1':tn_hora_dia_fcm1
+        'total_fcm':total_fcm_formatado,
+        'tn_hora':tn_hora,
+        'total_movimentacao':total_movimentacao,
+        'tot_hs':tot_hs
     }
 
     return JsonResponse(response_data)
