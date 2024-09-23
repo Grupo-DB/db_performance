@@ -6,7 +6,7 @@ from rest_framework.decorators import api_view
 from django.db import connections
 import pandas as pd
 import locale
-
+import numpy as np
 
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')  # Exemplo de locale brasileiro
 
@@ -433,7 +433,6 @@ GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
 ]
     mina_britador = round(mina_britador['PESO'].sum(),1) or 0
     mina_britador = locale.format_string("%.0f",mina_britador,grouping=True)
-
     ####################----MINA ESTOQUE---------------------####################################
     mina_estoque = consulta_mov.loc[
     (
@@ -496,23 +495,23 @@ GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
 ################---------CONTEXT--------------###########################
 
     response_data = {
-        'alimentador_desligado_percentual':alimentador_desligado_percentual,
+        'alimentador_desligado_percentual': alimentador_desligado_percentual.tolist() if isinstance(alimentador_desligado_percentual, np.ndarray) else alimentador_desligado_percentual,
         'alimentador_desligado_tempo':alimentador_desligado_tempo,
-        'evento_nao_informado_percentual':evento_nao_informado_percentual,
+        'evento_nao_informado_percentual':evento_nao_informado_percentual.tolist() if isinstance(evento_nao_informado_percentual, np.ndarray) else evento_nao_informado_percentual,
         'evento_nao_informado_tempo':evento_nao_informado_tempo,
-        'preparando_local_percentual':preparando_local_percentual,
+        'preparando_local_percentual':preparando_local_percentual.tolist() if isinstance(preparando_local_percentual, np.ndarray) else preparando_local_percentual,
         'preparando_local_tempo':preparando_local_tempo,
-        'esperando_demanda_percentual':esperando_demanda_percentual,
+        'esperando_demanda_percentual':esperando_demanda_percentual.tolist() if isinstance(esperando_demanda_percentual, np.ndarray) else esperando_demanda_percentual,
         'esperando_demanda_tempo':esperando_demanda_tempo,
-        'materiaprima_percentual':materiaprima_percentual,
+        'materiaprima_percentual':materiaprima_percentual.tolist() if isinstance(materiaprima_percentual, np.ndarray) else materiaprima_percentual,
         'materiaprima_tempo':materiaprima_tempo,
-        'setup_percentual':setup_percentual,
+        'setup_percentual':setup_percentual.tolist() if isinstance(setup_percentual, np.ndarray) else setup_percentual,
         'setup_tempo':setup_tempo,
-        'embuchamento_desarme_percentual':embuchamento_desarme_percentual,
+        'embuchamento_desarme_percentual':embuchamento_desarme_percentual.tolist() if isinstance(embuchamento_desarme_percentual, np.ndarray) else embuchamento_desarme_percentual,
         'embuchamento_desarme_tempo':embuchamento_desarme_tempo,
-        'embuchamento_rompedor_percentual':embuchamento_rompedor_percentual,
+        'embuchamento_rompedor_percentual':embuchamento_rompedor_percentual.tolist() if isinstance(embuchamento_rompedor_percentual, np.ndarray) else embuchamento_rompedor_percentual,
         'embuchamento_rompedor_tempo':embuchamento_rompedor_tempo,
-        'almoco_janta_percentual':almoco_janta_percentual,
+        'almoco_janta_percentual':almoco_janta_percentual.tolist() if isinstance(almoco_janta_percentual,np.ndarray) else almoco_janta_percentual,
         'almoco_janta_tempo': almoco_janta_tempo,
         'mina_britador':mina_britador,
         'mina_estoque':mina_estoque,
