@@ -156,8 +156,7 @@ def calculos_graficos_calcario(request):
                 AND BPROSIT = 1
                 AND IBPROTIPO = 'D'
                 AND BPROEP = 6
-                AND EQPLOC = '{fabrica}'
-
+                
                 ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
             """,connections[connection_name])
 
@@ -173,10 +172,20 @@ def calculos_graficos_calcario(request):
     if tipo_calculo == 'mensal':
         consulta_fcm['DIA'] = consulta_fcm['BPRODATA'].dt.day
 
+        #Função para preencher em caso de dias faltantes
+        def preencher_dias_faltantes(volume_df):
+            dias_completos = pd.DataFrame({'DIA': range(1, 32)})
+            return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0)
+
         #calculo do volume acumulado das tres fabricas
         volume_diario_fcmi_df = consulta_fcm[consulta_fcm['EQPLOC'] == 23].groupby('DIA')['PESO'].sum().reset_index()
         volume_diario_fcmii_df = consulta_fcm[consulta_fcm['EQPLOC'] == 24].groupby('DIA')['PESO'].sum().reset_index()
         volume_diario_fcmiii_df = consulta_fcm[consulta_fcm['EQPLOC'] == 25].groupby('DIA')['PESO'].sum().reset_index()
+
+        # Preencher dias faltantes com 0 para cada fábrica
+        volume_diario_fcmi_df = preencher_dias_faltantes(volume_diario_fcmi_df)
+        volume_diario_fcmii_df = preencher_dias_faltantes(volume_diario_fcmii_df)
+        volume_diario_fcmiii_df = preencher_dias_faltantes(volume_diario_fcmiii_df)
 
         #médias diárias
         media_diaria_fcmi = volume_diario_fcmi_df['PESO'].mean()
@@ -186,7 +195,22 @@ def calculos_graficos_calcario(request):
         media_diaria_fcmii = locale.format_string("%.0f",media_diaria_fcmii, grouping=True)
 
         media_diaria_fcmiii = volume_diario_fcmiii_df['PESO'].mean()
-        media_diaria_fcmiii = locale.format_string("%.0f",media_diaria_fcmiii, grouping=True)     
+        media_diaria_fcmiii = locale.format_string("%.0f",media_diaria_fcmiii, grouping=True) 
+
+
+        # Somando os volumes diários de todas as fábricas
+        volume_diario_total = volume_diario_fcmi_df['PESO'].sum() + volume_diario_fcmii_df['PESO'].sum() + volume_diario_fcmiii_df['PESO'].sum()
+
+        # Calculando o número total de entradas (dias de produção)
+        total_entradas = len(volume_diario_fcmi_df) + len(volume_diario_fcmii_df) + len(volume_diario_fcmiii_df)
+
+        # Calculando a média agregada de todas as fábricas
+        if total_entradas > 0:
+            media_diaria_agregada = volume_diario_total / total_entradas
+            media_diaria_agregada = locale.format_string("%.0f", media_diaria_agregada, grouping=True)
+        else:
+            media_diaria_agregada = 0
+
          # Calculando projeção
         dias_corridos = consulta_fcm['DIA'].max()  # Último dia do mês em que houve produção
         dias_no_mes = (consulta_fcm['BPRODATA'].max().replace(day=1) + pd.DateOffset(months=1) - pd.DateOffset(days=1)).day
@@ -219,29 +243,52 @@ def calculos_graficos_calcario(request):
         else:
             projecao_fcmi = 0
             projecao_fcmii = 0
-            projecao_fcmiii = 0   
+            projecao_fcmiii = 0
+
+        producao_acumulada_total = producao_acumulada_fcmi + producao_acumulada_fcmii + producao_acumulada_fcmiii
+        # Projeção anual agregada
+        if dias_corridos > 0:
+            projecao_total = (producao_acumulada_total /dias_corridos) * dias_no_mes
+            projecao_total = locale.format_string("%.0f", projecao_total, grouping=True)
+        else:
+            projecao_total = 0        
             
         volume_diario = {
+            'volume_ultimo_dia_total_fcmi':volume_ultimo_dia_total_fcmi,
+            'volume_ultimo_dia_total_fcmii': volume_ultimo_dia_total_fcmii,
+            'volume_ultimo_dia_total_fcmiii':volume_ultimo_dia_total_fcmiii,
             'projecao_fcmi':projecao_fcmi,
             'projecao_fcmii':projecao_fcmii,
             'projecao_fcmiii':projecao_fcmiii,
-            'fcmi': volume_diario_fcmi_df.to_dict(orient='records'),
-            'fcmii': volume_diario_fcmii_df.to_dict(orient='records'),
-            'fcmiii': volume_diario_fcmiii_df.to_dict(orient='records'),
             'media_diaria_fcmi': media_diaria_fcmi,
             'media_diaria_fcmii': media_diaria_fcmii,
             'media_diaria_fcmiii': media_diaria_fcmiii,
-            'volume_ultimo_dia_total': volume_ultimo_dia_total
+            'volume_ultimo_dia_total': volume_ultimo_dia_total,
+            'media_diaria_agregada': media_diaria_agregada,
+            'projecao_total': projecao_total,
+            'fcmi': volume_diario_fcmi_df.to_dict(orient='records'),
+            'fcmii': volume_diario_fcmii_df.to_dict(orient='records'),
+            'fcmiii': volume_diario_fcmiii_df.to_dict(orient='records'),
         }
 
     elif tipo_calculo == 'anual':
         consulta_fcm['MES'] = consulta_fcm['BPRODATA'].dt.month
+
+        # Função para preencher os meses faltantes com 0
+        def preencher_meses_faltantes(volume_df):
+            meses_completos = pd.DataFrame({'MES': range(1, 13)})
+            return meses_completos.merge(volume_df, on='MES', how='left').fillna(0)
 
         #calculo do volume acumulado das tres fabricas
         volume_mensal_fcmi_df = consulta_fcm[consulta_fcm['EQPLOC'] == 23].groupby('MES')['PESO'].sum().reset_index()
         volume_mensal_fcmii_df = consulta_fcm[consulta_fcm['EQPLOC'] == 24].groupby('MES')['PESO'].sum().reset_index()
         volume_mensal_fcmiii_df = consulta_fcm[consulta_fcm['EQPLOC'] == 25].groupby('MES')['PESO'].sum().reset_index()
     
+         # Preencher meses faltantes com 0 para cada fábrica
+        volume_mensal_fcmi_df = preencher_meses_faltantes(volume_mensal_fcmi_df)
+        volume_mensal_fcmii_df = preencher_meses_faltantes(volume_mensal_fcmii_df)
+        volume_mensal_fcmiii_df = preencher_meses_faltantes(volume_mensal_fcmiii_df)
+
         #médias mensais
         media_mensal_fcmi = volume_mensal_fcmi_df['PESO'].mean()
         media_mensal_fcmi = locale.format_string("%.0f",media_mensal_fcmi, grouping=True)
@@ -250,7 +297,21 @@ def calculos_graficos_calcario(request):
         media_mensal_fcmii = locale.format_string("%.0f",media_mensal_fcmii, grouping=True)
 
         media_mensal_fcmiii = volume_mensal_fcmiii_df['PESO'].mean()
-        media_mensal_fcmiii = locale.format_string("%.0f",media_mensal_fcmiii, grouping=True)     
+        media_mensal_fcmiii = locale.format_string("%.0f",media_mensal_fcmiii, grouping=True)
+
+        # Somando os volumes mensais de todas as fábricas
+        volume_mensal_total = volume_mensal_fcmi_df['PESO'].sum() + volume_mensal_fcmii_df['PESO'].sum() + volume_mensal_fcmiii_df['PESO'].sum()
+
+        # Calculando o número total de entradas (dias de produção)
+        total_entradas_mensais = len(volume_mensal_fcmi_df) + len(volume_mensal_fcmii_df) + len(volume_mensal_fcmiii_df)
+
+        # Calculando a média agregada de todas as fábricas
+        if total_entradas_mensais > 0:
+            media_mensal_agregada = volume_mensal_total / total_entradas_mensais
+            media_mensal_agregada = locale.format_string("%.0f", media_mensal_agregada, grouping=True)
+        else:
+            media_mensal_agregada = 0
+
          # Calculando projeção
         meses_corridos = consulta_fcm['MES'].max()  # Último dia do mês em que houve produção
         meses_no_ano = 12
@@ -280,22 +341,33 @@ def calculos_graficos_calcario(request):
             producao_mensal_acumulada_fcmiii = volume_mensal_fcmiii_df['PESO'].sum()
             projecao_anual_fcmiii = (producao_mensal_acumulada_fcmiii / meses_corridos) * meses_no_ano
             projecao_anual_fcmiii = locale.format_string("%.0f", projecao_anual_fcmiii, grouping=True)
+         
         else:
             projecao_anual_fcmi = 0
             projecao_anual_fcmii = 0
             projecao_anual_fcmiii = 0
 
+        producao_mensal_acumulada_total = producao_mensal_acumulada_fcmi + producao_mensal_acumulada_fcmii + producao_mensal_acumulada_fcmiii
+        # Projeção anual agregada
+        if meses_corridos > 0:
+            projecao_anual_total = (producao_mensal_acumulada_total / meses_corridos) * meses_no_ano
+            projecao_anual_total = locale.format_string("%.0f", projecao_anual_total, grouping=True)
+        else:
+            projecao_anual_total = 0    
+
         volume_mensal = {
             'projecao_anual_fcmi':projecao_anual_fcmi,
             'projecao_anual_fcmii':projecao_anual_fcmii,
             'projecao_anual_fcmiii':projecao_anual_fcmiii,
-            'fcmi': volume_mensal_fcmi_df.to_dict(orient='records'),
-            'fcmii': volume_mensal_fcmii_df.to_dict(orient='records'),
-            'fcmiii': volume_mensal_fcmiii_df.to_dict(orient='records'),
             'media_mensal_fcmi': media_mensal_fcmi,
             'media_mensal_fcmii': media_mensal_fcmii,
             'media_mensal_fcmiii': media_mensal_fcmiii,
-            'volume_ultimo_mes_total': volume_ultimo_mes_total
+            'volume_ultimo_mes_total': volume_ultimo_mes_total,
+            'media_mensal_agregada': media_mensal_agregada,
+            'projecao_anual_total': projecao_anual_total,
+            'fcmi': volume_mensal_fcmi_df.to_dict(orient='records'),
+            'fcmii': volume_mensal_fcmii_df.to_dict(orient='records'),
+            'fcmiii': volume_mensal_fcmiii_df.to_dict(orient='records'),
         }
 
     response_data = {

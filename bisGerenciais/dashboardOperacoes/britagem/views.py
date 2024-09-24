@@ -590,11 +590,20 @@ def calculos_graficos(request):
             consulta_volume_britado['DIA'] = consulta_volume_britado['DPRDATA1'].dt.day
             #volume_diario = consulta_volume_britado.groupby('DIA')['TOTAL'].sum().reset_index()
 
+            #Função para preencher em caso de dias faltantes
+            def preencher_dias_faltantes(volume_df):
+                dias_completos = pd.DataFrame({'DIA': range(1, 32)})
+                return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0)
+
+
             # Calculando volume diário para LOCCOD 44 e 62
             volume_diario_loc_44 = consulta_volume_britado[consulta_volume_britado['LOCCOD'] == 44].groupby('DIA')['TOTAL'].sum().reset_index()
             volume_diario_loc_62 = consulta_volume_britado[consulta_volume_britado['LOCCOD'] == 62].groupby('DIA')['TOTAL'].sum().reset_index()
             
-        
+            # Preencher meses faltantes com 0 para cada fábrica    
+            volume_diario_loc_44 = preencher_dias_faltantes(volume_diario_loc_44)
+            volume_diario_loc_62 = preencher_dias_faltantes(volume_diario_loc_62)
+
             # Calculando a média mensal para Pedra Calcario
             media_diaria_calcario = volume_diario_loc_44['TOTAL'].mean()
             media_diaria_calcario = locale.format_string("%.0f", media_diaria_calcario, grouping=True)
@@ -647,10 +656,20 @@ def calculos_graficos(request):
             consulta_volume_britado['MES'] = consulta_volume_britado['DPRDATA1'].dt.month
             #volume_mensal = consulta_volume_britado.groupby('MES')['TOTAL'].sum().reset_index()
 
+            # Função para preencher os meses faltantes com 0
+            def preencher_meses_faltantes(volume_df):
+                meses_completos = pd.DataFrame({'MES': range(1, 13)})
+                return meses_completos.merge(volume_df, on='MES', how='left').fillna(0)    
+
+
             # Calculando volume diário para LOCCOD 44 e 62
             volume_mensal_loc_44 = consulta_volume_britado[consulta_volume_britado['LOCCOD'] == 44].groupby('MES')['TOTAL'].sum().reset_index()
             volume_mensal_loc_62 = consulta_volume_britado[consulta_volume_britado['LOCCOD'] == 62].groupby('MES')['TOTAL'].sum().reset_index()
             
+                # Preencher meses faltantes com 0 para cada fábrica
+            volume_mensal_loc_44 = preencher_meses_faltantes(volume_mensal_loc_44)
+            volume_mensal_loc_62 = preencher_meses_faltantes(volume_mensal_loc_62)
+           
             # Calculando a média mensal para Pedra Calcario
             media_mensal_calcario = volume_mensal_loc_44['TOTAL'].mean()
             media_mensal_calcario = locale.format_string("%.0f", media_mensal_calcario, grouping=True)
