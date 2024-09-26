@@ -95,8 +95,8 @@ def calculos_rebritagem_paradas(request):
 
     # Definindo as datas com base no tipo de cálculo
     if tipo_calculo == 'atual':
-        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
-        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
+        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
     elif tipo_calculo == 'mensal':
         data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
@@ -136,7 +136,7 @@ def calculos_rebritagem_paradas(request):
         AND DPREMP =1
         AND DPRFIL = 0
         AND EQPAPLIC = 'P'
-        AND EQPCOD IN (91,92)
+        AND EQPCOD =92
 
 
     GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
