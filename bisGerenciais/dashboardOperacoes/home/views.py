@@ -6,9 +6,14 @@ from rest_framework.decorators import api_view
 from django.db import connections
 import pandas as pd
 import locale
-
+from sqlalchemy import create_engine
 
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')  # Exemplo de locale brasileiro
+
+ # String de conexão
+connection_string = 'mssql+pyodbc://DBCONSULTA:DB%40%402023**@172.50.10.5/DB?driver=ODBC+Driver+17+for+SQL+Server'
+# Cria a engine
+engine = create_engine(connection_string)
 
 @csrf_exempt
 @api_view(['POST'])
@@ -20,14 +25,14 @@ def calculos_calcario(request):
 
     # Definindo as datas com base no tipo de cálculo
     if tipo_calculo == 'atual':
-        data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
-        data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
+        data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d 07:10:00')
+        data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
     elif tipo_calculo == 'mensal':
-        data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
-        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:10')  # Data atual
     elif tipo_calculo == 'anual':
-        data_inicio = datetime.now().strftime('%Y-01-01 00:00:00')  # Início do ano
-        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
     else:
         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
 
@@ -38,10 +43,10 @@ def calculos_calcario(request):
             FROM BAIXAPRODUCAO
             JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
             JOIN ESTOQUE ON ESTQCOD = IBPROREF
-            WHERE BPRODATA BETWEEN '{data_inicio}' AND '{data_fim}'
+            WHERE CAST (BPRODATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
             AND BPROEMP = 1 AND BPROFIL = 0 AND BPROSIT = 1
             AND IBPROTIPO = 'D' AND BPROEP = {bproep};
-        """, connections[connection_name])
+        """, engine)
 
     # Consultas para diferentes produtos com BPROEP fixos
     produtos = {
@@ -103,7 +108,7 @@ def calculos_calcario(request):
         AND CAST(DPRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
         AND DPREQP = 66
         GROUP BY C.PPDADOCHAR, M.PPDADOCHAR
-    """, connections[connection_name])
+    """, engine)
 
     #REBRITAGEM
 
@@ -137,7 +142,7 @@ def calculos_calcario(request):
             GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHRPROD
 
             ORDER BY 5,7
-                             """,connections[connection_name])
+                             """,engine)
 
     
     #volume_britado_por_loc = locale.format_string("%.2f",consulta_volume_britado.groupby('LOCCOD')['TOTAL'].sum(),grouping=True)

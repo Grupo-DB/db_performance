@@ -89,17 +89,17 @@ WSGI_APPLICATION = 'db_performance.wsgi.application'
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 #autenticações
 DATABASES = {
-   'sga': {
-        'ENGINE': 'mssql',
-        'NAME': 'DB',
-        'USER': 'DBCONSULTA',
-        'PASSWORD': 'DB@@2023**',
-        'HOST': '172.50.10.5',
-        'PORT': '',
-        'OPTIONS': {
-            'driver': 'ODBC Driver 17 for SQL Server',
-        }
-    },
+#    'sga': {
+#         'ENGINE': 'mssql',
+#         'NAME': 'DB',
+#         'USER': 'DBCONSULTA',
+#         'PASSWORD': 'DB@@2023**',
+#         'HOST': '172.50.10.5',
+#         'PORT': '',
+#         'OPTIONS': {
+#             'driver': 'ODBC Driver 17 for SQL Server',
+#         }
+#     },
 
     'default':{
         'ENGINE': 'django.db.backends.mysql',

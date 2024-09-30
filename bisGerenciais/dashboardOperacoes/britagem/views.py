@@ -7,9 +7,14 @@ from django.db import connections
 import pandas as pd
 import locale
 import numpy as np
+from sqlalchemy import create_engine
 
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')  # Exemplo de locale brasileiro
 
+ # String de conexão
+connection_string = 'mssql+pyodbc://DBCONSULTA:DB%40%402023**@172.50.10.5/DB?driver=ODBC+Driver+17+for+SQL+Server'
+# Cria a engine
+engine = create_engine(connection_string)
 
 @csrf_exempt
 @api_view(['POST'])
@@ -69,7 +74,7 @@ def calculos_britagem(request):
 
 GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
 
-    """,connections[connection_name])
+    """,engine)
 
     ##KPI´S PARADAS
 
@@ -412,7 +417,7 @@ GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
         
     ORDER BY 
     INICIO, FIM, DIARIA;
-            """,connections[connection_name])
+            """,engine)
     
     ###KPI´S
     ##############################-----------------MINA---BRITADOR---------------------###########################
@@ -574,7 +579,7 @@ def calculos_graficos(request):
         GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHRPROD, DTRDATA1
 
         ORDER BY 5,7
-    """, connections[connection_name])
+    """, engine)
 
     # Inicializar variáveis
     volume_diario = None
@@ -670,16 +675,30 @@ def calculos_graficos(request):
             volume_mensal_loc_44 = preencher_meses_faltantes(volume_mensal_loc_44)
             volume_mensal_loc_62 = preencher_meses_faltantes(volume_mensal_loc_62)
            
-            # Calculando a média mensal para Pedra Calcario
-            media_mensal_calcario = volume_mensal_loc_44['TOTAL'].mean()
+            # # Calculando a média mensal para Pedra Calcario
+            # media_mensal_calcario = volume_mensal_loc_44['TOTAL'].mean()
+            # media_mensal_calcario = locale.format_string("%.0f", media_mensal_calcario, grouping=True)
+
+            # # Calculando a média mensal para Pedra Cal
+            # media_mensal_cal = volume_mensal_loc_62['TOTAL'].mean()
+            # media_mensal_cal = locale.format_string("%.0f", media_mensal_cal, grouping=True)
+
+            # Pegando o mês atual (corridos)
+            mes_corrente = datetime.now().month
+
+            # Somar o volume mensal sem incluir os meses futuros
+            volume_mensal_loc_44_filtrado = volume_mensal_loc_44[volume_mensal_loc_44['MES'] <= mes_corrente]
+            volume_mensal_loc_62_filtrado = volume_mensal_loc_62[volume_mensal_loc_62['MES'] <= mes_corrente]
+
+            # Médias mensais baseadas nos meses já passados
+            media_mensal_calcario = volume_mensal_loc_44_filtrado['TOTAL'].sum() / mes_corrente
             media_mensal_calcario = locale.format_string("%.0f", media_mensal_calcario, grouping=True)
 
-            # Calculando a média mensal para Pedra Cal
-            media_mensal_cal = volume_mensal_loc_62['TOTAL'].mean()
+            media_mensal_cal = volume_mensal_loc_62_filtrado['TOTAL'].sum() / mes_corrente
             media_mensal_cal = locale.format_string("%.0f", media_mensal_cal, grouping=True)
 
             # Projeção anual
-            meses_corridos = consulta_volume_britado['MES'].max()  # Último mês em que houve produção
+            meses_corridos = datetime.now().month
             meses_no_ano = 12  # Número total de meses no ano
 
             if meses_corridos > 0:

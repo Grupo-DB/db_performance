@@ -7,8 +7,14 @@ from django.db import connections
 import pandas as pd
 import locale
 import numpy as np
+from sqlalchemy import create_engine
 
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')  # Exemplo de locale brasileiro
+
+ # String de conexão
+connection_string = 'mssql+pyodbc://DBCONSULTA:DB%40%402023**@172.50.10.5/DB?driver=ODBC+Driver+17+for+SQL+Server'
+# Cria a engine
+engine = create_engine(connection_string)
 
 @csrf_exempt
 @api_view(['POST'])
@@ -61,7 +67,7 @@ def calculos_rebritagem(request):
             GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHRPROD
 
             ORDER BY 5,7
-                             """,connections[connection_name])
+                             """,engine)
 
     
     #volume_britado_por_loc = locale.format_string("%.2f",consulta_volume_britado.groupby('LOCCOD')['TOTAL'].sum(),grouping=True)
@@ -141,7 +147,7 @@ def calculos_rebritagem_paradas(request):
 
     GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
 
-    """,connections[connection_name])
+    """,engine)
 
     ##KPI´S PARADAS
 

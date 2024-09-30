@@ -5,7 +5,12 @@ from django.shortcuts import render
 from django.db import connections
 import pandas as pd
 import locale
+from sqlalchemy import create_engine
 
+ # String de conexão
+connection_string = 'mssql+pyodbc://DBCONSULTA:DB%40%402023**@172.50.10.5/DB?driver=ODBC+Driver+17+for+SQL+Server'
+# Cria a engine
+engine = create_engine(connection_string)
 
 @csrf_exempt
 @api_view(['GET'])
@@ -34,7 +39,7 @@ def calculos_cal(request):
 
             ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD,BPROFPRO
 
-            """,connections[connection_name])
+            """,engine)
     
         #KPI´S
     to_ton_azbe = round(consulta_ultimo_dia_azbe['PESO'].sum(),1)
