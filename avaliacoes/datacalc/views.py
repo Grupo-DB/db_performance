@@ -16,32 +16,6 @@ from rest_framework import generics
 from rest_framework.parsers import JSONParser
 from django.db.models import Q
 from avaliacoes.management.utils import send_custom_email
-# Create your views here.
-
-
-# def calc_colaboradores(request):
-#     queryset = Colaborador.objects.all().values()
-#     df = pd.DataFrame(queryset)
-
-#     total_colaboradores = len(df)
-
-#     querysetidade = Colaborador.objects.all().values('data_nascimento')
-#     dfidade = pd.DataFrame(querysetidade)
-
-#     hoje = datetime.today()
-#     dfidade['idade'] = (hoje - dfidade['data_nascimento']).astype('<m8[Y]')
-
-#     media_idade = df['idade'].mean()
-
-#     return JsonResponse({
-#         'total_colaboradores': total_colaboradores,
-#         'media_idade':media_idade
-#     })
-
-
-
-
-
 
 #@method_decorator(csrf_exempt, name='dispatch')
 @csrf_exempt
@@ -333,6 +307,7 @@ def filtrar_avaliacoes(request):
         data = json.loads(request.body)
         selected_avaliadores = data.get('avaliadorSelecionadoId', [])
         selected_avaliados = data.get('avaliadoSelecionadoId', [])
+        tipo = data.get('tipoSelecionado',[])
         selected_areas = data.get('selectedAreas', [])
         selected_cargos = data.get('selectedCargos', [])
         selected_ambientes = data.get('selectedAmbientes', [])
@@ -362,6 +337,15 @@ def filtrar_avaliacoes(request):
         # Calcular a média das respostas das avaliações gerais
 
         avaliacoes = Avaliacao.objects.filter(avaliador_id__in=selected_avaliadores)
+
+        # Filtrar por tipo
+        if tipo:
+            if isinstance(tipo, list):
+                tipo = [t.strip().lower() for t in tipo]  # Aplicar strip e lower em cada elemento da lista
+                avaliacoes = avaliacoes.filter(tipo__in=tipo)
+            else:
+                tipo = tipo.strip().lower()
+                avaliacoes = avaliacoes.filter(tipo__iexact=tipo)
 
         # Filtrar avaliações por data
         if data_inicio:
@@ -420,6 +404,15 @@ def filtrar_avaliacoes(request):
 ###AVALIADOS
 
         avaliacoesAv = Avaliacao.objects.filter(avaliado_id__in=selected_avaliados)
+
+        # Filtrar por tipo
+        if tipo:
+            if isinstance(tipo, list):
+                tipo = [t.strip().lower() for t in tipo]  # Aplicar strip e lower em cada elemento da lista
+                avaliacoesAv = avaliacoesAv.filter(tipo__in=tipo)
+            else:
+                tipo = tipo.strip().lower()
+                avaliacoesAv = avaliacoesAv.filter(tipo__iexact=tipo)
 
         # Filtrar avaliações por data
         if data_inicio:
@@ -869,6 +862,7 @@ def filtrar_avaliacoes_periodo(request):
         selected_cargos = data.get('selectedCargos', [])
         selected_ambientes = data.get('selectedAmbientes', [])
         selected_setores = data.get('selectedSetores', [])
+        tipo = data.get('tipoSelecionado',[])
         data_inicio = data.get('data_inicio', None)
         data_fim = data.get('data_fim', None)
 
@@ -891,6 +885,15 @@ def filtrar_avaliacoes_periodo(request):
             queryset = queryset.filter(create_at__gte=data_inicio)
         if data_fim:
             queryset = queryset.filter(create_at__lte=data_fim)
+
+
+        if tipo:
+            if isinstance(tipo, list):
+                tipo = [t.strip().lower() for t in tipo]  # Aplicar strip e lower em cada elemento da lista
+                queryset = queryset.filter(tipo__in=tipo)
+            else:
+                tipo = tipo.strip().lower()
+                queryset = queryset.filter(tipo__iexact=tipo)
 
         # Preparar dados filtrados
         filtered_data = []
