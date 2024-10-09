@@ -37,6 +37,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes
 from .permissions import IsInGroup
+from db_performance.tasks import enviar_notificacoes
 
 #logger = logging.getLogger(__name__)
 # @api_view(['GET','POST'])
@@ -1384,6 +1385,8 @@ class NotificationViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['post'])
     def enviar_notificacoes(self, request):
+        #task = enviar_notificacoes
+
         now = timezone.now()
         trimestre_atual = obterTrimestre(now)
         #logger.debug(f"Trimestre atual: {trimestre_atual}")
@@ -1404,7 +1407,7 @@ class NotificationViewSet(viewsets.ViewSet):
         for avaliador in avaliadores_sem_avaliacao:
             for avaliado in avaliador.avaliados.filter(id__in=avaliados_sem_avaliacao).all():
                 notify.send(
-                    sender=request.user,  # Quem envia a notificação (o usuário autenticado)
+                    sender=avaliador,  # Quem envia a notificação (o usuário autenticado)
                     recipient=avaliador.user,  # Avaliador que receberá a notificação
                     verb='Nova notificação!!',  # Verbo da notificação
                     description=f'Nova avaliação pendente  no período atual para {avaliado.nome}'  # Descrição da notificação

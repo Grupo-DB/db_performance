@@ -1,53 +1,54 @@
-# from celery import shared_task
-# from django.core.mail import send_mail
-# from django.utils import timezone
-# from management.models import Avaliador, Avaliado, Avaliacao, Colaborador
-# from rest_framework.response import Response
-# from management.utils import obterTrimestre,send_custom_email
-# from rest_framework import status
-# from django.db.models import Q
-# from notifications.signals import notify
-# from rest_framework.response import Response
-# from datetime import timedelta
-# from django.contrib.auth.models import User,Group
+from celery import shared_task
+from django.core.mail import send_mail
+from django.utils import timezone
+from avaliacoes.management.models import Avaliador, Avaliado, Avaliacao, Colaborador
+from rest_framework.response import Response
+from avaliacoes.management.utils import obterTrimestre,send_custom_email
+from rest_framework import status
+from django.db.models import Q
+from notifications.signals import notify
+from rest_framework.response import Response
+from datetime import timedelta
+from django.contrib.auth.models import User,Group
+from django.db import IntegrityError
 
-# @shared_task
-# def enviar_notificacoes():
-#     now = timezone.now()
-#     trimestre_atual = obterTrimestre(now)
+@shared_task
+def enviar_notificacoes():
+    now = timezone.now()
+    trimestre_atual = obterTrimestre(now)
 
-#     # Encontrar todos os avaliados que não foram avaliados no trimestre atual
-#     avaliados_sem_avaliacao = Avaliado.objects.filter(
-#         ~Q(avaliacoes_avaliado__periodo=trimestre_atual)
-#     ).distinct()
+    # Encontrar todos os avaliados que não foram avaliados no trimestre atual
+    avaliados_sem_avaliacao = Avaliado.objects.filter(
+        ~Q(avaliacoes_avaliado__periodo=trimestre_atual)
+    ).distinct()
 
-#     # Encontrar os avaliadores desses avaliados
-#     avaliadores_sem_avaliacao = Avaliador.objects.filter(
-#         avaliados__in=avaliados_sem_avaliacao
-#     ).distinct()
+    # Encontrar os avaliadores desses avaliados
+    avaliadores_sem_avaliacao = Avaliador.objects.filter(
+        avaliados__in=avaliados_sem_avaliacao
+    ).distinct()
 
-#     notificacoes_enviadas = 0
-#     # Enviar notificações para os avaliadores sem avaliações no trimestre atual
-#     for avaliador in avaliadores_sem_avaliacao:
-#         for avaliado in avaliador.avaliados.filter(id__in=avaliados_sem_avaliacao).all():
-#             # Verificar se o avaliado ainda não foi avaliado no período atual
-#             if not Avaliacao.objects.filter(avaliador=avaliador, avaliado=avaliado, periodo=trimestre_atual).exists():
-#                 # Verificar se o avaliador tem um usuário associado antes de enviar a notificação
-#                 if avaliador.user:
-#                     try:
-#                         notify.send(
-#                             sender=avaliador,
-#                             recipient=avaliador.user,
-#                             verb='Nova notificação!!',
-#                             description=f'Nova avaliação pendente no período atual para {avaliado.nome}'
-#                         )
-#                         notificacoes_enviadas += 1
-#                     except IntegrityError as e:
-#                         # Log do erro e continue
-#                         print(f"Erro ao enviar notificação: {str(e)}")
+    notificacoes_enviadas = 0
+    # Enviar notificações para os avaliadores sem avaliações no trimestre atual
+    for avaliador in avaliadores_sem_avaliacao:
+        for avaliado in avaliador.avaliados.filter(id__in=avaliados_sem_avaliacao).all():
+            # Verificar se o avaliado ainda não foi avaliado no período atual
+            if not Avaliacao.objects.filter(avaliador=avaliador, avaliado=avaliado, periodo=trimestre_atual).exists():
+                # Verificar se o avaliador tem um usuário associado antes de enviar a notificação
+                if avaliador.user:
+                    try:
+                        notify.send(
+                            sender=avaliador,
+                            recipient=avaliador.user,
+                            verb='Nova notificação!!',
+                            description=f'Nova avaliação pendente no período atual para {avaliado.nome}'
+                        )
+                        notificacoes_enviadas += 1
+                    except IntegrityError as e:
+                        # Log do erro e continue
+                        print(f"Erro ao enviar notificação: {str(e)}")
 
-#     # Retornar uma mensagem simples que pode ser serializada como JSON
-#     return f"Notificações enviadas: {notificacoes_enviadas}"
+    # Retornar uma mensagem simples que pode ser serializada como JSON
+    return f"Notificações enviadas: {notificacoes_enviadas}"
 
 # @shared_task
 # def enviar_emails():
