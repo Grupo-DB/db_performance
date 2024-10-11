@@ -19,21 +19,21 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 
 # Descobrir automaticamente tarefas do seu projeto.
 #app.autodiscover_tasks()
-app.autodiscover_tasks(['db_performance', 'management'])
-#app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
+#app.autodiscover_tasks(['db_performance', 'avaliacoes.management'])
+app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
 
 
-app.autodiscover_tasks(lambda: [n.name for n in app.get_app_configs()])
+#app.autodiscover_tasks(lambda: [n.name for n in app.get_app_configs()])
 
 app.conf.beat_schedule = {
         'enviar-notificacoes-cada-5-minutos': {
         'task':'db_performance.tasks.enviar_notificacoes',
-        'schedule': crontab(hour=0, minute=5),
+        'schedule': crontab(minute='*/2'),
     },    
-#     'enviar-emails-cada-5-minutos': {
-#         'task': 'db_performance.tasks.enviar_emails',
-#         'schedule': crontab(hour=0, minute=0),
-#     },
+     'enviar-emails-cada-5-minutos': {
+         'task': 'db_performance.tasks.enviar_emails',
+         'schedule': crontab(minute='*/2'),
+     },
 #     'enviar-media-avaliações': {
 #         'task': 'db_performance.tasks.verificar_media_avaliacoes',
 #         'schedule': crontab(month_of_year='1,4,7,10', day_of_month=28,hour=0, minute=0),

@@ -196,8 +196,8 @@ EMAIL_HOST_PASSWORD = 'zrwehfczwugpsssp'  # Sua senha de e-mail
 
 
 
-CELERY_BROKER_URL = 'redis://localhost:6379/0'
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_BROKER_URL = 'redis://172.50.10.79:6379/0'
+CELERY_RESULT_BACKEND = 'redis://172.50.10.79:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
@@ -217,43 +217,3 @@ CORS_ALLOW_HEADERS = [
 ]
 
 
-
-
-
-# LOGGING = {
-#     'version': 1,
-#     'disable_existing_loggers': False,
-#     'handlers': {
-#         'console': {
-#             'level': 'DEBUG',
-#             'class': 'logging.StreamHandler',
-#         },
-#     },
-#     'root': {
-#         'handlers': ['console'],
-#         'level': 'DEBUG',
-#     },
-#     'loggers': {
-#         'django': {
-#             'handlers': ['console'],
-#             'level': 'DEBUG',
-#             'propagate': True,
-#         },
-#         '': {
-#             'handlers': ['console'],
-#             'level': 'DEBUG',
-#         },
-#     },
-# }
-
-
-
-
-
-# ROLEPERMISSIONS_MODULE = "db_performance.roles"
-
-
-
-# CORS_ALLOW_ORIGINS = [
-#     'http://localhost:4200',
-# ]

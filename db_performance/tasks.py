@@ -50,45 +50,45 @@ def enviar_notificacoes():
     # Retornar uma mensagem simples que pode ser serializada como JSON
     return f"Notificações enviadas: {notificacoes_enviadas}"
 
-# @shared_task
-# def enviar_emails():
-#     subject = ('RH Dagoberto Barcellos')
-#     message = ('Avaliações ainda pendentes no período atual')
+@shared_task
+def enviar_emails():
+    subject = ('RH Dagoberto Barcellos')
+    message = ('Avaliações ainda pendentes no período atual')
 
-#     if not subject or not message:
-#         print("Erro ao enviar email")
+    if not subject or not message:
+        print("Erro ao enviar email")
 
-#     now = timezone.now()
-#     trimestre_atual = obterTrimestre(now)  # Supondo que obterTrimestre() retorna o trimestre atual
+    now = timezone.now()
+    trimestre_atual = obterTrimestre(now)  # Supondo que obterTrimestre() retorna o trimestre atual
 
-#     # Encontrar todos os avaliados sem avaliação no trimestre atual
-#     avaliados_sem_avaliacao = Avaliado.objects.exclude(
-#         avaliacoes_avaliado__periodo=trimestre_atual
-#     ).distinct()
+    # Encontrar todos os avaliados sem avaliação no trimestre atual
+    avaliados_sem_avaliacao = Avaliado.objects.exclude(
+        avaliacoes_avaliado__periodo=trimestre_atual
+    ).distinct()
 
-#     # Encontrar os avaliadores desses avaliados
-#     avaliadores_sem_avaliacao = Avaliador.objects.filter(
-#         avaliados__in=avaliados_sem_avaliacao
-#     ).distinct()
+    # Encontrar os avaliadores desses avaliados
+    avaliadores_sem_avaliacao = Avaliador.objects.filter(
+        avaliados__in=avaliados_sem_avaliacao
+    ).distinct()
 
-#     if not avaliadores_sem_avaliacao.exists():
-#         print("Erro ao enviar email")
+    if not avaliadores_sem_avaliacao.exists():
+        print("Erro ao enviar email")
 
-#     for avaliador in avaliadores_sem_avaliacao:
-#         # Filtrar os avaliados pertencentes ao avaliador atual
-#         avaliados_do_avaliador = avaliados_sem_avaliacao.filter(avaliadores=avaliador)
+    for avaliador in avaliadores_sem_avaliacao:
+        # Filtrar os avaliados pertencentes ao avaliador atual
+        avaliados_do_avaliador = avaliados_sem_avaliacao.filter(avaliadores=avaliador)
 
-#         # Construir o corpo do email incluindo os avaliados sem avaliação para o avaliador atual
-#         email_body = f"{message}\n\nAvaliados sem avaliação no trimestre atual:\n"
-#         for avaliado in avaliados_do_avaliador:
-#             email_body += f"- {avaliado.nome}\n"
+        # Construir o corpo do email incluindo os avaliados sem avaliação para o avaliador atual
+        email_body = f"{message}\n\nAvaliados sem avaliação no trimestre atual:\n"
+        for avaliado in avaliados_do_avaliador:
+            email_body += f"- {avaliado.nome}\n"
 
-#         try:
-#             send_custom_email(subject, email_body, [avaliador.email])
-#         except Exception as e:
-#             print("Erro ao enviar email")
+        try:
+            send_custom_email(subject, email_body, [avaliador.email])
+        except Exception as e:
+            print("Erro ao enviar email")
 
-#     print("Email enviado com sucesso!")
+    print("Email enviado com sucesso!")
 
 # @shared_task
 # def enviar_notificacoes_experiencia():

@@ -1382,39 +1382,83 @@ class NotificationViewSet(viewsets.ViewSet):
         notifications = request.user.notifications.unread()
         serializer = NotificationSerializer(notifications, many=True)
         return Response(serializer.data)
+    
+    # @action(detail=False, methods=['post'])
+    # def enviar_emails(self, request):
+    #     subject = 'RH Dagoberto Barcellos'
+    #     message = 'Avaliações ainda pendentes no período atual'
+
+    #     if not subject or not message:
+    #         return Response({"error": "Erro ao enviar email"}, status=status.HTTP_400_BAD_REQUEST)
+
+    #     # Obter o avaliador logado
+    #     avaliador = Avaliador.objects.get(user=request.user)
+
+    #     now = timezone.now()
+    #     trimestre_atual = obterTrimestre(now)
+
+    #     # Encontrar avaliados sem avaliação no trimestre atual para o avaliador logado
+    #     avaliados_sem_avaliacao = Avaliado.objects.exclude(
+    #         avaliacoes_avaliado__periodo=trimestre_atual
+    #     ).filter(avaliadores=avaliador).distinct()
+
+    #     if not avaliados_sem_avaliacao.exists():
+    #         return Response({"message": "Nenhum avaliador sem avaliação."}, status=status.HTTP_204_NO_CONTENT)
+
+    #     # Construir o corpo do email incluindo os avaliados sem avaliação para o avaliador atual
+    #     email_body = f"{message}\n\nAvaliados sem avaliação no trimestre atual:\n"
+    #     for avaliado in avaliados_sem_avaliacao:
+    #         email_body += f"- {avaliado.nome}\n"
+
+    #     try:
+    #         send_custom_email(subject, email_body, [avaliador.user.email])  # Enviando para o email do avaliador logado
+    #     except Exception as e:
+    #         return Response({"error": "Erro ao enviar email"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    #     return Response({"success": "Email enviado com sucesso!"}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'])
     def enviar_notificacoes(self, request):
-        #task = enviar_notificacoes
-
-        now = timezone.now()
-        trimestre_atual = obterTrimestre(now)
-        #logger.debug(f"Trimestre atual: {trimestre_atual}")
-
-        # Encontrar todos os avaliados que não foram avaliados no trimestre atual
-        avaliados_sem_avaliacao = Avaliado.objects.filter(
-            ~Q(avaliacoes_avaliado__periodo=trimestre_atual)
-        ).distinct()
-        #logger.debug(f"Avaliados sem avaliação: {[a.id for a in avaliados_sem_avaliacao]}")
-
-        # Encontrar os avaliadores desses avaliados
-        avaliadores_sem_avaliacao = Avaliador.objects.filter(
-            avaliados__in=avaliados_sem_avaliacao
-        ).distinct()
-        #logger.debug(f"Avaliadores sem avaliação: {[a.id for a in avaliadores_sem_avaliacao]}")
-
-        # Enviar notificações para os avaliadores sem avaliações no trimestre atual
-        for avaliador in avaliadores_sem_avaliacao:
-            for avaliado in avaliador.avaliados.filter(id__in=avaliados_sem_avaliacao).all():
-                notify.send(
-                    sender=avaliador,  # Quem envia a notificação (o usuário autenticado)
-                    recipient=avaliador.user,  # Avaliador que receberá a notificação
-                    verb='Nova notificação!!',  # Verbo da notificação
-                    description=f'Nova avaliação pendente  no período atual para {avaliado.nome}'  # Descrição da notificação
-                )
-
+        task = enviar_notificacoes
         return Response({"success": "Notificações enviadas"}, status=status.HTTP_200_OK)
 
+
+        # avaliador_id = request.data.get('avaliador_id')
+
+        # if not avaliador_id:
+        #     return Response({"error": "Avaliador ID não fornecido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # try:
+        #     avaliador = Avaliador.objects.get(id=avaliador_id)
+        # except Avaliador.DoesNotExist:
+        #     return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        # now = timezone.now()
+        # trimestre_atual = obterTrimestre(now)
+
+        # avaliados_sem_avaliacao = Avaliado.objects.filter(
+        #     ~Q(avaliacoes_avaliado__periodo=trimestre_atual)
+        # ).distinct()
+
+        # avaliadores_sem_avaliacao = Avaliador.objects.filter(
+        #     avaliados__in=avaliados_sem_avaliacao
+        # ).distinct()
+
+        # # Enviar notificações para os avaliadores sem avaliações no trimestre atual
+        # for avaliador in avaliadores_sem_avaliacao:
+        #     # Verifica se o avaliador tem um usuário associado
+        #     if avaliador.user is None:
+        #         continue  # Pula este avaliador se não tiver usuário associado
+
+        #     for avaliado in avaliador.avaliados.filter(id__in=avaliados_sem_avaliacao).all():
+        #         notify.send(
+        #             sender=request.user,  # Quem envia a notificação (usuário autenticado)
+        #             recipient=avaliador.user,  # Avaliador (instância de User)
+        #             verb='Nova notificação!!',
+        #             description=f'Nova avaliação pendente no período atual para {avaliado.nome}'
+        #         )
+
+        # return Response({"success": "Notificações enviadas"}, status=status.HTTP_200_OK)
         
     @action(detail=False, methods=['post'])
     def marcar_como_lidas(self, request):
