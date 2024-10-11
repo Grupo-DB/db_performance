@@ -28,11 +28,11 @@ app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
 app.conf.beat_schedule = {
         'enviar-notificacoes-cada-5-minutos': {
         'task':'db_performance.tasks.enviar_notificacoes',
-        'schedule': crontab(minute='*/2'),
+        'schedule': crontab(hour=11, minute=0),
     },    
      'enviar-emails-cada-5-minutos': {
          'task': 'db_performance.tasks.enviar_emails',
-         'schedule': crontab(minute='*/2'),
+         'schedule': crontab(hour=11, minute=0),
      },
 #     'enviar-media-avaliações': {
 #         'task': 'db_performance.tasks.verificar_media_avaliacoes',
