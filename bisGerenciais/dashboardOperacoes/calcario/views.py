@@ -398,3 +398,126 @@ def calculos_graficos_calcario(request):
 
 
     return JsonResponse(response_data, safe=False)
+
+#######################################------------CALCULOS---DETALHES--------EQUIPAMENTOS------------##############
+@csrf_exempt
+@api_view(['POST'])
+def calculos_equipamentos_detalhes(request):
+    data = request.data.get('data')
+    eqpto = request.data.get('eqpto')
+    consulta_equipamentos = pd.read_sql(f"""
+
+    SELECT 
+    CASE
+        WHEN EPNOME LIKE '%ARGAMASSA%' THEN 7
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM1%' THEN 1
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM2%' THEN 2
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM3%' THEN 3
+        WHEN EPNOME LIKE '%CAL%' AND EQPAUTOMTAG LIKE '%FCC%' THEN 5
+        WHEN EPNOME LIKE '%CAL%' AND EQPAUTOMTAG NOT LIKE '%FCC%' THEN 6
+        WHEN EPNOME LIKE '%FERTILIZANTE%' THEN 4
+        ELSE 999
+    END ORDEM,
+    CASE
+        WHEN EPNOME LIKE '%ARGAMASSA%' THEN 'ARGAMASSA'
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM1%' THEN 'CALCARIO 1'
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM2%' THEN 'CALCARIO 2'
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM3%' THEN 'CALCARIO 3'
+        WHEN EPNOME LIKE '%CAL%' AND EQPAUTOMTAG LIKE '%FCC%' THEN 'CALCINACAO'
+        WHEN EPNOME LIKE '%CAL%' AND EQPAUTOMTAG NOT LIKE '%FCC%' THEN 'CAL'
+        WHEN EPNOME LIKE '%FERTILIZANTE%' THEN 'FERTILIZANTE'
+        ELSE EPNOME 
+    END FABRICA,
+    EPNOME ETAPA, 
+    BPROCOD DIARIA,
+    CASE 
+        WHEN EQPAUTOMTAG = '' OR EQPAUTOMTAG IS NULL THEN EQPNOME
+        ELSE EQPAUTOMTAG
+    END EQUIPAMENTO, 
+    BPROEQP EQUIPAMENTO_CODIGO, 
+    CASE
+        WHEN BPROEQP = 0 OR BPROEQP IS NULL THEN DATEPART(HOUR, BPRODATA2 - BPRODATA1) + 
+                                                (CAST(DATEPART(MINUTE, BPRODATA2 - BPRODATA1) AS DOUBLE PRECISION) / 60)
+        ELSE BPROHRTOT
+    END HRTOT, 
+    CASE
+        WHEN BPROEQP = 0 OR BPROEQP IS NULL THEN DATEPART(HOUR, BPRODATA2 - BPRODATA1) + 
+                                                (CAST(DATEPART(MINUTE, BPRODATA2 - BPRODATA1) AS DOUBLE PRECISION) / 60)
+        ELSE BPROHRPROD
+    END HRPRO, 
+    CASE
+        WHEN BPROEQP = 0 OR BPROEQP IS NULL THEN DATEPART(HOUR, BPRODATA2 - BPRODATA1) + 
+                                                (CAST(DATEPART(MINUTE, BPRODATA2 - BPRODATA1) AS DOUBLE PRECISION) / 60)
+        ELSE BPROHROPER
+    END HROPER,
+    (SELECT SUM(EDPRHRTOT) FROM EVENTODIARIAPROD WHERE EDPRBPRO = BPRO.BPROCOD) HREVENTO,
+    IBPROQUANT QUANT, 
+    ESPSIGLA SIGLA,
+    (SELECT PPDADOCHAR FROM PESPARAMETRO WHERE PPTPP = 7 AND PPREF = BPRO.BPROCOD) CONDICAO,
+    (SELECT PPDADOCHAR FROM PESPARAMETRO WHERE PPTPP = 8 AND PPREF = BPRO.BPROCOD) MATERIAL,
+    (SELECT PPDADOCHAR FROM PESPARAMETRO WHERE PPTPP = 584 AND PPREF = BPRO.BPROCOD) TELA
+    FROM BAIXAPRODUCAO BPRO
+    JOIN ETAPAPRODUCAO ON EPCOD = BPROEP
+    LEFT OUTER JOIN FICHAPRODUTO ON FPROCOD = BPROFPRO
+    LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+    LEFT OUTER JOIN ITEMBAIXAPRODUCAO ON IBPROTIPO = 'D' AND IBPROBPRO = BPROCOD
+    LEFT OUTER JOIN ESTOQUE ON ESTQCOD = IBPROREF
+    LEFT OUTER JOIN ESPECIE ON ESPCOD = ESTQESP
+    WHERE BPROSIT = 1
+    AND BPROEMP = 1
+    AND BPROFIL = 0
+    AND CAST(BPRODATA1 as date) = '{data}'
+    AND BPROEP = 6
+    AND BPROEQP IN (110,111,169,18,19,20)
+    ORDER BY BPRO.BPROCOD
+
+    """,engine)
+
+    ####################---------FCMI---------------###############################################
+    fcmi_mg01_hora_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum()
+    fcmi_mg01_hora_producao = locale.format_string("%.1f",fcmi_mg01_hora_producao_int, grouping=True)
+
+    fcmi_mg01_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
+    fcmi_mg01_hora_parado = locale.format_string("%.1f",fcmi_mg01_hora_parado_int, grouping=True)
+
+    fcmi_mg01_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
+    fcmi_mg01_producao = locale.format_string("%.1f",fcmi_mg01_producao_int, grouping=True)
+
+    fcmi_mg01_produtividade_int = fcmi_mg01_producao_int / fcmi_mg01_hora_producao_int
+    #fcmi_mg01_produtividade = locale.format_string("%.1f",fcmi_mg01_produtividade_int, grouping=True)
+
+    ####################---------FCMII---------------###############################################
+    fcmi_mg02_hora_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum()
+    fcmi_mg02_hora_producao = locale.format_string("%.1f",fcmi_mg02_hora_producao_int, grouping=True)
+
+    fcmi_mg02_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
+    fcmi_mg02_hora_parado = locale.format_string("%.1f",fcmi_mg02_hora_parado_int, grouping=True)
+
+    fcmi_mg02_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
+    fcmi_mg02_producao = locale.format_string("%.1f",fcmi_mg02_producao_int, grouping=True)
+
+    fcmi_mg02_produtividade_int = fcmi_mg02_producao_int / fcmi_mg02_hora_producao_int
+    #fcmi_mg02_produtividade = locale.format_string("%.1f",fcmi_mg02_produtividade_int, grouping=True)
+
+    ##################---------TOTAIS FCMI-----------------####################################
+    fcmi_produtividade_geral = fcmi_mg01_produtividade_int + fcmi_mg02_produtividade_int 
+
+    fcmi_producao_geral = fcmi_mg01_producao + fcmi_mg02_producao
+
+    response_data = {
+        ##-----------FCMI--MG01------------------------
+        'fcmi_mg01_hora_producao': fcmi_mg01_hora_producao,
+        'fcmi_mg01_hora_parado': fcmi_mg01_hora_parado,
+        'fcmi_mg01_producao': fcmi_mg01_producao,
+        #'fcmi_mg01_produtividade': fcmi_mg01_produtividade,
+        ##----------FCMII--MG02-----------------
+        'fcmi_mg02_hora_producao': fcmi_mg02_hora_producao,
+        'fcmi_mg02_hora_parado': fcmi_mg02_hora_parado,
+        'fcmi_mg02_producao': fcmi_mg02_producao,
+        #'fcmi_mg02_produtividade': fcmi_mg02_produtividade_int,
+        ##------------FCMI--GERAL---------------
+         #'fcmi_produtividade_geral': fcmi_produtividade_geral,
+         'fcmi_producao_geral' : fcmi_producao_geral
+    }
+
+    return JsonResponse(response_data,safe=False)
