@@ -473,51 +473,194 @@ def calculos_equipamentos_detalhes(request):
 
     """,engine)
 
-    ####################---------FCMI---------------###############################################
-    fcmi_mg01_hora_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum()
-    fcmi_mg01_hora_producao = locale.format_string("%.1f",fcmi_mg01_hora_producao_int, grouping=True)
+    ####################---------FCMI --- MG01---------------###############################################
+    fcmi_mg01_hora_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum() #soma
+    fcmi_mg01_hora_producao_val = fcmi_mg01_hora_producao_int.item() if not fcmi_mg01_hora_producao_int.empty else 0 #converte o series para um valor
+    fcmi_mg01_hora_producao = locale.format_string("%.1f",fcmi_mg01_hora_producao_val, grouping=True) if fcmi_mg01_hora_producao_val > 0 else 0 #formata o valor
+    
 
     fcmi_mg01_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    fcmi_mg01_hora_parado = locale.format_string("%.1f",fcmi_mg01_hora_parado_int, grouping=True)
+    fcmi_mg01_hora_parado_val = fcmi_mg01_hora_parado_int.item() if not fcmi_mg01_hora_parado_int.empty  else 0
+    fcmi_mg01_hora_parado = locale.format_string("%.1f",fcmi_mg01_hora_parado_val, grouping=True) if fcmi_mg01_hora_parado_val > 0 else 0
+
 
     fcmi_mg01_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
-    fcmi_mg01_producao = locale.format_string("%.1f",fcmi_mg01_producao_int, grouping=True)
+    fcmi_mg01_producao_val = fcmi_mg01_producao_int.item() if not fcmi_mg01_producao_int.empty else 0
+    fcmi_mg01_producao = locale.format_string("%.1f",fcmi_mg01_producao_val, grouping=True) if fcmi_mg01_producao_val > 0 else 0
 
-    fcmi_mg01_produtividade_int = fcmi_mg01_producao_int / fcmi_mg01_hora_producao_int
-    #fcmi_mg01_produtividade = locale.format_string("%.1f",fcmi_mg01_produtividade_int, grouping=True)
+    if fcmi_mg01_hora_producao_val > 0:
+        fcmi_mg01_produtividade = fcmi_mg01_producao_val / fcmi_mg01_hora_producao_val
+        #fcmi_mg01_produtividade = locale.format_string("%.1f",fcmi_mg01_produtividade_int, grouping=True)
+    else:
+        fcmi_mg01_produtividade = 0    
+    
 
-    ####################---------FCMII---------------###############################################
-    fcmi_mg02_hora_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum()
-    fcmi_mg02_hora_producao = locale.format_string("%.1f",fcmi_mg02_hora_producao_int, grouping=True)
-
+    ####################---------FCMI-MG02---------------###############################################
+    fcmi_mg02_hora_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum() #soma
+    fcmi_mg02_hora_producao_val = fcmi_mg02_hora_producao_int.item() if not fcmi_mg02_hora_producao_int.empty else 0 #converte o series para um valor
+    fcmi_mg02_hora_producao = locale.format_string("%.1f",fcmi_mg02_hora_producao_val, grouping=True) if fcmi_mg02_hora_producao_val > 0 else 0
+   
     fcmi_mg02_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    fcmi_mg02_hora_parado = locale.format_string("%.1f",fcmi_mg02_hora_parado_int, grouping=True)
+    fcmi_mg02_hora_parado_val = fcmi_mg02_hora_parado_int.item() if not fcmi_mg02_hora_parado_int.empty else 0
+    fcmi_mg02_hora_parado = locale.format_string("%.1f",fcmi_mg02_hora_parado_val, grouping=True) if fcmi_mg02_hora_parado_val > 0 else 0
 
     fcmi_mg02_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
-    fcmi_mg02_producao = locale.format_string("%.1f",fcmi_mg02_producao_int, grouping=True)
+    fcmi_mg02_producao_val = fcmi_mg02_producao_int.item() if not fcmi_mg02_producao_int.empty else 0
+    fcmi_mg02_producao = locale.format_string("%.1f",fcmi_mg02_producao_val, grouping=True) if fcmi_mg02_producao_val >0 else 0
 
-    fcmi_mg02_produtividade_int = fcmi_mg02_producao_int / fcmi_mg02_hora_producao_int
-    #fcmi_mg02_produtividade = locale.format_string("%.1f",fcmi_mg02_produtividade_int, grouping=True)
+    if fcmi_mg02_hora_producao_val > 0:
+        fcmi_mg02_produtividade = fcmi_mg02_producao_val / fcmi_mg02_hora_producao_val
+        #fcmi_mg02_produtividade = locale.format_string("%.1f", fcmi_mg02_produtividade, grouping=True)
+    else:
+        fcmi_mg02_produtividade = 0
 
     ##################---------TOTAIS FCMI-----------------####################################
-    fcmi_produtividade_geral = fcmi_mg01_produtividade_int + fcmi_mg02_produtividade_int 
+    if fcmi_mg01_produtividade or fcmi_mg02_produtividade > 0:
+        fcmi_produtividade_geral_val = fcmi_mg01_produtividade + fcmi_mg02_produtividade / 2
+        fcmi_produtividade_geral = locale.format_string("%.1f",fcmi_produtividade_geral_val, grouping=True)
+    else:      
+        fcmi_produtividade_geral = 0
 
-    fcmi_producao_geral = fcmi_mg01_producao + fcmi_mg02_producao
+    fcmi_producao_geral_val = fcmi_mg01_producao_val + fcmi_mg02_producao_val
+    fcmi_producao_geral = locale.format_string("%.1f",fcmi_producao_geral_val,grouping=True)    
+
+    ####################---------FCMII --- MG01---------------###############################################
+    fcmii_mg01_hora_prod_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 169].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum() #soma
+    fcmii_mg01_hora_prod_val = fcmii_mg01_hora_prod_int.item() if not fcmii_mg01_hora_prod_int.empty else 0 #converte o serires do pandas em valor
+    fcmii_mg01_hora_prod = locale.format_string("%.1f",fcmii_mg01_hora_prod_val,grouping=True) if fcmii_mg01_hora_prod_val > 0 else 0
+
+    fcmii_mg01_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 169].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
+    fcmii_mg01_hora_parado_val = fcmii_mg01_hora_parado_int.item() if not fcmii_mg01_hora_parado_int.empty else 0
+    fcmii_mg01_hora_parado = locale.format_string("%.1f",fcmii_mg01_hora_parado_val,grouping=True) if fcmii_mg01_hora_parado_val > 0 else 0
+
+    fcmii_mg01_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 169].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
+    fcmii_mg01_producao_val = fcmii_mg01_producao_int.item() if not fcmii_mg01_producao_int.empty else 0
+    fcmii_mg01_producao = locale.format_string("%.1f",fcmii_mg01_producao_val, grouping=True) if fcmii_mg01_producao_val > 0 else 0
+
+    if fcmii_mg01_hora_prod_val > 0:
+        fcmii_produtividade_geral_val = fcmii_mg01_producao_val / fcmii_mg01_hora_prod_val
+        fcmii_produtividade_geral = locale.format_string("%.1f",fcmii_produtividade_geral_val,grouping=True)
+    else:
+        fcmii_produtividade_geral = 0    
+
+     ####################---------FCMIII --- MG01---------------###############################################
+    fcmiii_mg01_hora_prod_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 18 ].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum() #soma
+    fcmiii_mg01_hora_prod_val = fcmiii_mg01_hora_prod_int.item() if not fcmiii_mg01_hora_prod_int.empty else 0   #conversão do series do panda para valor
+    fcmiii_mg01_hora_prod = locale.format_string("%.1f",fcmiii_mg01_hora_prod_val,grouping=True) if fcmiii_mg01_hora_prod_val > 0 else 0
+
+    fcmiii_mg01_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 18 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
+    fcmiii_mg01_hora_parado_val = fcmiii_mg01_hora_parado_int.item() if not fcmiii_mg01_hora_parado_int.empty else 0
+    fcmiii_mg01_hora_parado = locale.format_string("%.1f",fcmiii_mg01_hora_parado_val,grouping=True) if fcmiii_mg01_hora_parado_val > 0 else 0
+
+    fcmiii_mg01_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 18].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
+    fcmiii_mg01_producao_val = fcmiii_mg01_producao_int.item() if not fcmiii_mg01_producao_int.empty else 0
+    fcmiii_mg01_producao = locale.format_string("%.1f",fcmiii_mg01_producao_val,grouping=True) if fcmiii_mg01_producao_val > 0 else 0
+
+    if fcmiii_mg01_hora_prod_val > 0:
+        fcmiii_mg01_produtividade_val = fcmiii_mg01_producao_val / fcmiii_mg01_hora_prod_val
+        fcmiii_mg01_produtividade = locale.format_string("%.1f",fcmiii_mg01_produtividade_val, grouping=True)
+    else:
+        fcmiii_mg01_produtividade = 0     
+
+    ####################---------FCMIII --- MG02---------------###############################################  
+    fcmiii_mg02_hora_prod_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 19 ].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum() #soma
+    fcmiii_mg02_hora_prod_val = fcmiii_mg02_hora_prod_int.item() if not fcmiii_mg02_hora_prod_int.empty else 0   #conversão do series do panda para valor
+    fcmiii_mg02_hora_prod = locale.format_string("%.1f",fcmiii_mg02_hora_prod_val,grouping=True) if fcmiii_mg02_hora_prod_val > 0 else 0
+
+    fcmiii_mg02_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 19 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
+    fcmiii_mg02_hora_parado_val = fcmiii_mg02_hora_parado_int.item() if not fcmiii_mg02_hora_parado_int.empty else 0
+    fcmiii_mg02_hora_parado = locale.format_string("%.1f",fcmiii_mg02_hora_parado_val,grouping=True) if fcmiii_mg02_hora_parado_val > 0 else 0
+
+    fcmiii_mg02_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 19].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
+    fcmiii_mg02_producao_val = fcmiii_mg02_producao_int.item() if not fcmiii_mg02_producao_int.empty else 0
+    fcmiii_mg02_producao = locale.format_string("%.1f",fcmiii_mg02_producao_val,grouping=True) if fcmiii_mg02_producao_val > 0 else 0
+
+    if fcmiii_mg02_hora_prod_val > 0:
+        fcmiii_mg02_produtividade_val = fcmiii_mg02_producao_val / fcmiii_mg02_hora_prod_val
+        fcmiii_mg02_produtividade = locale.format_string("%.1f",fcmiii_mg02_produtividade_val, grouping=True)
+    else:
+        fcmiii_mg02_produtividade = 0 
+
+     ####################---------FCMIII --- MG03---------------###############################################  
+    fcmiii_mg03_hora_prod_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 20 ].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum() #soma
+    fcmiii_mg03_hora_prod_val = fcmiii_mg03_hora_prod_int.item() if not fcmiii_mg03_hora_prod_int.empty else 0   #conversão do series do panda para valor
+    fcmiii_mg03_hora_prod = locale.format_string("%.1f",fcmiii_mg03_hora_prod_val,grouping=True) if fcmiii_mg03_hora_prod_val > 0 else 0
+
+    fcmiii_mg03_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 20 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
+    fcmiii_mg03_hora_parado_val = fcmiii_mg03_hora_parado_int.item() if not fcmiii_mg03_hora_parado_int.empty else 0
+    fcmiii_mg03_hora_parado = locale.format_string("%.1f",fcmiii_mg03_hora_parado_val,grouping=True) if fcmiii_mg03_hora_parado_val > 0 else 0
+
+    fcmiii_mg03_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 20 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
+    fcmiii_mg03_producao_val = fcmiii_mg03_producao_int.item() if not fcmiii_mg03_producao_int.empty else 0
+    fcmiii_mg03_producao = locale.format_string("%.1f",fcmiii_mg03_producao_val,grouping=True) if fcmiii_mg03_producao_val > 0 else 0
+
+    if fcmiii_mg03_hora_prod_val > 0:
+        fcmiii_mg03_produtividade_val = fcmiii_mg03_producao_val / fcmiii_mg03_hora_prod_val
+        fcmiii_mg03_produtividade = locale.format_string("%.1f",fcmiii_mg03_produtividade_val, grouping=True)
+    else:
+        fcmiii_mg03_produtividade = 0 
+
+
+    if fcmiii_mg01_produtividade_val or fcmiii_mg02_produtividade_val or fcmiii_mg03_produtividade_val > 0 :
+        fcmiii_produtividade_geral_val = (fcmiii_mg01_produtividade_val + fcmiii_mg02_produtividade_val + fcmiii_mg03_produtividade_val) / 3
+        fcmiii_produtividade_geral = locale.format_string("%.1f",fcmiii_produtividade_geral_val,grouping=True)
+    else:
+        fcmiii_produtividade_geral = 0  
+
+    fcmiii_producao_geral_val =   fcmiii_mg01_producao_val + fcmiii_mg02_producao_val  + fcmiii_mg03_producao_val
+    fcmiii_producao_geral = locale.format_string("%.1f",fcmiii_producao_geral_val,grouping=True)  
+
+    ##########------------------------TOTAIS DAS FABRICAS-------------------------------#############################
+    if fcmi_producao_geral_val or fcmii_mg01_producao_val or fcmiii_producao_geral_val > 0 : 
+        producao_geral_fabricas_val = fcmi_producao_geral_val + fcmii_mg01_producao_val + fcmiii_producao_geral_val   
+        producao_geral_fabricas = locale.format_string("%.1f",producao_geral_fabricas_val, grouping=True)
+    else:
+        producao_geral_fabricas = 0    
+
+    if fcmi_produtividade_geral_val or fcmii_produtividade_geral_val or fcmiii_produtividade_geral_val > 0 :
+        produtividade_geral_fabricas_val = (fcmi_produtividade_geral_val + fcmii_produtividade_geral_val + fcmiii_produtividade_geral_val)
+        produtividade_geral_fabricas = locale.format_string("%.1f",produtividade_geral_fabricas_val, grouping=True)
+    else:
+        produtividade_geral_fabricas = 0
 
     response_data = {
         ##-----------FCMI--MG01------------------------
         'fcmi_mg01_hora_producao': fcmi_mg01_hora_producao,
         'fcmi_mg01_hora_parado': fcmi_mg01_hora_parado,
         'fcmi_mg01_producao': fcmi_mg01_producao,
-        #'fcmi_mg01_produtividade': fcmi_mg01_produtividade,
-        ##----------FCMII--MG02-----------------
+        'fcmi_mg01_produtividade': fcmi_mg01_produtividade,
+        ##----------FCMI--MG02-----------------
         'fcmi_mg02_hora_producao': fcmi_mg02_hora_producao,
         'fcmi_mg02_hora_parado': fcmi_mg02_hora_parado,
         'fcmi_mg02_producao': fcmi_mg02_producao,
-        #'fcmi_mg02_produtividade': fcmi_mg02_produtividade_int,
+        'fcmi_mg02_produtividade': fcmi_mg02_produtividade,
         ##------------FCMI--GERAL---------------
-         #'fcmi_produtividade_geral': fcmi_produtividade_geral,
-         'fcmi_producao_geral' : fcmi_producao_geral
+         'fcmi_produtividade_geral': fcmi_produtividade_geral,
+         'fcmi_producao_geral' : fcmi_producao_geral,
+        ##-----------FCMII--MG01------------------------
+         'fcmii_mg01_hora_prod': fcmii_mg01_hora_prod,
+         'fcmii_mg01_hora_parado':fcmii_mg01_hora_parado,
+         'fcmii_mg01_producao':fcmii_mg01_producao,
+        ##------------FCMII--GERAL---------------
+        'fcmii_produtividade_geral':fcmii_produtividade_geral,
+        ##-----------FCMIII--MG01------------------------
+        'fcmiii_mg01_hora_prod': fcmiii_mg01_hora_prod,
+        'fcmiii_mg01_hora_parado':fcmiii_mg01_hora_parado,
+        'fcmiii_mg01_producao': fcmiii_mg01_producao,
+        ##-----------FCMIII--MG02------------------------
+        'fcmiii_mg02_hora_prod': fcmiii_mg02_hora_prod,
+        'fcmiii_mg02_hora_parado':fcmiii_mg02_hora_parado,
+        'fcmiii_mg02_producao': fcmiii_mg02_producao,
+        ##-----------FCMIII--MG03------------------------
+        'fcmiii_mg03_hora_prod': fcmiii_mg03_hora_prod,
+        'fcmiii_mg03_hora_parado':fcmiii_mg03_hora_parado,
+        'fcmiii_mg03_producao': fcmiii_mg03_producao,
+        ##-----------FCMIII--Totais------------------------
+        'fcmiii_produtividade_geral': fcmiii_produtividade_geral,
+        'fcmiii_producao_geral': fcmiii_producao_geral,
+        ##-----------TOTAIS DAS FABRICAS--------------------------------
+        'producao_geral_fabricas': producao_geral_fabricas,
+        'produtividade_geral_fabricas': produtividade_geral_fabricas,
     }
 
     return JsonResponse(response_data,safe=False)
