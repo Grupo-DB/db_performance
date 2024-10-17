@@ -49,7 +49,8 @@ INSTALLED_APPS = [
     'bisGerenciais.dashboardOperacoes.home',
     'bisGerenciais.dashboardOperacoes.britagem',
     'bisGerenciais.dashboardOperacoes.rebritagem',
-    'bisGerenciais.dashboardOperacoes.calcario'
+    'bisGerenciais.dashboardOperacoes.calcario',
+    'bisGerenciais.dashboardOperacoes.fertilizante'
 
 ]
 
