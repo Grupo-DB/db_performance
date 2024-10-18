@@ -15,6 +15,7 @@ urlpatterns = [
     path('britagem/', include('bisGerenciais.dashboardOperacoes.britagem.urls')),
     path('rebritagem/', include('bisGerenciais.dashboardOperacoes.rebritagem.urls')),
     path('calcario/', include('bisGerenciais.dashboardOperacoes.calcario.urls')),
+    path('fertilizante/',include('bisGerenciais.dashboardOperacoes.fertilizante.urls')),
 
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
