@@ -135,11 +135,11 @@ def calculos_graficos_calcario(request):
         data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
         data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
     elif tipo_calculo == 'mensal':
-        data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
-        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
     elif tipo_calculo == 'anual':
-        data_inicio = datetime.now().strftime('%Y-01-01 00:00:00')  # Início do ano
-        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
     else:
         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
 

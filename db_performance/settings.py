@@ -45,7 +45,7 @@ INSTALLED_APPS = [
     'django_celery_results',
     'notifications',
     'avaliacoes.datacalc',
-    'bisGerenciais.cal',
+    'bisGerenciais.dashboardOperacoes.cal',
     'bisGerenciais.dashboardOperacoes.home',
     'bisGerenciais.dashboardOperacoes.britagem',
     'bisGerenciais.dashboardOperacoes.rebritagem',
