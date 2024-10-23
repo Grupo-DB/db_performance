@@ -247,7 +247,7 @@ def calculos_cal_equipamentos(request):
             'azbe_quant': azbe_quant,
             'metalicos_quant': metalicos_quant
         }
-
+    return JsonResponse(response_data, safe=False)
 ##############-----------------------------------CALCULAR GRÀFICOS CAL------------------------------------####
 @csrf_exempt
 @api_view(['POST'])
@@ -344,7 +344,7 @@ def calculos_cal_graficos(request):
 
         if dias_corridos > 0 :
             volume_ultimo_dia_cvc = consulta_cal[consulta_cal['ESTQCOD'].isin([2740,2741]) & (consulta_cal['DIA'] == dias_corridos )]
-            volume_ultimo_dia_ch2 = consulta_cal[consulta_cal['ESTQCOD'].isin([2744.2833]) & (consulta_cal['DIA'] == dias_corridos )]    
+            volume_ultimo_dia_ch2 = consulta_cal[consulta_cal['ESTQCOD'].isin([2744,2833]) & (consulta_cal['DIA'] == dias_corridos )]    
             volume_ultimo_dia_hidraulica = consulta_cal[consulta_cal['ESTQCOD'].isin([2742,2743]) & (consulta_cal['DIA'] == dias_corridos )]
 
             #Volume total
@@ -403,7 +403,7 @@ def calculos_cal_graficos(request):
             'ch2': volume_diario_ch2_df.to_dict(orient='records'),
             'hidraulica': volume_diario_hidraulica_df.to_dict(orient='records'),
         }
-        return JsonResponse(volume_diario, safe=False)
+       
     elif tipo_calculo == 'anual':
         consulta_cal['MES'] = consulta_cal['BPRODATA'].dt.month
 
@@ -516,7 +516,7 @@ def calculos_cal_graficos(request):
             'hidraulica': volume_mensal_hidraulica_df.to_dict(orient='records')
         }
 
-        response_data = {
+    response_data = {
 
     }
 
@@ -528,5 +528,299 @@ def calculos_cal_graficos(request):
     if volume_mensal is not None:
         response_data['volume_mensal'] = volume_mensal                
     
-        return JsonResponse(response_data, safe=False)
+    return JsonResponse(response_data, safe=False)
+
+##----------------------------------------- CAL DETALHES EQUIPAMENTOS ---------------------------------##
+@csrf_exempt
+@api_view(['POST'])
+def calculos_equipamentos_detalhes(request):
+    data = request.data.get('data')
+
+    consulta_equipamentos = pd.read_sql(f"""
+    SELECT 
+    CASE
+        WHEN EPNOME LIKE '%ARGAMASSA%' THEN 7
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM1%' THEN 1
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM2%' THEN 2
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM3%' THEN 3
+        WHEN EPNOME LIKE '%CAL%' AND EQPAUTOMTAG LIKE '%FCC%' THEN 5
+        WHEN EPNOME LIKE '%CAL%' AND EQPAUTOMTAG NOT LIKE '%FCC%' THEN 6
+        WHEN EPNOME LIKE '%FERTILIZANTE%' THEN 4
+        ELSE 999
+    END ORDEM,
+    CASE
+        WHEN EPNOME LIKE '%ARGAMASSA%' THEN 'ARGAMASSA'
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM1%' THEN 'CALCARIO 1'
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM2%' THEN 'CALCARIO 2'
+        WHEN EPNOME LIKE '%CALCARIO%' AND EQPAUTOMTAG LIKE '%FCM3%' THEN 'CALCARIO 3'
+        WHEN EPNOME LIKE '%CAL%' AND EQPAUTOMTAG LIKE '%FCC%' THEN 'CALCINACAO'
+        WHEN EPNOME LIKE '%CAL%' AND EQPAUTOMTAG NOT LIKE '%FCC%' THEN 'CAL'
+        WHEN EPNOME LIKE '%FERTILIZANTE%' THEN 'FERTILIZANTE'
+        ELSE EPNOME 
+    END FABRICA,
+    EPNOME ETAPA, 
+    BPROCOD DIARIA,
+    CASE 
+        WHEN EQPAUTOMTAG = '' OR EQPAUTOMTAG IS NULL THEN EQPNOME
+        ELSE EQPAUTOMTAG
+    END EQUIPAMENTO, 
+    BPROEQP EQUIPAMENTO_CODIGO, 
+    CASE
+        WHEN BPROEQP = 0 OR BPROEQP IS NULL THEN DATEPART(HOUR, BPRODATA2 - BPRODATA1) + 
+                                                (CAST(DATEPART(MINUTE, BPRODATA2 - BPRODATA1) AS DOUBLE PRECISION) / 60)
+        ELSE BPROHRTOT
+    END HRTOT, 
+    CASE
+        WHEN BPROEQP = 0 OR BPROEQP IS NULL THEN DATEPART(HOUR, BPRODATA2 - BPRODATA1) + 
+                                                (CAST(DATEPART(MINUTE, BPRODATA2 - BPRODATA1) AS DOUBLE PRECISION) / 60)
+        ELSE BPROHRPROD
+    END HRPRO, 
+    CASE
+        WHEN BPROEQP = 0 OR BPROEQP IS NULL THEN DATEPART(HOUR, BPRODATA2 - BPRODATA1) + 
+                                                (CAST(DATEPART(MINUTE, BPRODATA2 - BPRODATA1) AS DOUBLE PRECISION) / 60)
+        ELSE BPROHROPER
+    END HROPER,
+    (SELECT SUM(EDPRHRTOT) FROM EVENTODIARIAPROD WHERE EDPRBPRO = BPRO.BPROCOD) HREVENTO,
+    IBPROQUANT QUANT, 
+    ESPSIGLA SIGLA,
+    (SELECT PPDADOCHAR FROM PESPARAMETRO WHERE PPTPP = 7 AND PPREF = BPRO.BPROCOD) CONDICAO,
+    (SELECT PPDADOCHAR FROM PESPARAMETRO WHERE PPTPP = 8 AND PPREF = BPRO.BPROCOD) MATERIAL,
+    (SELECT PPDADOCHAR FROM PESPARAMETRO WHERE PPTPP = 584 AND PPREF = BPRO.BPROCOD) TELA
+    FROM BAIXAPRODUCAO BPRO
+    JOIN ETAPAPRODUCAO ON EPCOD = BPROEP
+    LEFT OUTER JOIN FICHAPRODUTO ON FPROCOD = BPROFPRO
+    LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+    LEFT OUTER JOIN ITEMBAIXAPRODUCAO ON IBPROTIPO = 'D' AND IBPROBPRO = BPROCOD
+    LEFT OUTER JOIN ESTOQUE ON ESTQCOD = IBPROREF
+    LEFT OUTER JOIN ESPECIE ON ESPCOD = ESTQESP
+    WHERE BPROSIT = 1
+    AND BPROEMP = 1
+    AND BPROFIL = 0
+    AND CAST(BPRODATA1 as date) = '{data}'
+    AND BPROEP = 3
+    AND BPROEQP IN (440,441,442,612)
+    ORDER BY BPRO.BPROCOD
+
+    """,engine)
+
+    ####################---------ENSACADOS -- MB01---------------############################################### 
+    #MB01
+    mb01_hora_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 440 ].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum()
+    mb01_hora_producao_val = mb01_hora_producao_int.item() if not mb01_hora_producao_int.empty else 0
+    mb01_hora_producao_quant = locale.format_string("%.0f",mb01_hora_producao_val,grouping=True) if mb01_hora_producao_val > 0 else 0
+
+    mb01_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 440 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
+    mb01_hora_parado_val = mb01_hora_parado_int.item() if not mb01_hora_parado_int.empty else 0
+    mb01_hora_parado_quant = locale.format_string("%.0f",mb01_hora_parado_val,grouping=True) if mb01_hora_parado_val > 0 else 0
+
+    mb01_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 440 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
+    mb01_producao_val = mb01_producao_int.item() if not mb01_producao_int.empty else 0
+    mb01_producao_quant = locale.format_string("%.0f",mb01_producao_val,grouping=True) if mb01_producao_val > 0 else 0
+
+    mb01_produtividade_val = 0 
+    if mb01_hora_producao_val > 0:
+        mb01_produtividade_val = mb01_producao_val / mb01_hora_producao_val
+        mb01_produtividade = locale.format_string("%.0f",mb01_produtividade_val, grouping=True)
+    else:
+        mb01_produtividade = 0    
+#---------------------------------------------------------MB02
+    #MB02
+    mb02_hora_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 441 ].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum()
+    mb02_hora_producao_val = mb02_hora_producao_int.item() if not mb02_hora_producao_int.empty else 0
+    mb02_hora_producao_quant = locale.format_string("%.0f",mb02_hora_producao_val,grouping=True) if mb02_hora_producao_val > 0 else 0
+
+    mb02_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 441 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
+    mb02_hora_parado_val = mb02_hora_parado_int.item() if not mb02_hora_parado_int.empty else 0
+    mb02_hora_parado_quant = locale.format_string("%.0f",mb02_hora_parado_val,grouping=True) if mb02_hora_parado_val > 0 else 0
+
+    mb02_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 441 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
+    mb02_producao_val = mb02_producao_int.item() if not mb02_producao_int.empty else 0
+    mb02_producao_quant = locale.format_string("%.0f",mb02_producao_val,grouping=True) if mb02_producao_val > 0 else 0
+
+    mb02_produtividade_val = 0
+    if mb02_hora_producao_val > 0:
+        mb02_produtividade_val = mb02_producao_val / mb02_hora_producao_val
+        mb02_produtividade = locale.format_string("%.0f",mb02_produtividade_val, grouping=True)
+    else:
+        mb02_produtividade = 0
+
+#-----------------------------------------------------------MB03
+    #MB03
+    mb03_hora_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 612 ].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum()
+    mb03_hora_producao_val = mb03_hora_producao_int.item() if not mb03_hora_producao_int.empty else 0
+    mb03_hora_producao_quant = locale.format_string("%.0f",mb03_hora_producao_val,grouping=True) if mb03_hora_producao_val > 0 else 0
+
+    mb03_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 612 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
+    mb03_hora_parado_val = mb03_hora_parado_int.item() if not mb03_hora_parado_int.empty else 0
+    mb03_hora_parado_quant = locale.format_string("%.0f",mb03_hora_parado_val,grouping=True) if mb03_hora_parado_val > 0 else 0
+
+    mb03_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 612 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
+    mb03_producao_val = mb03_producao_int.item() if not mb03_producao_int.empty else 0
+    mb03_producao_quant = locale.format_string("%.0f",mb03_producao_val,grouping=True) if mb03_producao_val > 0 else 0
+
+    mb03_produtividade_val = 0 
+    if mb03_hora_producao_val > 0:
+        mb03_produtividade_val = mb03_producao_val / mb03_hora_producao_val
+        mb03_produtividade = locale.format_string("%.0f",mb03_produtividade_val, grouping=True)
+    else:
+        mb03_produtividade = 0
+        
+#---------------------------------------------------MG01------------------------------------------------------
+     #MG01
+    mg01_hora_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 442 ].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum()
+    mg01_hora_producao_val = mg01_hora_producao_int.item() if not mg01_hora_producao_int.empty else 0
+    mg01_hora_producao_quant = locale.format_string("%.0f",mg01_hora_producao_val,grouping=True) if mg01_hora_producao_val > 0 else 0
+
+    mg01_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 442 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
+    mg01_hora_parado_val = mg01_hora_parado_int.item() if not mg01_hora_parado_int.empty else 0
+    mg01_hora_parado_quant = locale.format_string("%.0f",mg01_hora_parado_val,grouping=True) if mg01_hora_parado_val > 0 else 0
+
+    mg01_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 442 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
+    mg01_producao_val = mg01_producao_int.item() if not mg01_producao_int.empty else 0
+    mg01_producao_quant = locale.format_string("%.0f",mg01_producao_val,grouping=True) if mg01_producao_val > 0 else 0
+
+    mg01_produtividade_val = 0 
+    if mg01_hora_producao_val > 0:
+        mg01_produtividade_val = mg01_producao_val / mg01_hora_producao_val
+        mg01_produtividade = locale.format_string("%.0f",mg01_produtividade_val, grouping=True)
+    else:
+        mg01_produtividade = 0
+
+#----------------------------------------------------TOTAIS----------------------------------------------------
+    #Produtividade
+    produtividade_geral_val = 0
+    if mb01_produtividade_val or mb02_produtividade_val or mb03_produtividade_val or mg01_produtividade_val > 0 :
+        produtividade_geral_val = (mb01_produtividade_val + mb02_produtividade_val + mb03_produtividade_val + mg01_produtividade_val) / 4
+        produtividade_geral = locale.format_string("%.0f",produtividade_geral_val,grouping=True)
+    else:
+        produtividade_geral = 0    
+
+    #Produção
+    if mb01_producao_val or mb02_producao_val or mb03_producao_val or mg01_producao_val > 0 :
+        producao_geral_val = mb01_producao_val + mb02_producao_val + mb03_producao_val + mg01_producao_val 
+        producao_geral = locale.format_string("%.0f",producao_geral_val,grouping=True)
+    else:
+        producao_geral = 0   
+
+    ##---------------------------------MOVIMENTAÇÃO DE CARGAS---------------------------------------------######        
+    data = request.data.get('data')
+    consulta_carregamento= pd.read_sql(f"""
+    SELECT CLINOME, CLICOD, TRANNOME, TRANCOD, NFPLACA, ESTUF, NFPED, NFNUM, SDSSERIE, NFDATA,
+
+        ESTQCOD, ESTQNOME, ESPSIGLA,
+
+        ((INFQUANT * INFPESO) /1000) QUANT,
+        (INFTOTAL / (NFTOTPRO + NFTOTSERV) * (NFTOTPRO + NFTOTSERV)) TOTAL_PRODUTO,
+        (INFTOTAL / (NFTOTPRO + NFTOTSERV) * NFTOTAL) TOTAL,
+        INFDAFRETE FRETE
+
+        FROM NOTAFISCAL
+        JOIN SERIEDOCSAIDA ON SDSCOD = NFSNF
+        JOIN NATUREZAOPERACAO ON NOPCOD = NFNOP
+        JOIN CLIENTE ON CLICOD = NFCLI
+        JOIN ITEMNOTAFISCAL ON INFNFCOD = NFCOD
+        JOIN ESTOQUE ON ESTQCOD = INFESTQ
+        JOIN ESPECIE ON ESPCOD = ESTQESP
+        LEFT OUTER JOIN TRANSPORTADOR ON TRANCOD = NFTRAN
+        LEFT OUTER JOIN PEDIDO ON PEDNUM = INFPED
+        LEFT OUTER JOIN ESTADO ON ESTCOD = NFEST
+
+        WHERE NFSIT = 1
+        AND NFSNF NOT IN (8) -- Serie Acerto
+        AND NFEMP = 1
+        AND NFFIL = 0
+        AND NOPFLAGNF LIKE '_S%'
+        AND CAST (NFDATA as date) = '{data}' 
+        AND ESTQCOD IN (2740,2741,2742,2743,2744,2833)
+
+    ORDER BY NFDATA, NFNUM
+                 """,engine)
+
+    #KPI'S
+    total_carregamento = consulta_carregamento['QUANT'].sum()
+    total_carregamento = locale.format_string("%.0f",total_carregamento, grouping=True)
+
+
+    data = request.data.get('data')
+    consulta_estoque = pd.read_sql (f"""
+        SELECT DISTINCT ESTQNOME, ESTQCOD, DADOS.DT DATA, EMPCOD EMPRESA, QESTQFIL FILIAL,
+        QUANTESTOQUE, QUANTMOV, (QUANTESTOQUE - QUANTMOV) SALDO,
+        ((QUANTESTOQUE * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END) / 1000) QUANTESTOQUETN,
+        ((QUANTMOV * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END) / 1000) QUANTMOVTN,
+        ((QUANTESTOQUE * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END) / 1000) -
+        ((QUANTMOV * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END) / 1000) SALDOTN
+        FROM (
+            SELECT CAST('{data}' AS DATE) AS DT
+            FROM master..spt_values
+            WHERE type = 'P'
+        ) DADOS
+        JOIN ESTOQUE EQ ON 1=1  
+        JOIN EMPRESA EE ON 1=1  
+        JOIN GRUPOALMOXARIFADO G1 ON G1.GALMCOD = ESTQGALM
+        LEFT OUTER JOIN GRUPOALMOXARIFADO G2 ON G2.GALMCOD = G1.GALMGALMPAI
+        LEFT OUTER JOIN GRUPOALMOXARIFADO G3 ON G3.GALMCOD = G2.GALMGALMPAI
+        LEFT OUTER JOIN GRUPOALMOXARIFADO G4 ON G4.GALMCOD = G3.GALMGALMPAI
+        LEFT OUTER JOIN GRUPOALMOXARIFADO G5 ON G5.GALMCOD = G4.GALMGALMPAI
+        LEFT OUTER JOIN GRUPOALMOXARIFADO G6 ON G6.GALMCOD = G5.GALMGALMPAI
+        OUTER APPLY (SELECT QESTQFIL, COALESCE(SUM(QESTQESTOQUE),0) QUANTESTOQUE
+                    FROM QUANTESTOQUE
+                    WHERE QESTQESTQ = EQ.ESTQCOD AND QESTQEMP = EE.EMPCOD GROUP BY QESTQFIL) QESTQ
+        OUTER APPLY (SELECT COALESCE(SUM(MESTQQUANT),0) QUANTMOV 
+                    FROM MOVESTOQUE 
+                    WHERE MESTQESTQ = EQ.ESTQCOD 
+                    AND MESTQEMP = EE.EMPCOD AND MESTQFIL = QESTQ.QESTQFIL AND MESTQDATA > DADOS.DT) QUANTMOV
+        -- Novo JOIN com MOVESTOQUE para verificar o movimento
+        LEFT JOIN (
+            SELECT MESTQESTQ, MESTQEMP, MESTQFIL, COUNT(*) AS MOVCOUNT
+            FROM MOVESTOQUE
+            WHERE MESTQREFTIPO < 10
+            AND CAST(MESTQDATA AS DATE) = '{data}'
+            GROUP BY MESTQESTQ, MESTQEMP, MESTQFIL
+        ) MOV ON MOV.MESTQESTQ = EQ.ESTQCOD
+            AND MOV.MESTQEMP = EE.EMPCOD 
+            AND MOV.MESTQFIL = QESTQ.QESTQFIL
+
+        WHERE EE.EMPCOD = 1
+        AND COALESCE(QESTQFIL, 0) = 0 
+        AND ESTQGALM = 1827
+        AND ESTQCOD IN (2740,2741,2742,2743,2744,2833)
+        AND MOV.MOVCOUNT > 0 -- Usa o resultado do JOIN ao invés da subquery
+        AND (SELECT COUNT(*) FROM GRUPOALMOXARIFADO WHERE GALMCOD = EQ.ESTQGALM AND GALMPRODVENDA = 'S') > 0  /*&PRODVENDA*/
+        ORDER BY ESTQNOME, DATA;
+                    """,engine)
     
+    estoque_total = 0
+    estoque_total = consulta_estoque['SALDO'].sum()
+    estoque_total = locale.format_string("%.0f",estoque_total,grouping=True)
+
+    response_data = {
+        #-------------MB01---------------------## 
+        'mb01_producao_quant':mb01_producao_quant,
+        'mb01_produtividade':mb01_produtividade,
+        'mb01_hora_parado_quant':mb01_hora_parado_quant,
+        'mb01_hora_producao_quant' : mb01_hora_producao_quant,
+        #-------------MB02---------------------## 
+        'mb02_producao_quant':mb02_producao_quant,
+        'mb02_produtividade':mb02_produtividade,
+        'mb02_hora_parado_quant':mb02_hora_parado_quant,
+        'mb02_hora_producao_quant': mb02_hora_producao_quant,
+        #-------------MB03---------------------##
+        'mb03_producao_quant':mb03_producao_quant,
+        'mb03_produtividade':mb03_produtividade, 
+        'mb03_hora_parado_quant':mb03_hora_parado_quant,
+        'mb03_hora_producao_quant' : mb03_hora_producao_quant,
+        #-------------MG01---------------------##
+        'mg01_producao_quant':mg01_producao_quant,
+        'mg01_produtividade':mg01_produtividade,
+        'mg01_hora_parado_quant':mg01_hora_parado_quant,
+        'mg01_hora_producao_quant': mg01_hora_producao_quant,
+        #------------GERAL------------------##
+        'produtividade_geral': produtividade_geral,
+        'producao_geral': producao_geral,
+        #------------CARREGAMENTO------------------##
+        'total_carregamento':total_carregamento,
+        #------------ESTOQUE------------------##
+        'estoque_total': estoque_total,
+    }    
+
+    return JsonResponse(response_data, safe=False)    
