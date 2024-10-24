@@ -824,3 +824,297 @@ def calculos_equipamentos_detalhes(request):
     }    
 
     return JsonResponse(response_data, safe=False)    
+
+####----------------------------------GRAFICOS CARREGAMENTO---------------------------"#########
+@csrf_exempt
+@api_view(['POST'])
+def calculos_cal_graficos_carregamento(request):
+
+    # Recuperando o tipo de cálculo do corpo da requisição
+    tipo_calculo = request.data.get('tipo_calculo')
+    etapa = request.data.get('etapa')
+    # Definindo as datas com base no tipo de cálculo
+    if tipo_calculo == 'atual':
+        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
+        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
+    elif tipo_calculo == 'mensal':
+        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+    elif tipo_calculo == 'anual':
+        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+    else:
+        return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
+
+    consulta_carregamento= pd.read_sql(f"""
+    SELECT CLINOME, CLICOD, TRANNOME, TRANCOD, NFPLACA, ESTUF, NFPED, NFNUM, SDSSERIE, NFDATA,INFQUANT,
+
+        ESTQCOD, ESTQNOME, ESPSIGLA,
+
+        ((INFQUANT * INFPESO) /1000) QUANT,
+        (INFTOTAL / (NFTOTPRO + NFTOTSERV) * (NFTOTPRO + NFTOTSERV)) TOTAL_PRODUTO,
+        (INFTOTAL / (NFTOTPRO + NFTOTSERV) * NFTOTAL) TOTAL,
+        INFDAFRETE FRETE
+
+        FROM NOTAFISCAL
+        JOIN SERIEDOCSAIDA ON SDSCOD = NFSNF
+        JOIN NATUREZAOPERACAO ON NOPCOD = NFNOP
+        JOIN CLIENTE ON CLICOD = NFCLI
+        JOIN ITEMNOTAFISCAL ON INFNFCOD = NFCOD
+        JOIN ESTOQUE ON ESTQCOD = INFESTQ
+        JOIN ESPECIE ON ESPCOD = ESTQESP
+        LEFT OUTER JOIN TRANSPORTADOR ON TRANCOD = NFTRAN
+        LEFT OUTER JOIN PEDIDO ON PEDNUM = INFPED
+        LEFT OUTER JOIN ESTADO ON ESTCOD = NFEST
+
+        WHERE NFSIT = 1
+        AND NFSNF NOT IN (8) -- Serie Acerto
+        AND NFEMP = 1
+        AND NFFIL = 0
+        AND NOPFLAGNF LIKE '_S%'
+        AND CAST (NFDATA as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}' 
+        AND ESTQCOD IN (2740,2741,2742,2743,2744,2833)
+
+    ORDER BY NFDATA, NFNUM
+                 """,engine)
+
+    # Inicializar variáveis
+    volume_diario = None
+    volume_mensal = None
+
+    if 'NFDATA' in consulta_carregamento.columns:
+        consulta_carregamento['NFDATA'] = pd.to_datetime(consulta_carregamento['NFDATA'],errors='coerce')
+        consulta_carregamento = consulta_carregamento.dropna(subset=['NFDATA']) # remove as linhas onde a data é nula                 
+
+     # Quebrando o cálculo mensal em dias
+    if tipo_calculo == 'mensal':
+        consulta_carregamento['DIA'] = consulta_carregamento['NFDATA'].dt.day
+
+        #Função para preencher em caso de dias faltantes
+        def preencher_dias_faltantes(volume_df):
+            dias_completos = pd.DataFrame({'DIA': range(1, 32)})
+            return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0)    
+
+        #calculo do volume acumulado dos ensacados
+        volume_diario_cvc_df = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2740,2741])].groupby('DIA')['INFQUANT'].sum().reset_index()
+        volume_diario_ch2_df = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2744,2833])].groupby('DIA')['INFQUANT'].sum().reset_index()
+        volume_diario_hidraulica_df = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2742,2743])].groupby('DIA')['INFQUANT'].sum().reset_index()
+
+        #Preencher dias Faltantes
+        volume_diario_cvc_df = preencher_dias_faltantes(volume_diario_cvc_df)
+        volume_diario_ch2_df = preencher_dias_faltantes(volume_diario_ch2_df)
+        volume_diario_hidraulica_df = preencher_dias_faltantes(volume_diario_hidraulica_df)
+
+        #MediasDiarias
+        media_diaria_cvc = volume_diario_cvc_df['INFQUANT'].mean()
+        media_diaria_cvc = locale.format_string("%.0f",media_diaria_cvc,grouping=True)
+
+        media_diaria_ch2 = volume_diario_ch2_df['INFQUANT'].mean()
+        media_diaria_ch2 = locale.format_string("%.0f",media_diaria_ch2,grouping=True)
+
+        media_diaria_hidraulica = volume_diario_hidraulica_df['INFQUANT'].mean()
+        media_diaria_hidraulica = locale.format_string("%.0f",media_diaria_hidraulica,grouping=True)
+
+        #volume Total
+        volume_diario_total = volume_diario_cvc_df['INFQUANT'].sum() + volume_diario_ch2_df['INFQUANT'].sum() + volume_diario_hidraulica_df['INFQUANT'].sum()
+        #data Atual 
+        hoje = datetime.now().day -1
+
+        # Calculo média agregada todos os produtos
+        if hoje > 0 :
+            media_diaria_agregada = volume_diario_total / hoje
+            media_diaria_agregada = locale.format_string("%.0f",media_diaria_agregada,grouping=True)
+        else:
+            media_diaria_agregada = 0
+
+        #CAlculo de projeção
+        dias_corridos = consulta_carregamento['DIA'].max()  #último dia no mes que teve produção
+        dias_no_mes = (consulta_carregamento['NFDATA'].max().replace(day=1) + pd.DateOffset(months=1) - pd.DateOffset(days=1)).day   
+
+        if dias_corridos > 0 :
+            volume_ultimo_dia_cvc = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2740,2741]) & (consulta_carregamento['DIA'] == dias_corridos )]
+            volume_ultimo_dia_ch2 = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2744,2833]) & (consulta_carregamento['DIA'] == dias_corridos )]    
+            volume_ultimo_dia_hidraulica = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2742,2743]) & (consulta_carregamento['DIA'] == dias_corridos )]
+
+            #Volume total
+            volume_ultimo_dia_total_cvc = volume_ultimo_dia_cvc['INFQUANT'].sum()
+            volume_ultimo_dia_total_ch2 = volume_ultimo_dia_ch2['INFQUANT'].sum()
+            volume_ultimo_dia_total_hidraulica = volume_ultimo_dia_hidraulica['INFQUANT'].sum()
+
+            volume_ultimo_dia_total = volume_ultimo_dia_total_cvc + volume_ultimo_dia_total_ch2 + volume_ultimo_dia_total_hidraulica
+            volume_ultimo_dia_total = locale.format_string("%.0f",volume_ultimo_dia_total,grouping=True)
+
+            #PROJEÇÂO
+            producao_acumulada_cvc = volume_diario_cvc_df['INFQUANT'].sum()
+            projecao_cvc = (producao_acumulada_cvc / dias_corridos) * dias_no_mes
+            projecao_cvc = locale.format_string("%.0f",projecao_cvc,grouping=True)
+
+            producao_acumulada_ch2 = volume_diario_ch2_df['INFQUANT'].sum()
+            projecao_ch2 = (producao_acumulada_ch2 / dias_corridos) * dias_no_mes
+            projecao_ch2 = locale.format_string("%.0f",projecao_ch2,grouping=True)
+
+            producao_acumulada_hidraulica = volume_diario_hidraulica_df['INFQUANT'].sum()
+            projecao_hidraulica = (producao_acumulada_hidraulica / dias_corridos) * dias_no_mes
+            projecao_hidraulica = locale.format_string("%.0f",projecao_hidraulica,grouping=True)
+        else :
+            projecao_cvc = 0
+            projecao_ch2 = 0
+            projecao_hidraulica = 0
+
+        #Projecao agregada anual
+        projecao_acumulada_total = producao_acumulada_cvc + producao_acumulada_ch2 + producao_acumulada_hidraulica
+        if dias_corridos > 0 :
+            projecao_total = (projecao_acumulada_total / dias_corridos) * dias_no_mes
+            projecao_total = locale.format_string("%.0f",projecao_total,grouping=True)
+        else:
+            projecao_total = 0
+
+        volume_diario = {
+            #----------VOLUMES ULTIMO DIA-----------------------#
+            'volume_ultimo_dia_total_cvc': volume_ultimo_dia_total_cvc,
+            'volume_ultimo_dia_total_ch2': volume_ultimo_dia_total_ch2,
+            'volume_ultimo_dia_total_hidraulica': volume_ultimo_dia_total_hidraulica,
+            #------------------PROJEÇÕES--------------------------------#
+            'projecao_cvc': projecao_cvc,
+            'projecao_ch2': projecao_ch2,
+            'projecao_hidraulica': projecao_hidraulica,
+            'projecao_total': projecao_total,
+            #----------------MEDIAS----------------------------------#
+            'media_diaria_cvc': media_diaria_cvc,
+            'media_diaria_ch2': media_diaria_ch2,
+            'media_diaria_hidraulica': media_diaria_hidraulica,
+            'media_diaria_agregada': media_diaria_agregada,
+            #---------------VOLUME TOTAL---------------#
+            'volume_ultimo_dia_total': volume_ultimo_dia_total,
+            'volume_diario_total': volume_diario_total,
+            #-----------------INDIVIDUAIS-----------------------#
+            'cvc': volume_diario_cvc_df.to_dict(orient='records'),
+            'ch2': volume_diario_ch2_df.to_dict(orient='records'),
+            'hidraulica': volume_diario_hidraulica_df.to_dict(orient='records'),
+        }
+
+    elif tipo_calculo == 'anual':
+        consulta_carregamento['MES'] = consulta_carregamento['NFDATA'].dt.month
+
+        # Função para preencher os meses faltantes com 0
+        def preencher_meses_faltantes(volume_df):
+            meses_completos = pd.DataFrame({'MES': range(1, 13)})
+            return meses_completos.merge(volume_df, on='MES', how='left').fillna(0)
+        
+        #calculo do volume acumulado dos ensacados
+        volume_mensal_cvc_df = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2740,2741])].groupby('MES')['INFQUANT'].sum().reset_index()
+        volume_mensal_ch2_df = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2744,2833])].groupby('MES')['INFQUANT'].sum().reset_index()
+        volume_mensal_hidraulica_df = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2742,2743])].groupby('MES')['INFQUANT'].sum().reset_index()
+       
+        #Preencher dias Faltantes
+        volume_mensal_cvc_df = preencher_meses_faltantes(volume_mensal_cvc_df)
+        volume_mensal_ch2_df = preencher_meses_faltantes(volume_mensal_ch2_df)
+        volume_mensal_hidraulica_df = preencher_meses_faltantes(volume_mensal_hidraulica_df)
+
+        # Pegando o mês atual (corridos)
+        mes_corrente = datetime.now().month
+
+        # Somar o volume mensal sem incluir os meses futuros
+        volume_mensal_cvc_df_filtrado = volume_mensal_cvc_df[volume_mensal_cvc_df['MES'] <= mes_corrente]
+        volume_mensal_ch2_df_filtrado = volume_mensal_ch2_df[volume_mensal_ch2_df['MES'] <= mes_corrente]
+        volume_mensal_hidraulica_df_filtrado = volume_mensal_hidraulica_df[volume_mensal_hidraulica_df['MES'] <= mes_corrente]
+
+        # Médias mensais baseadas nos meses já passados
+        media_mensal_cvc = volume_mensal_cvc_df_filtrado['INFQUANT'].sum() / mes_corrente
+        media_mensal_cvc = locale.format_string("%.0f", media_mensal_cvc, grouping=True)
+
+        media_mensal_ch2 = volume_mensal_ch2_df_filtrado['INFQUANT'].sum() / mes_corrente
+        media_mensal_ch2 = locale.format_string("%.0f", media_mensal_ch2, grouping=True)
+
+        media_mensal_hidraulica = volume_mensal_hidraulica_df_filtrado['INFQUANT'].sum() / mes_corrente
+        media_mensal_hidraulica = locale.format_string("%.0f", media_mensal_hidraulica, grouping=True)
+
+        #SOma valores mensais 
+        volume_mensal_total = volume_mensal_cvc_df['INFQUANT'].sum() + volume_mensal_ch2_df['INFQUANT'].sum() + volume_mensal_hidraulica_df['INFQUANT'].sum() 
+        
+        # Calculando o número total de entradas (dias de produção)
+        mes = datetime.now().month
+
+        # Calculando a média agregada de todas as fábricas
+        if mes > 0:
+            media_mensal_agregada = volume_mensal_total / mes
+            media_mensal_agregada = locale.format_string("%.0f", media_mensal_agregada, grouping=True)
+        else:
+            media_mensal_agregada = 0
+
+        # Calculando projeção
+        #meses_corridos = consulta_fcm['MES'].max()  # Último dia do mês em que houve produção
+        meses_corridos = datetime.now().month
+        meses_no_ano = 12
+
+        if meses_corridos > 0 :
+            volume_ultimo_mes_cvc = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2740,2741]) & (consulta_carregamento['MES'] == meses_corridos )]
+            volume_ultimo_mes_ch2 = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2744.2833]) & (consulta_carregamento['MES'] == meses_corridos )]    
+            volume_ultimo_mes_hidraulica = consulta_carregamento[consulta_carregamento['ESTQCOD'].isin([2742,2743]) & (consulta_carregamento['MES'] == meses_corridos )]
+
+            #Volume total
+            volume_ultimo_mes_total_cvc = volume_ultimo_mes_cvc['INFQUANT'].sum()
+            volume_ultimo_mes_total_ch2 = volume_ultimo_mes_ch2['INFQUANT'].sum()
+            volume_ultimo_mes_total_hidraulica = volume_ultimo_mes_hidraulica['INFQUANT'].sum()
+
+            volume_ultimo_mes_total = volume_ultimo_mes_total_cvc + volume_ultimo_mes_total_ch2 + volume_ultimo_mes_total_hidraulica
+            volume_ultimo_mes_total = locale.format_string("%.0f",volume_ultimo_mes_total, grouping=True)
+
+            #PROJEÇÂO
+            producao_mensal_acumulada_cvc = volume_mensal_cvc_df['INFQUANT'].sum()
+            projecao_anual_cvc = (producao_mensal_acumulada_cvc / meses_corridos) * meses_no_ano
+            projecao_anual_cvc = locale.format_string("%.0f", projecao_anual_cvc, grouping=True)
+
+            producao_mensal_acumulada_ch2 = volume_mensal_ch2_df['INFQUANT'].sum()
+            projecao_anual_ch2 = (producao_mensal_acumulada_ch2 / meses_corridos) * meses_no_ano
+            projecao_anual_ch2 = locale.format_string("%.0f", projecao_anual_ch2, grouping=True)
+
+            producao_mensal_acumulada_hidraulica = volume_mensal_hidraulica_df['INFQUANT'].sum()
+            projecao_anual_hidraulica = (producao_mensal_acumulada_hidraulica / meses_corridos) * meses_no_ano
+            projecao_anual_hidraulica = locale.format_string("%.0f", projecao_anual_hidraulica, grouping=True)
+
+        else:
+            projecao_anual_fcmi = 0
+            projecao_anual_fcmii = 0
+            projecao_anual_fcmiii = 0
+
+        producao_mensal_acumulada_total = producao_mensal_acumulada_cvc + producao_mensal_acumulada_ch2 + producao_mensal_acumulada_hidraulica
+        # Projeção anual agregada
+        if meses_corridos > 0:
+            projecao_anual_total = (producao_mensal_acumulada_total / meses_corridos) * meses_no_ano
+            projecao_anual_total = locale.format_string("%.0f", projecao_anual_total, grouping=True)
+        else:
+            projecao_anual_total = 0
+
+        volume_mensal = {
+            #---------PROJECOES-----------------#
+            'projecao_anual_cvc': projecao_anual_cvc,
+            'projecao_anual_ch2': projecao_anual_ch2,
+            'projecao_anual_hidraulica': projecao_anual_hidraulica,
+            'projecao_anual_total': projecao_anual_total,
+            #------------MEDIAS--------------#####
+            'media_mensal_cvc': media_mensal_cvc,
+            'media_mensal_ch2': media_mensal_ch2,
+            'media_mensal_hidraulica': media_mensal_hidraulica,
+            'media_mensal_agregada': media_mensal_agregada,
+            #-----------VOLUMES-----------------####
+            'volume_ultimo_mes_total': volume_ultimo_mes_total,
+            #-----------INDIVIDUAIS------------#
+            'cvc': volume_mensal_cvc_df.to_dict(orient='records'),
+            'ch2': volume_mensal_ch2_df.to_dict(orient='records'),
+            'hidraulica': volume_mensal_hidraulica_df.to_dict(orient='records')
+        }
+
+    response_data = {
+
+    }
+
+    # Adicionando o volume diário se o tipo de cálculo for 'mensal'
+    if volume_diario is not None:
+        response_data['volume_diario'] = volume_diario
+
+    # Adicionando o volume mensal se o tipo de cálculo for 'anual'
+    if volume_mensal is not None:
+        response_data['volume_mensal'] = volume_mensal                
+    
+    return JsonResponse(response_data, safe=False)     
