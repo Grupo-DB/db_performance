@@ -4,9 +4,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from rest_framework.decorators import api_view
 from django.db import connections
+from sqlalchemy import create_engine
 import pandas as pd
 import locale
-from sqlalchemy import create_engine
 
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')  # Exemplo de locale brasileiro
 
