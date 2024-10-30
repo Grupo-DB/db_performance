@@ -25,7 +25,7 @@ def calculos_calcario(request):
 
     # Definindo as datas com base no tipo de cálculo
     if tipo_calculo == 'atual':
-        data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d 07:10:00')
+        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
         data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
     elif tipo_calculo == 'mensal':
         data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
@@ -43,7 +43,7 @@ def calculos_calcario(request):
             FROM BAIXAPRODUCAO
             JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
             JOIN ESTOQUE ON ESTQCOD = IBPROREF
-            WHERE CAST (BPRODATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+            WHERE CAST (BPRODATA AS datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
             AND BPROEMP = 1 AND BPROFIL = 0 AND BPROSIT = 1
             AND IBPROTIPO = 'D' AND BPROEP = {bproep};
         """, engine)

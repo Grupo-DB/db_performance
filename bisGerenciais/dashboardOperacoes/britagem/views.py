@@ -26,14 +26,14 @@ def calculos_britagem(request):
 
     # Definindo as datas com base no tipo de cálculo
     if tipo_calculo == 'atual':
-        data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
-        data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
+        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
+        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:09:00')
     elif tipo_calculo == 'mensal':
-        data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
-        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:09:00')  # Data atual
     elif tipo_calculo == 'anual':
         data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
-        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:09:00')  # Data atual
     else:
         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
 
@@ -52,7 +52,7 @@ def calculos_britagem(request):
                             FROM DIARIAPROD
                             JOIN EVENTODIARIAPROD ON EDPRDPR = DPRCOD
                             WHERE
-                            CAST(DPRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+                              CAST(DPRDATA1 as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
                             AND DPRSIT = 1
                             AND DPREMP = 1
                             AND DPRFIL = 0
@@ -64,7 +64,7 @@ def calculos_britagem(request):
     JOIN EVENTODIARIA ON EVDCOD = EDPREVD
 
     WHERE 
-    CAST(DPRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+      CAST(DPRDATA1 as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
     AND DPRSIT = 1
     AND DPREMP =1
     AND DPRFIL = 0
@@ -290,8 +290,6 @@ GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
 ################################################################################################
 
     consulta_mov = pd.read_sql(f"""
-        DECLARE @LOCAL_ORIGEM VARCHAR(MAX) = '';  -- Substitua pelo valor apropriado
-
         SELECT 
             DTRREF AS DIARIA, 
             DTRDATA1 AS INICIO, 
@@ -413,7 +411,7 @@ GROUP BY EDPREVD, EVDNOME, EDPROPERSN, DPREQP
         AND DTREMP = 1
         AND DTRFIL = 0
         
-        AND CAST(DTRDATA1 AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND CAST(DTRDATA1 AS datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
         
     ORDER BY 
     INICIO, FIM, DIARIA;
@@ -537,14 +535,14 @@ def calculos_graficos(request):
 
     # Definindo as datas com base no tipo de cálculo
     if tipo_calculo == 'atual':
-        data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
-        data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
+        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
+        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
     elif tipo_calculo == 'mensal':
-        data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
-        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
     elif tipo_calculo == 'anual':
-        data_inicio = datetime.now().strftime('%Y-01-01 00:00:00')  # Início do ano
-        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
     else:
         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
 
@@ -558,7 +556,7 @@ def calculos_graficos(request):
         WHERE DPRSIT = 1
         AND DPREMP = 1
         AND DPRFIL = 0
-        AND CAST(DPRDATA1 AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND CAST(DPRDATA1 AS datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
         AND ADPRLOC <> 0
         GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHROPER, DPRDATA1
 
@@ -572,7 +570,7 @@ def calculos_graficos(request):
         JOIN DIARIAPROD ON DPRCOD = IDTRDPR
         JOIN EQUIPAMENTO ON EQPCOD = DPREQP
         WHERE DTRSIT = 1
-        AND CAST(DTRDATA1 AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND CAST(DTRDATA1 AS datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
         AND IDTRTIPODEST = 1
         AND DTREMP = 1
         AND DTRFIL = 0
@@ -768,123 +766,6 @@ def calculos_graficos(request):
     return JsonResponse(response_data)
 
 
-# @csrf_exempt
-# @api_view(['POST'])
-# def calculos_graficos(request):
-#     connection_name = 'sga'
-    
-#     # Recuperando o tipo de cálculo do corpo da requisição
-#     tipo_calculo = request.data.get('tipo_calculo')
-
-#     # Definindo as datas com base no tipo de cálculo
-#     if tipo_calculo == 'atual':
-#         data_inicio = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
-#         data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
-
-#     elif tipo_calculo == 'mensal':
-#         # Quebrar o mensal em diário
-#         data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
-#         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
-        
-#         # Itera sobre os dias do mês
-#         data_inicio_dt = datetime.strptime(data_inicio, '%Y-%m-%d %H:%M:%S')
-#         data_fim_dt = datetime.strptime(data_fim, '%Y-%m-%d %H:%M:%S')
-#         resultados_diarios = []
-
-#         while data_inicio_dt <= data_fim_dt:
-#             dia_fim = data_inicio_dt + timedelta(days=1)
-#             consulta_volume_britado = pd.read_sql(f"""
-#                 SELECT 0 TIPO, DPRCOD, DPRREF, EQPCOD, EQPNOME, LOCCOD, LOCNOME, SUM(ADPRPESOTOT) TOTAL, (DPRHROPER) TOTAL_HORAS FROM ALIMDIARIAPROD
-#                 JOIN DIARIAPROD ON DPRCOD = ADPRDPR
-#                 JOIN LOCAL LD ON LD.LOCCOD = ADPRLOC
-#                 JOIN EQUIPAMENTO ON EQPCOD = DPREQP
-#                 WHERE DPRSIT = 1
-#                 AND DPREMP = 1
-#                 AND DPRFIL = 0
-#                 AND CAST(DPRDATA1 as date) BETWEEN '{data_inicio_dt.strftime('%Y-%m-%d')}' AND '{dia_fim.strftime('%Y-%m-%d')}'
-#                 AND ADPRLOC <> 0
-#                 GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHROPER
-#                 UNION
-#                 SELECT 0 TIPO, DPRCOD, DPRREF, EQPCOD, EQPNOME, LOCCOD, LOCNOME, SUM(ADTRPESOTOT) TOTAL, (DPRHRPROD) TOTAL_HORAS FROM ALIMDIARIATRANSP
-#                 JOIN ITEMDIARIATRANSP ON IDTRCOD = ADTRIDTR
-#                 JOIN DIARIATRANSP ON DTRCOD = IDTRDTR
-#                 JOIN LOCAL LD ON LD.LOCCOD = ADTRLOC
-#                 JOIN DIARIAPROD ON DPRCOD = IDTRDPR
-#                 JOIN EQUIPAMENTO ON EQPCOD = DPREQP
-#                 WHERE DTRSIT = 1
-#                 AND CAST(DTRDATA1 as date) BETWEEN '{data_inicio_dt.strftime('%Y-%m-%d')}' AND '{dia_fim.strftime('%Y-%m-%d')}'
-#                 AND IDTRTIPODEST = 1
-#                 AND DTREMP = 1
-#                 AND DTRFIL = 0
-#                 GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHRPROD
-#                 ORDER BY 5,7
-#             """, connections[connection_name])
-
-#             # Adicionando resultados diários
-#             resultados_diarios.append({
-#                 'data': data_inicio_dt.strftime('%Y-%m-%d'),
-#                 'volume_britado': consulta_volume_britado.to_dict(orient='records')
-#             })
-            
-#             # Incrementar para o próximo dia
-#             data_inicio_dt = dia_fim
-
-#         return JsonResponse({'resultados_diarios': resultados_diarios}, status=200)
-
-#     elif tipo_calculo == 'anual':
-#         # Quebrar o anual em mensal
-#         data_inicio = datetime.now().strftime('%Y-01-01 00:00:00')  # Início do ano
-#         data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
-        
-#         # Itera sobre os meses do ano
-#         data_inicio_dt = datetime.strptime(data_inicio, '%Y-%m-%d %H:%M:%S')
-#         data_fim_dt = datetime.now()
-#         resultados_mensais = []
-
-#         while data_inicio_dt <= data_fim_dt:
-#             ultimo_dia_mes = (data_inicio_dt.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
-#             data_fim_mes = min(ultimo_dia_mes, data_fim_dt)
-
-#             consulta_volume_britado = pd.read_sql(f"""
-#                 SELECT 0 TIPO, DPRCOD, DPRREF, EQPCOD, EQPNOME, LOCCOD, LOCNOME, SUM(ADPRPESOTOT) TOTAL, (DPRHROPER) TOTAL_HORAS FROM ALIMDIARIAPROD
-#                 JOIN DIARIAPROD ON DPRCOD = ADPRDPR
-#                 JOIN LOCAL LD ON LD.LOCCOD = ADPRLOC
-#                 JOIN EQUIPAMENTO ON EQPCOD = DPREQP
-#                 WHERE DPRSIT = 1
-#                 AND DPREMP = 1
-#                 AND DPRFIL = 0
-#                 AND CAST(DPRDATA1 as date) BETWEEN '{data_inicio_dt.strftime('%Y-%m-%d')}' AND '{data_fim_mes.strftime('%Y-%m-%d')}'
-#                 AND ADPRLOC <> 0
-#                 GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHROPER
-#                 UNION
-#                 SELECT 0 TIPO, DPRCOD, DPRREF, EQPCOD, EQPNOME, LOCCOD, LOCNOME, SUM(ADTRPESOTOT) TOTAL, (DPRHRPROD) TOTAL_HORAS FROM ALIMDIARIATRANSP
-#                 JOIN ITEMDIARIATRANSP ON IDTRCOD = ADTRIDTR
-#                 JOIN DIARIATRANSP ON DTRCOD = IDTRDTR
-#                 JOIN LOCAL LD ON LD.LOCCOD = ADTRLOC
-#                 JOIN DIARIAPROD ON DPRCOD = IDTRDPR
-#                 JOIN EQUIPAMENTO ON EQPCOD = DPREQP
-#                 WHERE DTRSIT = 1
-#                 AND CAST(DTRDATA1 as date) BETWEEN '{data_inicio_dt.strftime('%Y-%m-%d')}' AND '{data_fim_mes.strftime('%Y-%m-%d')}'
-#                 AND IDTRTIPODEST = 1
-#                 AND DTREMP = 1
-#                 AND DTRFIL = 0
-#                 GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHRPROD
-#                 ORDER BY 5,7
-#             """, connections[connection_name])
-
-#             # Adicionando resultados mensais
-#             resultados_mensais.append({
-#                 'mes': data_inicio_dt.strftime('%Y-%m'),
-#                 'volume_britado': consulta_volume_britado.to_dict(orient='records')
-#             })
-
-#             # Incrementar para o próximo mês
-#             data_inicio_dt = (data_inicio_dt.replace(day=28) + timedelta(days=4)).replace(day=1)
-
-#         return JsonResponse({'resultados_mensais': resultados_mensais}, status=200)
-
-#     else:
-#         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
 
 
 

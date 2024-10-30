@@ -26,14 +26,14 @@ def calculos_rebritagem(request):
 
     # Definindo as datas com base no tipo de cálculo
     if tipo_calculo == 'atual':
-        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
-        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
+        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:09:00')
     elif tipo_calculo == 'mensal':
-        data_inicio = datetime.now().strftime('%Y-%m-01 00:00:00')  # Início do mês
-        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
     elif tipo_calculo == 'anual':
-        data_inicio = datetime.now().strftime('%Y-01-01 00:00:00')  # Início do ano
-        data_fim = datetime.now().strftime('%Y-%m-%d 23:59:59')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
     else:
         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
 
@@ -45,7 +45,7 @@ def calculos_rebritagem(request):
             WHERE DPRSIT = 1
             AND DPREMP = 1
             AND DPRFIL = 0
-            AND CAST(DPRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+            AND CAST(DPRDATA1 as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
             AND ADPRLOC <> 0
 
             GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHROPER
@@ -59,7 +59,7 @@ def calculos_rebritagem(request):
             JOIN DIARIAPROD ON DPRCOD = IDTRDPR
             JOIN EQUIPAMENTO ON EQPCOD = DPREQP
             WHERE DTRSIT = 1
-            AND CAST(DTRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+            AND CAST(DTRDATA1 as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
             AND IDTRTIPODEST = 1
             AND DTREMP = 1
             AND DTRFIL = 0
@@ -204,7 +204,7 @@ def calculos_rebritagem_paradas(request):
         embuchamento_desarme_percentual = ', '.join(map(str, embuchamento_desarme_percentual))
         embuchamento_desarme_percentual = round(float(embuchamento_desarme_percentual),1)
     else:
-        embuchamento_rompedor_percentual = 0
+        embuchamento_desarme_percentual = 0
     embuchamento_desarme_tempo = des['TEMPO'].values
     if embuchamento_desarme_tempo != 0:
         embuchamento_desarme_tempo = ', '.join(map(str, embuchamento_desarme_tempo))

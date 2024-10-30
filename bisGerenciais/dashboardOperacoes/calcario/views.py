@@ -46,7 +46,7 @@ def calculos_calcario(request):
                 JOIN ESTOQUE ON ESTQCOD = IBPROREF
                 LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
 
-                WHERE CAST(BPRODATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+                WHERE CAST(BPRODATA1 as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
 
                 AND BPROEMP = 1
                 AND BPROFIL =0
@@ -99,7 +99,7 @@ def calculos_calcario(request):
         AND NFEMP = 1
         AND NFFIL = 0
         AND NOPFLAGNF LIKE '_S%'
-        AND CAST (NFDATA as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND CAST (NFDATA as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
         AND ESTQCOD IN (1,4,5,104,37,2785)
 
     ORDER BY NFDATA, NFNUM
