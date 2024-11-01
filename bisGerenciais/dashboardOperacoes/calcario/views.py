@@ -203,8 +203,8 @@ def calculos_graficos_calcario(request):
 
 
         # Somando os volumes diários de todas as fábricas
-        volume_diario_total = volume_diario_fcmi_df['PESO'].sum() + volume_diario_fcmii_df['PESO'].sum() + volume_diario_fcmiii_df['PESO'].sum()
-
+        volume_diario_total = int(volume_diario_fcmi_df['PESO'].sum() + volume_diario_fcmii_df['PESO'].sum() + volume_diario_fcmiii_df['PESO'].sum())
+        
        # Obter o dia atual
         hoje = datetime.now().day -1
 
@@ -233,14 +233,17 @@ def calculos_graficos_calcario(request):
             volume_ultimo_dia_total = locale.format_string("%.0f",volume_ultimo_dia_total, grouping=True)
                 
             #PROJEÇÂO
+           
             producao_acumulada_fcmi = volume_diario_fcmi_df['PESO'].sum()
             projecao_fcmi = (producao_acumulada_fcmi / dias_corridos) * dias_no_mes
             projecao_fcmi = locale.format_string("%.0f", projecao_fcmi, grouping=True)
 
+            
             producao_acumulada_fcmii = volume_diario_fcmii_df['PESO'].sum()
             projecao_fcmii = (producao_acumulada_fcmii / dias_corridos) * dias_no_mes
             projecao_fcmii = locale.format_string("%.0f", projecao_fcmii, grouping=True)
 
+            
             producao_acumulada_fcmiii = volume_diario_fcmiii_df['PESO'].sum()
             projecao_fcmiii = (producao_acumulada_fcmiii / dias_corridos) * dias_no_mes
             projecao_fcmiii = locale.format_string("%.0f", projecao_fcmiii, grouping=True)
@@ -248,6 +251,13 @@ def calculos_graficos_calcario(request):
             projecao_fcmi = 0
             projecao_fcmii = 0
             projecao_fcmiii = 0
+            producao_acumulada_fcmi = 0
+            producao_acumulada_fcmii = 0
+            producao_acumulada_fcmiii = 0
+            volume_ultimo_dia_total_fcmi = 0
+            volume_ultimo_dia_total_fcmii = 0
+            volume_ultimo_dia_total_fcmiii = 0
+            volume_ultimo_dia_total = 0
 
         producao_acumulada_total = producao_acumulada_fcmi + producao_acumulada_fcmii + producao_acumulada_fcmiii
         # Projeção anual agregada
@@ -258,22 +268,22 @@ def calculos_graficos_calcario(request):
             projecao_total = 0        
             
         volume_diario = {
-            'volume_ultimo_dia_total_fcmi':volume_ultimo_dia_total_fcmi,
-            'volume_ultimo_dia_total_fcmii': volume_ultimo_dia_total_fcmii,
-            'volume_ultimo_dia_total_fcmiii':volume_ultimo_dia_total_fcmiii,
-            'projecao_fcmi':projecao_fcmi,
-            'projecao_fcmii':projecao_fcmii,
-            'projecao_fcmiii':projecao_fcmiii,
-            'media_diaria_fcmi': media_diaria_fcmi,
-            'media_diaria_fcmii': media_diaria_fcmii,
-            'media_diaria_fcmiii': media_diaria_fcmiii,
-            'volume_ultimo_dia_total': volume_ultimo_dia_total,
-            'media_diaria_agregada': media_diaria_agregada,
-            'projecao_total': projecao_total,
-            'volume_diario_total': volume_diario_total,
-            'fcmi': volume_diario_fcmi_df.to_dict(orient='records'),
-            'fcmii': volume_diario_fcmii_df.to_dict(orient='records'),
-            'fcmiii': volume_diario_fcmiii_df.to_dict(orient='records'),
+             'volume_ultimo_dia_total_fcmi':volume_ultimo_dia_total_fcmi,
+             'volume_ultimo_dia_total_fcmii': volume_ultimo_dia_total_fcmii,
+             'volume_ultimo_dia_total_fcmiii':volume_ultimo_dia_total_fcmiii,
+             'projecao_fcmi':projecao_fcmi,
+             'projecao_fcmii':projecao_fcmii,
+             'projecao_fcmiii':projecao_fcmiii,
+             'media_diaria_fcmi': media_diaria_fcmi,
+             'media_diaria_fcmii': media_diaria_fcmii,
+             'media_diaria_fcmiii': media_diaria_fcmiii,
+             'volume_ultimo_dia_total': volume_ultimo_dia_total,
+             'media_diaria_agregada': media_diaria_agregada,
+             'projecao_total': projecao_total,
+             'volume_diario_total': volume_diario_total,
+             'fcmi': volume_diario_fcmi_df.to_dict(orient='records'),
+             'fcmii': volume_diario_fcmii_df.to_dict(orient='records'),
+             'fcmiii': volume_diario_fcmiii_df.to_dict(orient='records'),
         }
 
     elif tipo_calculo == 'anual':

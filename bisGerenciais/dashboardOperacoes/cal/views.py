@@ -352,7 +352,7 @@ def calculos_cal_graficos(request):
             volume_ultimo_dia_total_ch2 = volume_ultimo_dia_ch2['PESO'].sum()
             volume_ultimo_dia_total_hidraulica = volume_ultimo_dia_hidraulica['PESO'].sum()
 
-            volume_ultimo_dia_total = volume_ultimo_dia_total_cvc + volume_ultimo_dia_total_ch2 + volume_ultimo_dia_total_hidraulica
+            volume_ultimo_dia_total = int(volume_ultimo_dia_total_cvc + volume_ultimo_dia_total_ch2 + volume_ultimo_dia_total_hidraulica)
             volume_ultimo_dia_total = locale.format_string("%.0f",volume_ultimo_dia_total,grouping=True)
 
             #PROJEÇÂO
@@ -371,9 +371,15 @@ def calculos_cal_graficos(request):
             projecao_cvc = 0
             projecao_ch2 = 0
             projecao_hidraulica = 0
-
-        #Projecao agregada anual
-        projecao_acumulada_total = producao_acumulada_cvc + producao_acumulada_ch2 + producao_acumulada_hidraulica
+            producao_acumulada_cvc = 0
+            producao_acumulada_ch2 = 0
+            producao_acumulada_hidraulica = 0
+            volume_ultimo_dia_total_cvc = 0
+            volume_ultimo_dia_total_ch2 = 0
+            volume_ultimo_dia_total_hidraulica = 0
+            volume_ultimo_dia_total = 0
+            #Projecao agregada anual
+            projecao_acumulada_total = producao_acumulada_cvc + producao_acumulada_ch2 + producao_acumulada_hidraulica
         if dias_corridos > 0 :
             projecao_total = (projecao_acumulada_total / dias_corridos) * dias_no_mes
             projecao_total = locale.format_string("%.0f",projecao_total,grouping=True)
@@ -396,8 +402,8 @@ def calculos_cal_graficos(request):
             'media_diaria_hidraulica': media_diaria_hidraulica,
             'media_diaria_agregada': media_diaria_agregada,
             #---------------VOLUME TOTAL---------------#
-            'volume_ultimo_dia_total': volume_ultimo_dia_total,
-            'volume_diario_total': volume_diario_total,
+            #'volume_ultimo_dia_total': volume_ultimo_dia_total,
+            #'volume_diario_total': volume_diario_total,
             #-----------------INDIVIDUAIS-----------------------#
             'cvc': volume_diario_cvc_df.to_dict(orient='records'),
             'ch2': volume_diario_ch2_df.to_dict(orient='records'),
@@ -941,7 +947,7 @@ def calculos_cal_graficos_carregamento(request):
             volume_ultimo_dia_total_ch2 = volume_ultimo_dia_ch2['INFQUANT'].sum()
             volume_ultimo_dia_total_hidraulica = volume_ultimo_dia_hidraulica['INFQUANT'].sum()
 
-            volume_ultimo_dia_total = volume_ultimo_dia_total_cvc + volume_ultimo_dia_total_ch2 + volume_ultimo_dia_total_hidraulica
+            volume_ultimo_dia_total = int(volume_ultimo_dia_total_cvc + volume_ultimo_dia_total_ch2 + volume_ultimo_dia_total_hidraulica)
             volume_ultimo_dia_total = locale.format_string("%.0f",volume_ultimo_dia_total,grouping=True)
 
             #PROJEÇÂO
@@ -960,9 +966,15 @@ def calculos_cal_graficos_carregamento(request):
             projecao_cvc = 0
             projecao_ch2 = 0
             projecao_hidraulica = 0
-
+            volume_ultimo_dia_total_cvc = 0
+            volume_ultimo_dia_total_ch2 = 0
+            volume_ultimo_dia_total_hidraulica = 0
+            producao_acumulada_cvc = 0
+            producao_acumulada_ch2 = 0
+            producao_acumulada_hidraulica = 0
+            volume_ultimo_dia_total = 0
         #Projecao agregada anual
-        projecao_acumulada_total = producao_acumulada_cvc + producao_acumulada_ch2 + producao_acumulada_hidraulica
+            projecao_acumulada_total = producao_acumulada_cvc + producao_acumulada_ch2 + producao_acumulada_hidraulica
         if dias_corridos > 0 :
             projecao_total = (projecao_acumulada_total / dias_corridos) * dias_no_mes
             projecao_total = locale.format_string("%.0f",projecao_total,grouping=True)
@@ -985,8 +997,8 @@ def calculos_cal_graficos_carregamento(request):
             'media_diaria_hidraulica': media_diaria_hidraulica,
             'media_diaria_agregada': media_diaria_agregada,
             #---------------VOLUME TOTAL---------------#
-            'volume_ultimo_dia_total': volume_ultimo_dia_total,
-            'volume_diario_total': volume_diario_total,
+           # 'volume_ultimo_dia_total': volume_ultimo_dia_total,
+            #'volume_diario_total': volume_diario_total,
             #-----------------INDIVIDUAIS-----------------------#
             'cvc': volume_diario_cvc_df.to_dict(orient='records'),
             'ch2': volume_diario_ch2_df.to_dict(orient='records'),

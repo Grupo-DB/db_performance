@@ -642,6 +642,8 @@ def calculos_graficos(request):
             else:
                 projecao_calcario = 0
                 projecao_cal = 0
+                total_ultimo_dia_calcario = 0
+                total_ultimo_dia_cal = 0
 
             volume_diario = {
                 'LOCCOD_44': volume_diario_loc_44.to_dict(orient='records'),
