@@ -103,10 +103,19 @@ def calculos_argamassa_produtos(request):
                 AND BPROSIT = 1
                 AND IBPROTIPO = 'D'
                 AND BPROEP = '{etapa}'
-                
+                AND ESTQCOD <> 5594
+
                 ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
             """,engine)
     #KPIs
+    producao_total = consulta_argamassa['PESO'].sum()
+    producao_total = int(producao_total)
+    producao_total = locale.format_string("%.0f",producao_total,grouping=True)
+
+    ensacado_total = consulta_argamassa['IBPROQUANT'].sum()
+    ensacado_total = int(ensacado_total)
+    ensacado_total = locale.format_string("%.0f",ensacado_total, grouping=True)
+
     concrecal_cimento_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2728].groupby('ESTQCOD')['IBPROQUANT'].sum()
     concrecal_cimento_val = concrecal_cimento_int.item() if not concrecal_cimento_int.empty else 0
     concrecal_cimento_quant = locale.format_string("%.0f",concrecal_cimento_val,grouping=True) if concrecal_cimento_val > 0 else 0
@@ -238,6 +247,9 @@ def calculos_argamassa_produtos(request):
         'arg_contrapiso_5mpa':arg_contrapiso_5mpa_quant,
         'massa_fina':massa_fina_quant,
         'multichapisco':multichapisco_quant,
+        #-----------TOTAIS--------------------------------####
+        'producao_total':producao_total,
+        'ensacado_total': ensacado_total,
     }
     return JsonResponse(response_data, safe=False)
 
