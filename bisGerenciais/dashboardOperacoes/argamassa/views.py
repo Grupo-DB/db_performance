@@ -253,6 +253,58 @@ def calculos_argamassa_produtos(request):
     }
     return JsonResponse(response_data, safe=False)
 
+#---------------------------------CONSULTA ARGAMASSA PRODUTOINDIVIDUAL ---------------------------#########
+@csrf_exempt
+@api_view(['POST'])
+def calculos_argamassa_produto_individual(request):
+    tipo_calculo = request.data.get('tipo_calculo')
+    # Definindo as datas com base no tipo de cálculo
+    if tipo_calculo == 'atual':
+        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
+        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
+    elif tipo_calculo == 'mensal':
+        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+    elif tipo_calculo == 'anual':
+        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+    else:
+        return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
+    etapa = request.data.get('etapa')
+    produto = request.data.get('produto')
+    consulta_argamassa_produto = pd.read_sql(f"""
+            SELECT BPROCOD, BPRODATA, ESTQCOD,EQPLOC, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
+                IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
+
+                FROM BAIXAPRODUCAO
+                JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
+                JOIN ESTOQUE ON ESTQCOD = IBPROREF
+                LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+
+                WHERE CAST(BPRODATA1 as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
+
+                AND BPROEMP = 1
+                AND BPROFIL =0
+                AND BPROSIT = 1
+                AND IBPROTIPO = 'D'
+                AND BPROEP = 1
+                AND ESTQCOD = '{produto}'
+
+                ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
+            """,engine)
+    #KPIs
+
+    produto_int = consulta_argamassa_produto['IBPROQUANT'].sum()
+    #produto_val = produto_int.item() if not produto_int.empty else 0
+    produto_quant = locale.format_string("%.0f",produto_int,grouping=True) if produto_int > 0 else 0
+
+
+    response_data = {
+        'produto':produto_quant,
+    }
+    return JsonResponse(response_data, safe=False)
+
+
     ###---------------------------------CONSULTA EQUIPAMENTOS --------------------##########
 @csrf_exempt
 @api_view(['POST'])
@@ -427,7 +479,7 @@ def calculos_argamassa_graficos(request):
                 AND BPROFIL =0
                 AND BPROSIT = 1
                 AND IBPROTIPO = 'D'
-                AND BPROEP = '{etapa}'
+                AND BPROEP = 1
                 AND ESTQCOD = '{produto}'
                 ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
             """,engine)
@@ -458,7 +510,7 @@ def calculos_argamassa_graficos(request):
         media_diaria = locale.format_string("%.0f",media_diaria,grouping=True)
 
         #volume Total
-        volume_diario_total = volume_diario_df['PESO'].sum()
+        volume_diario_total = int(volume_diario_df['PESO'].sum())
         #data Atual 
         hoje = datetime.now().day -1
 
@@ -477,32 +529,33 @@ def calculos_argamassa_graficos(request):
             volume_ultimo_dia = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto & (consulta_argamassa['DIA'] == dias_corridos )]
 
             #Volume total
-            volume_ultimo_dia_total = volume_ultimo_dia['PESO'].sum()
+            volume_ultimo_dia_total = int(volume_ultimo_dia['PESO'].sum())
             volume_ultimo_dia_total = locale.format_string("%.0f",volume_ultimo_dia_total,grouping=True)
 
             #PROJEÇÂO
             producao_acumulada = volume_diario_df['PESO'].sum()
             projecao = (producao_acumulada / dias_corridos) * dias_no_mes
+            
             projecao = locale.format_string("%.0f",projecao,grouping=True)
 
         else :
             projecao = 0
-
+            volume_ultimo_dia_total = 0
         
 
         volume_diario = {
             #----------VOLUMES ULTIMO DIA-----------------------#
-            'volume_ultimo_dia_total': volume_ultimo_dia_total,
+           # 'volume_ultimo_dia_total': volume_ultimo_dia_total,
             #------------------PROJEÇÕES--------------------------------#
-            'projecao': projecao,
+          #  'projecao': projecao,
             #----------------MEDIAS----------------------------------#
             'media_diaria': media_diaria,
             'media_diaria_agregada': media_diaria_agregada,
             #---------------VOLUME TOTAL---------------#
-            'volume_ultimo_dia_total': volume_ultimo_dia_total,
+            
             'volume_diario_total': volume_diario_total,
             #-----------------INDIVIDUAIS-----------------------#
-            'volume_diario': volume_diario_df.to_dict(orient='records'),
+            'produto': volume_diario_df.to_dict(orient='records'),
 
         }
        
@@ -569,7 +622,7 @@ def calculos_argamassa_graficos(request):
             #-----------VOLUMES-----------------####
             'volume_ultimo_mes_total': volume_ultimo_mes_total,
             #-----------INDIVIDUAIS------------#
-            'volume_mensal': volume_mensal_df.to_dict(orient='records'),
+            'produto': volume_mensal_df.to_dict(orient='records'),
             
         }
 
@@ -687,17 +740,19 @@ def calculos_argamassa_graficos_carregamento(request):
             volume_ultimo_dia = consulta_carregamento[consulta_carregamento['ESTQCOD'] == produto & (consulta_carregamento['DIA'] == dias_corridos )]
             
             #Volume total
-            volume_ultimo_dia_total = volume_ultimo_dia['INFQUANT'].sum()
+            volume_ultimo_dia_total = int(volume_ultimo_dia['INFQUANT'].sum())
             volume_ultimo_dia_total = locale.format_string("%.0f",volume_ultimo_dia_total,grouping=True)
 
             #PROJEÇÂO
-            producao_acumulada = volume_diario_df['INFQUANT'].sum()
+            producao_acumulada =int (volume_diario_df['INFQUANT'].sum())
             projecao = (producao_acumulada / dias_corridos) * dias_no_mes
             projecao = locale.format_string("%.0f",projecao,grouping=True)
 
         else :
             projecao = 0
-        
+            volume_ultimo_dia_total = 0
+            volume_ultimo_dia = 0
+            
         volume_diario = {
             #----------VOLUMES ULTIMO DIA-----------------------#
             'volume_ultimo_dia_total': volume_ultimo_dia_total,
@@ -710,7 +765,7 @@ def calculos_argamassa_graficos_carregamento(request):
             'volume_ultimo_dia_total': volume_ultimo_dia_total,
             'volume_diario_total': volume_diario_total,
             #-----------------INDIVIDUAIS-----------------------#
-            'volume_diario': volume_diario_df.to_dict(orient='records'),
+            'produto': volume_diario_df.to_dict(orient='records'),
         }
 
     elif tipo_calculo == 'anual':
@@ -759,7 +814,7 @@ def calculos_argamassa_graficos_carregamento(request):
             volume_ultimo_mes = consulta_carregamento[consulta_carregamento['ESTQCOD'] == produto & (consulta_carregamento['MES'] == meses_corridos )]
             
             #Volume total
-            volume_ultimo_mes_total = volume_ultimo_mes['INFQUANT'].sum()
+            volume_ultimo_mes_total = int(volume_ultimo_mes['INFQUANT'].sum())
             volume_ultimo_mes_total = locale.format_string("%.0f",volume_ultimo_mes_total, grouping=True)
 
             #PROJEÇÂO
@@ -769,7 +824,8 @@ def calculos_argamassa_graficos_carregamento(request):
 
         else:
             projecao_anual = 0
-
+            volume_ultimo_mes_total = 0
+            volume_ultimo_mes = 0
 
         volume_mensal = {
             #---------PROJECOES-----------------#
@@ -780,7 +836,7 @@ def calculos_argamassa_graficos_carregamento(request):
             #-----------VOLUMES-----------------####
             'volume_ultimo_mes_total': volume_ultimo_mes_total,
             #-----------INDIVIDUAIS------------#
-            'cvc': volume_mensal_df.to_dict(orient='records'),
+            'produto': volume_mensal_df.to_dict(orient='records'),
         }
 
     response_data = {
