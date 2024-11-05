@@ -102,9 +102,11 @@ def calculos_argamassa_produtos(request):
                 AND BPROFIL =0
                 AND BPROSIT = 1
                 AND IBPROTIPO = 'D'
-                AND BPROEP = '{etapa}'
-                AND ESTQCOD <> 5594
-
+                AND BPROEP = 1
+                AND ESTQCOD IN (
+                    2728, 22089, 2708, 2709, 2710, 2730, 23987, 23988, 23989, 24021, 24022, 24023, 24019, 
+                    24020, 24024, 2715, 2716, 2711, 2714, 24222, 2717, 2718, 25878, 25877, 2719, 2729
+                )
                 ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
             """,engine)
     #KPIs
@@ -221,32 +223,32 @@ def calculos_argamassa_produtos(request):
     multichapisco_quant = locale.format_string("%.0f",multichapisco_val,grouping=True) if multichapisco_val > 0 else 0 
 
     response_data = {
-        'concrecal_cimento':concrecal_cimento_quant,
-        'argamassa_assentamento':arg_assent_quant,
-        'arg_colante_ac1':arg_colante_ac1_quant,
-        'arg_colante_ac2':arg_colante_ac2_quant,
-        'arg_colante_ac3':arg_colante_ac3_quant,
-        'arg_projecao':arg_projecao_quant,
-        'arg_rev_arv1':arg_rev_arv1_quant,
-        'arg_rev_arv2':arg_rev_arv2_quant,
-        'arg_rev_arv3':arg_rev_arv3_quant,
-        'arg_est_aae12':arg_est_aae12_quant,
-        'arg_est_aae16':arg_est_aae16_quant,
-        'arg_est_aae20':arg_est_aae20_quant,
-        'arg_est_aae5':arg_est_aae5_quant,
-        'arg_est_aae8':arg_est_aae8_quant,
-        'arg_est_aae_esp':arg_est_aae_esp_quant,
-        'arg_grossa':arg_grossa_quant,
-        'arg_grossa_fibra':arg_grossa_fibra_quant,
-        'arg_media':arg_media_quant,
-        'arg_media_fibra':arg_media_fibra_quant,
-        'arg_mult_uso': arg_mult_uso_quant,
-        'arg_piso':arg_piso_quant,
-        'arg_piso_eva':arg_piso_eva_quant,
-        'arg_contrapiso_10mpa': arg_contrapiso_10mpa_quant,
-        'arg_contrapiso_5mpa':arg_contrapiso_5mpa_quant,
-        'massa_fina':massa_fina_quant,
-        'multichapisco':multichapisco_quant,
+        'CONCRECAL CAL + CIMENTO - SC 20 KG':concrecal_cimento_quant,
+        'PRIMEX ARGAMASSA ASSENTAMENTO DE ALVENARIA - AAV - SC 20 KG':arg_assent_quant,
+        'PRIMEX ARGAMASSA COLANTE AC-I - SC 20 KG':arg_colante_ac1_quant,
+        'PRIMEX ARGAMASSA COLANTE AC-II - SC 20 KG':arg_colante_ac2_quant,
+        'PRIMEX ARGAMASSA COLANTE AC-III - SC 20 KG':arg_colante_ac3_quant,
+        'PRIMEX ARGAMASSA DE PROJECAO - SC 25 KG':arg_projecao_quant,
+        'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-I SC 20 KG':arg_rev_arv1_quant,
+        'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-II SC 20 KG':arg_rev_arv2_quant,
+        'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-III SC 20 KG':arg_rev_arv3_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-12 - SC 20 KG':arg_est_aae12_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-16 - SC 20 KG':arg_est_aae16_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-20 - SC 20 KG':arg_est_aae20_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-5 - SC 20 KG':arg_est_aae5_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-8 - SC 20 KG':arg_est_aae8_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-ESPECIAL - SC 20 KG':arg_est_aae_esp_quant,
+        'PRIMEX ARGAMASSA GROSSA - SC- 25 KG':arg_grossa_quant,
+        'PRIMEX ARGAMASSA GROSSA C/ FIBRA - SC 25 KG':arg_grossa_fibra_quant,
+        'PRIMEX ARGAMASSA MEDIA - SC 25 KG':arg_media_quant,
+        'PRIMEX ARGAMASSA MEDIA C/ FIBRA - SC 25 KG':arg_media_fibra_quant,
+        'PRIMEX ARGAMASSA MULTIPLO USO - SC 20 KG': arg_mult_uso_quant,
+        'PRIMEX ARGAMASSA P/ PISO - SC 25 KG':arg_piso_quant,
+        'PRIMEX ARGAMASSA P/ PISO C/ E.V.A. - SC 25 KG':arg_piso_eva_quant,
+        'PRIMEX ARGAMASSA PARA CONTRAPISO 10 MPA - SC 20 KG': arg_contrapiso_10mpa_quant,
+        'PRIMEX ARGAMASSA PARA CONTRAPISO 5  MPA - SC 20 KG':arg_contrapiso_5mpa_quant,
+        'PRIMEX MASSA FINA - SC 20 KG':massa_fina_quant,
+        'PRIMEX MULTICHAPISCO - SC 20 KG':multichapisco_quant,
         #-----------TOTAIS--------------------------------####
         'producao_total':producao_total,
         'ensacado_total': ensacado_total,
@@ -309,20 +311,8 @@ def calculos_argamassa_produto_individual(request):
 @csrf_exempt
 @api_view(['POST'])
 def calculos_argamassa_equipamentos(request):
-    tipo_calculo = request.data.get('tipo_calculo')
-    # Definindo as datas com base no tipo de cálculo
-    if tipo_calculo == 'atual':
-        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
-        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
-    elif tipo_calculo == 'mensal':
-        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
-        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
-    elif tipo_calculo == 'anual':
-        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
-        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
-    else:
-        return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
-    
+    data = request.data.get('data')
+
     consulta_equipamentos = pd.read_sql(f"""
         SELECT 
         CASE
@@ -383,7 +373,7 @@ def calculos_argamassa_equipamentos(request):
         WHERE BPROSIT = 1
         AND BPROEMP = 1
         AND BPROFIL = 0
-        AND CAST(BPRODATA1 as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND CAST(BPRODATA1 as date) = '{data}'
         AND BPROEP = 1
         AND BPROEQP IN (264,265)
         ORDER BY BPRO.BPROCOD
@@ -429,6 +419,48 @@ def calculos_argamassa_equipamentos(request):
     else:
         mh02_produtividade = 0
 
+    argamassa_produtividade =  mh01_produtividade_val + mh02_produtividade_val / 2
+    argamassa_produtividade = locale.format_string("%.0f",argamassa_produtividade,grouping=True) if argamassa_produtividade > 0 else 0   
+
+    argamassa_producao = mh01_producao_val + mh02_producao_val
+    argamassa_producao = locale.format_string("%.0f",argamassa_producao, grouping=True) if argamassa_producao > 0 else 0
+
+####------------------------------------------------CARREGAMENTO DO DIA---------------####
+    data = request.data.get('data')
+    consulta_movimentacao = pd.read_sql(f"""
+        SELECT CLINOME, CLICOD, TRANNOME, TRANCOD, NFPLACA, ESTUF, NFPED, NFNUM, SDSSERIE, NFDATA,
+            ESTQCOD, ESTQNOME, ESPSIGLA,
+            ((INFQUANT * INFPESO) /1000) QUANT,
+            (INFTOTAL / (NFTOTPRO + NFTOTSERV) * (NFTOTPRO + NFTOTSERV)) TOTAL_PRODUTO,
+            (INFTOTAL / (NFTOTPRO + NFTOTSERV) * NFTOTAL) TOTAL,
+            INFDAFRETE FRETE
+            FROM NOTAFISCAL
+            JOIN SERIEDOCSAIDA ON SDSCOD = NFSNF
+            JOIN NATUREZAOPERACAO ON NOPCOD = NFNOP
+            JOIN CLIENTE ON CLICOD = NFCLI
+            JOIN ITEMNOTAFISCAL ON INFNFCOD = NFCOD
+            JOIN ESTOQUE ON ESTQCOD = INFESTQ
+            JOIN ESPECIE ON ESPCOD = ESTQESP
+            LEFT OUTER JOIN TRANSPORTADOR ON TRANCOD = NFTRAN
+            LEFT OUTER JOIN PEDIDO ON PEDNUM = INFPED
+            LEFT OUTER JOIN ESTADO ON ESTCOD = NFEST
+            WHERE NFSIT = 1
+            AND NFSNF NOT IN (8) -- Serie Acerto
+            AND NFEMP = 1
+            AND NFFIL = 0
+            AND NOPFLAGNF LIKE '_S%'
+            AND CAST (NFDATA as date) = '{data}'
+            AND ESTQCOD IN (
+                2728, 22089, 2708, 2709, 2710, 2730, 23987, 23988, 23989, 24021, 24022, 24023, 24019, 
+                24020, 24024, 2715, 2716, 2711, 2714, 24222, 2717, 2718, 25878, 25877, 2719, 2729
+                )
+        ORDER BY NFDATA, NFNUM
+                    """,engine)
+       #KPI´S
+    total_movimentacao = consulta_movimentacao['QUANT'].sum()
+    total_movimentacao = locale.format_string("%.0f",total_movimentacao, grouping=True)
+
+
     response_data = {
             'mh01_hora_producao':mh01_hora_producao_quant,
             'mh01_hora_parado':mh01_hora_parado_quant,
@@ -438,6 +470,9 @@ def calculos_argamassa_equipamentos(request):
             'mh02_hora_parado':mh02_hora_parado_quant,
             'mh02_producao':mh02_producao_quant,
             'mh02_produtividade':mh02_produtividade,
+            'argamassa_produtividade':argamassa_produtividade,
+            'argamassa_producao': argamassa_producao,
+            'total_movimentacao':total_movimentacao
         }
 
     return JsonResponse (response_data, safe=False)            
@@ -500,17 +535,17 @@ def calculos_argamassa_graficos(request):
             return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0)
         
         #calculo do volume acumulado dos ensacados
-        volume_diario_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('DIA')['PESO'].sum().reset_index()
+        volume_diario_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('DIA')['IBPROQUANT'].sum().reset_index()
         
         #Preencher dias Faltantes
         volume_diario_df = preencher_dias_faltantes(volume_diario_df)
 
         #MediasDiarias
-        media_diaria = volume_diario_df['PESO'].mean()
+        media_diaria = volume_diario_df['IBPROQUANT'].mean()
         media_diaria = locale.format_string("%.0f",media_diaria,grouping=True)
 
         #volume Total
-        volume_diario_total = int(volume_diario_df['PESO'].sum())
+        volume_diario_total = int(volume_diario_df['IBPROQUANT'].sum())
         #data Atual 
         hoje = datetime.now().day -1
 
@@ -529,14 +564,13 @@ def calculos_argamassa_graficos(request):
             volume_ultimo_dia = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto & (consulta_argamassa['DIA'] == dias_corridos )]
 
             #Volume total
-            volume_ultimo_dia_total = int(volume_ultimo_dia['PESO'].sum())
+            volume_ultimo_dia_total = int(volume_ultimo_dia['IBPROQUANT'].sum())
             volume_ultimo_dia_total = locale.format_string("%.0f",volume_ultimo_dia_total,grouping=True)
 
             #PROJEÇÂO
-            producao_acumulada = volume_diario_df['PESO'].sum()
-            projecao = (producao_acumulada / dias_corridos) * dias_no_mes
-            
-            projecao = locale.format_string("%.0f",projecao,grouping=True)
+            producao_acumulada = volume_diario_df['IBPROQUANT'].sum()
+            projecao_val = (producao_acumulada / dias_corridos) * dias_no_mes
+            projecao = locale.format_string("%.0f",projecao_val,grouping=True) if projecao_val > 0 else 0
 
         else :
             projecao = 0
@@ -547,9 +581,9 @@ def calculos_argamassa_graficos(request):
             #----------VOLUMES ULTIMO DIA-----------------------#
            # 'volume_ultimo_dia_total': volume_ultimo_dia_total,
             #------------------PROJEÇÕES--------------------------------#
-          #  'projecao': projecao,
+            'projecao': projecao,
             #----------------MEDIAS----------------------------------#
-            'media_diaria': media_diaria,
+            'media': media_diaria,
             'media_diaria_agregada': media_diaria_agregada,
             #---------------VOLUME TOTAL---------------#
             
@@ -568,7 +602,7 @@ def calculos_argamassa_graficos(request):
             return meses_completos.merge(volume_df, on='MES', how='left').fillna(0)
         
         #calculo do volume acumulado dos ensacados
-        volume_mensal_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('MES')['PESO'].sum().reset_index()
+        volume_mensal_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('MES')['IBPROQUANT'].sum().reset_index()
        
         #Preencher dias Faltantes
         volume_mensal_df = preencher_meses_faltantes(volume_mensal_df)
@@ -580,7 +614,7 @@ def calculos_argamassa_graficos(request):
         volume_mensal_df_filtrado = volume_mensal_df[volume_mensal_df['MES'] <= mes_corrente]
         
         # Médias mensais baseadas nos meses já passados
-        media_mensal = volume_mensal_df_filtrado['PESO'].sum() / mes_corrente
+        media_mensal = volume_mensal_df_filtrado['IBPROQUANT'].sum() / mes_corrente
         media_mensal = locale.format_string("%.0f", media_mensal, grouping=True)
 
         # Calculando o número total de entradas (dias de produção)
@@ -596,11 +630,11 @@ def calculos_argamassa_graficos(request):
             volume_ultimo_mes = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto & (consulta_argamassa['MES'] == meses_corridos )]
             
             #Volume total
-            volume_ultimo_mes_total = volume_ultimo_mes['PESO'].sum()
+            volume_ultimo_mes_total = volume_ultimo_mes['IBPROQUANT'].sum()
             volume_ultimo_mes_total = locale.format_string("%.0f",volume_ultimo_mes_total, grouping=True)
 
             #PROJEÇÂO
-            producao_mensal_acumulada = volume_mensal_df['PESO'].sum()
+            producao_mensal_acumulada = volume_mensal_df['IBPROQUANT'].sum()
             projecao_anual = (producao_mensal_acumulada / meses_corridos) * meses_no_ano
             projecao_anual = locale.format_string("%.0f", projecao_anual, grouping=True)
 
@@ -616,9 +650,9 @@ def calculos_argamassa_graficos(request):
 
         volume_mensal = {
             #---------PROJECOES-----------------#
-            'projecao_anual_total': projecao_anual_total,
+            'projecao': projecao_anual_total,
             #------------MEDIAS--------------#####
-            'media_mensal_cvc': media_mensal,
+            'media': media_mensal,
             #-----------VOLUMES-----------------####
             'volume_ultimo_mes_total': volume_ultimo_mes_total,
             #-----------INDIVIDUAIS------------#
@@ -717,8 +751,8 @@ def calculos_argamassa_graficos_carregamento(request):
         volume_diario = preencher_dias_faltantes(volume_diario_df)
         
         #MediasDiarias
-        media_diaria = volume_diario_df['INFQUANT'].mean()
-        media_diaria = locale.format_string("%.0f",media_diaria,grouping=True)
+        media_diaria_val = volume_diario_df['INFQUANT'].mean()
+        media_diaria = locale.format_string("%.0f",media_diaria_val,grouping=True) if media_diaria_val > 0 else 0
 
         #volume Total
         volume_diario_total = volume_diario_df['INFQUANT'].sum()
@@ -852,3 +886,195 @@ def calculos_argamassa_graficos_carregamento(request):
         response_data['volume_mensal'] = volume_mensal                
     
     return JsonResponse(response_data, safe=False)  
+
+#---------------CARREGAMENTO POR PRODUTO----------------------
+@csrf_exempt
+@api_view(['POST'])
+def calculos_argamassa_produtos_carregamento(request):
+
+    # Recuperando o tipo de cálculo do corpo da requisição
+    tipo_calculo = request.data.get('tipo_calculo')
+    produto = request.data.get('produto')
+    # Definindo as datas com base no tipo de cálculo
+    if tipo_calculo == 'atual':
+        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
+        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
+    elif tipo_calculo == 'mensal':
+        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+    elif tipo_calculo == 'anual':
+        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+    else:
+        return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
+
+    consulta_carregamento= pd.read_sql(f"""
+    SELECT CLINOME, CLICOD, TRANNOME, TRANCOD, NFPLACA, ESTUF, NFPED, NFNUM, SDSSERIE, NFDATA,INFQUANT,
+
+        ESTQCOD, ESTQNOME, ESPSIGLA,
+
+        ((INFQUANT * INFPESO) /1000) QUANT,
+        (INFTOTAL / (NFTOTPRO + NFTOTSERV) * (NFTOTPRO + NFTOTSERV)) TOTAL_PRODUTO,
+        (INFTOTAL / (NFTOTPRO + NFTOTSERV) * NFTOTAL) TOTAL,
+        INFDAFRETE FRETE
+
+        FROM NOTAFISCAL
+        JOIN SERIEDOCSAIDA ON SDSCOD = NFSNF
+        JOIN NATUREZAOPERACAO ON NOPCOD = NFNOP
+        JOIN CLIENTE ON CLICOD = NFCLI
+        JOIN ITEMNOTAFISCAL ON INFNFCOD = NFCOD
+        JOIN ESTOQUE ON ESTQCOD = INFESTQ
+        JOIN ESPECIE ON ESPCOD = ESTQESP
+        LEFT OUTER JOIN TRANSPORTADOR ON TRANCOD = NFTRAN
+        LEFT OUTER JOIN PEDIDO ON PEDNUM = INFPED
+        LEFT OUTER JOIN ESTADO ON ESTCOD = NFEST
+
+        WHERE NFSIT = 1
+        AND NFSNF NOT IN (8) -- Serie Acerto
+        AND NFEMP = 1
+        AND NFFIL = 0
+        AND NOPFLAGNF LIKE '_S%'
+        AND CAST (NFDATA as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}' 
+        AND ESTQCOD IN (
+                2728, 22089, 2708, 2709, 2710, 2730, 23987, 23988, 23989, 24021, 24022, 24023, 24019, 
+                24020, 24024, 2715, 2716, 2711, 2714, 24222, 2717, 2718, 25878, 25877, 2719, 2729
+            )
+
+    ORDER BY NFDATA, NFNUM
+                 """,engine)
+    concrecal_cimento_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2728].groupby('ESTQCOD')['INFQUANT'].sum()
+    concrecal_cimento_val = concrecal_cimento_int.item() if not concrecal_cimento_int.empty else 0
+    concrecal_cimento_quant = locale.format_string("%.0f",concrecal_cimento_val,grouping=True) if concrecal_cimento_val > 0 else 0
+
+    arg_assent_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 22089].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_assent_val = arg_assent_int.item() if not arg_assent_int.empty else 0
+    arg_assent_quant = locale.format_string("%.0f",arg_assent_val,grouping=True) if arg_assent_val > 0 else 0
+
+    arg_colante_ac1_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2708].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_colante_ac1_val = arg_colante_ac1_int.item() if not arg_colante_ac1_int.empty else 0
+    arg_colante_ac1_quant = locale.format_string("%.0f",arg_colante_ac1_val,grouping=True) if arg_colante_ac1_val > 0 else 0
+
+    arg_colante_ac2_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2709].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_colante_ac2_val = arg_colante_ac2_int.item() if not arg_colante_ac2_int.empty else 0
+    arg_colante_ac2_quant = locale.format_string("%.0f",arg_colante_ac2_val,grouping=True) if arg_colante_ac2_val > 0 else 0
+
+    arg_colante_ac3_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2710].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_colante_ac3_val = arg_colante_ac3_int.item() if not arg_colante_ac3_int.empty else 0
+    arg_colante_ac3_quant = locale.format_string("%.0f",arg_colante_ac3_val,grouping=True) if arg_colante_ac3_val > 0 else 0
+
+    arg_projecao_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2730].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_projecao_val = arg_projecao_int.item() if not arg_projecao_int.empty else 0
+    arg_projecao_quant = locale.format_string("%.0f",arg_projecao_val,grouping=True) if arg_projecao_val > 0 else 0
+
+    arg_rev_arv1_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 23987].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_rev_arv1_val = arg_rev_arv1_int.item() if not arg_rev_arv1_int.empty else 0
+    arg_rev_arv1_quant = locale.format_string("%.0f",arg_rev_arv1_val,grouping=True) if arg_rev_arv1_val > 0 else 0
+
+    arg_rev_arv2_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 23988].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_rev_arv2_val = arg_rev_arv2_int.item() if not arg_rev_arv2_int.empty else 0
+    arg_rev_arv2_quant = locale.format_string("%.0f",arg_rev_arv2_val,grouping=True) if arg_rev_arv2_val > 0 else 0
+
+    arg_rev_arv3_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 23989].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_rev_arv3_val = arg_rev_arv3_int.item() if not arg_rev_arv3_int.empty else 0
+    arg_rev_arv3_quant = locale.format_string("%.0f",arg_rev_arv3_val,grouping=True) if arg_rev_arv3_val > 0 else 0
+
+    arg_est_aae12_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24021].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae12_val = arg_est_aae12_int.item() if not arg_est_aae12_int.empty else 0
+    arg_est_aae12_quant = locale.format_string("%.0f",arg_est_aae12_val,grouping=True) if arg_est_aae12_val > 0 else 0
+
+    arg_est_aae16_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24022].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae16_val = arg_est_aae16_int.item() if not arg_est_aae16_int.empty else 0
+    arg_est_aae16_quant = locale.format_string("%.0f",arg_est_aae16_val,grouping=True) if arg_est_aae16_val > 0 else 0
+
+    arg_est_aae20_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24023].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae20_val = arg_est_aae20_int.item() if not arg_est_aae20_int.empty else 0
+    arg_est_aae20_quant = locale.format_string("%.0f",arg_est_aae20_val,grouping=True) if arg_est_aae20_val > 0 else 0
+
+    arg_est_aae5_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24019].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae5_val = arg_est_aae5_int.item() if not arg_est_aae5_int.empty else 0
+    arg_est_aae5_quant = locale.format_string("%.0f",arg_est_aae5_val,grouping=True) if arg_est_aae5_val > 0 else 0
+
+    arg_est_aae8_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24020].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae8_val = arg_est_aae8_int.item() if not arg_est_aae8_int.empty else 0
+    arg_est_aae8_quant = locale.format_string("%.0f",arg_est_aae8_val,grouping=True) if arg_est_aae8_val > 0 else 0
+
+    arg_est_aae_esp_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24024].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae_esp_val = arg_est_aae_esp_int.item() if not arg_est_aae_esp_int.empty else 0
+    arg_est_aae_esp_quant = locale.format_string("%.0f",arg_est_aae_esp_val,grouping=True) if arg_est_aae_esp_val > 0 else 0
+
+    arg_grossa_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2715].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_grossa_val = arg_grossa_int.item() if not arg_grossa_int.empty else 0
+    arg_grossa_quant = locale.format_string("%.0f",arg_grossa_val,grouping=True) if arg_grossa_val > 0 else 0  
+
+    arg_grossa_fibra_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2716].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_grossa_fibra_val = arg_grossa_fibra_int.item() if not arg_grossa_fibra_int.empty else 0
+    arg_grossa_fibra_quant = locale.format_string("%.0f",arg_grossa_fibra_val,grouping=True) if arg_grossa_fibra_val > 0 else 0 
+
+    arg_media_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2711].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_media_val = arg_media_int.item() if not arg_media_int.empty else 0
+    arg_media_quant = locale.format_string("%.0f",arg_media_val,grouping=True) if arg_media_val > 0 else 0 
+
+    arg_media_fibra_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2714].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_media_fibra_val = arg_media_fibra_int.item() if not arg_media_fibra_int.empty else 0
+    arg_media_fibra_quant = locale.format_string("%.0f",arg_media_fibra_val,grouping=True) if arg_media_fibra_val > 0 else 0 
+
+    arg_mult_uso_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24222].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_mult_uso_val = arg_mult_uso_int.item() if not arg_mult_uso_int.empty else 0
+    arg_mult_uso_quant = locale.format_string("%.0f",arg_mult_uso_val,grouping=True) if arg_mult_uso_val > 0 else 0
+
+    arg_piso_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2717].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_piso_val = arg_piso_int.item() if not arg_piso_int.empty else 0
+    arg_piso_quant = locale.format_string("%.0f",arg_piso_val,grouping=True) if arg_piso_val > 0 else 0   
+
+    arg_piso_eva_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2718].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_piso_eva_val = arg_piso_eva_int.item() if not arg_piso_eva_int.empty else 0
+    arg_piso_eva_quant = locale.format_string("%.0f",arg_piso_eva_val,grouping=True) if arg_piso_eva_val > 0 else 0
+
+    arg_contrapiso_10mpa_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 25878].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_contrapiso_10mpa_val = arg_contrapiso_10mpa_int.item() if not arg_contrapiso_10mpa_int.empty else 0
+    arg_contrapiso_10mpa_quant = locale.format_string("%.0f",arg_contrapiso_10mpa_val,grouping=True) if arg_contrapiso_10mpa_val > 0 else 0  
+
+    arg_contrapiso_5mpa_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 25877].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_contrapiso_5mpa_val = arg_contrapiso_5mpa_int.item() if not arg_contrapiso_5mpa_int.empty else 0
+    arg_contrapiso_5mpa_quant = locale.format_string("%.0f",arg_contrapiso_5mpa_val,grouping=True) if arg_contrapiso_5mpa_val > 0 else 0
+
+    massa_fina_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2719].groupby('ESTQCOD')['INFQUANT'].sum()
+    massa_fina_val = massa_fina_int.item() if not massa_fina_int.empty else 0
+    massa_fina_quant = locale.format_string("%.0f",massa_fina_val,grouping=True) if massa_fina_val > 0 else 0  
+
+    multichapisco_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2729].groupby('ESTQCOD')['INFQUANT'].sum()
+    multichapisco_val = multichapisco_int.item() if not multichapisco_int.empty else 0
+    multichapisco_quant = locale.format_string("%.0f",multichapisco_val,grouping=True) if multichapisco_val > 0 else 0 
+
+    response_data = {
+        'CONCRECAL CAL + CIMENTO - SC 20 KG':concrecal_cimento_quant,
+        'PRIMEX ARGAMASSA ASSENTAMENTO DE ALVENARIA - AAV - SC 20 KG':arg_assent_quant,
+        'PRIMEX ARGAMASSA COLANTE AC-I - SC 20 KG':arg_colante_ac1_quant,
+        'PRIMEX ARGAMASSA COLANTE AC-II - SC 20 KG':arg_colante_ac2_quant,
+        'PRIMEX ARGAMASSA COLANTE AC-III - SC 20 KG':arg_colante_ac3_quant,
+        'PRIMEX ARGAMASSA DE PROJECAO - SC 25 KG':arg_projecao_quant,
+        'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-I SC 20 KG':arg_rev_arv1_quant,
+        'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-II SC 20 KG':arg_rev_arv2_quant,
+        'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-III SC 20 KG':arg_rev_arv3_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-12 - SC 20 KG':arg_est_aae12_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-16 - SC 20 KG':arg_est_aae16_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-20 - SC 20 KG':arg_est_aae20_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-5 - SC 20 KG':arg_est_aae5_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-8 - SC 20 KG':arg_est_aae8_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-ESPECIAL - SC 20 KG':arg_est_aae_esp_quant,
+        'PRIMEX ARGAMASSA GROSSA - SC- 25 KG':arg_grossa_quant,
+        'PRIMEX ARGAMASSA GROSSA C/ FIBRA - SC 25 KG':arg_grossa_fibra_quant,
+        'PRIMEX ARGAMASSA MEDIA - SC 25 KG':arg_media_quant,
+        'PRIMEX ARGAMASSA MEDIA C/ FIBRA - SC 25 KG':arg_media_fibra_quant,
+        'PRIMEX ARGAMASSA MULTIPLO USO - SC 20 KG': arg_mult_uso_quant,
+        'PRIMEX ARGAMASSA P/ PISO - SC 25 KG':arg_piso_quant,
+        'PRIMEX ARGAMASSA P/ PISO C/ E.V.A. - SC 25 KG':arg_piso_eva_quant,
+        'PRIMEX ARGAMASSA PARA CONTRAPISO 10 MPA - SC 20 KG': arg_contrapiso_10mpa_quant,
+        'PRIMEX ARGAMASSA PARA CONTRAPISO 5  MPA - SC 20 KG':arg_contrapiso_5mpa_quant,
+        'PRIMEX MASSA FINA - SC 20 KG':massa_fina_quant,
+        'PRIMEX MULTICHAPISCO - SC 20 KG':multichapisco_quant,
+        #-----------TOTAIS--------------------------------####
+        # 'producao_total':producao_total,
+        # 'ensacado_total': ensacado_total,
+    }
+    return JsonResponse(response_data, safe=False)
