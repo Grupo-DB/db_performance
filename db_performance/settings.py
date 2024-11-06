@@ -114,6 +114,19 @@ DATABASES = {
             'charset': 'utf8mb4',  # para MySQL
         },
     }
+
+    #Dev Enviroment
+    # 'default':{
+    #     'ENGINE': 'django.db.backends.mysql',
+    #     'NAME': 'db_performance',
+    #     'USER':'root',
+    #     'PASSWORD': '!@#123qweQWE',
+    #     'HOST': 'localhost',
+    #     'PORT': '3306',
+    #     'OPTIONS': {
+    #         'charset': 'utf8mb4',  # para MySQL
+    #     },
+    # }
 }
 
 

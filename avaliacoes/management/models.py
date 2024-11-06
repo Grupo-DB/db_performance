@@ -124,6 +124,9 @@ class Colaborador(models.Model):
     categoria = models.CharField(max_length=50,blank=True,null=False)
     image = models.FileField(upload_to=upload_image_colaborador,blank=True,null=True)
     user = models.OneToOneField(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='colaborador')  # Campo opcional para o usuário
+    dominio_id = models.IntegerField(blank=True,null=True)
+    minerion_id = models.IntegerField(blank=True,null=True)
+    sgg_id = models.IntegerField(blank=True,null=True)
     class Meta:
         verbose_name = "Colaborador"
         verbose_name_plural = "Colaboradores"
