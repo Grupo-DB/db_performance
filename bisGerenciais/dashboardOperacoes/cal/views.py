@@ -378,8 +378,9 @@ def calculos_cal_graficos(request):
             volume_ultimo_dia_total_ch2 = 0
             volume_ultimo_dia_total_hidraulica = 0
             volume_ultimo_dia_total = 0
-            #Projecao agregada anual
-            projecao_acumulada_total = producao_acumulada_cvc + producao_acumulada_ch2 + producao_acumulada_hidraulica
+
+        #Projecao agregada anual
+        projecao_acumulada_total = producao_acumulada_cvc + producao_acumulada_ch2 + producao_acumulada_hidraulica
         if dias_corridos > 0 :
             projecao_total = (projecao_acumulada_total / dias_corridos) * dias_no_mes
             projecao_total = locale.format_string("%.0f",projecao_total,grouping=True)
@@ -974,7 +975,7 @@ def calculos_cal_graficos_carregamento(request):
             producao_acumulada_hidraulica = 0
             volume_ultimo_dia_total = 0
         #Projecao agregada anual
-            projecao_acumulada_total = producao_acumulada_cvc + producao_acumulada_ch2 + producao_acumulada_hidraulica
+        projecao_acumulada_total = producao_acumulada_cvc + producao_acumulada_ch2 + producao_acumulada_hidraulica
         if dias_corridos > 0 :
             projecao_total = (projecao_acumulada_total / dias_corridos) * dias_no_mes
             projecao_total = locale.format_string("%.0f",projecao_total,grouping=True)
