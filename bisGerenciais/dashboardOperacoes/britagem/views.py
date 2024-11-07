@@ -596,7 +596,7 @@ def calculos_graficos(request):
             #Função para preencher em caso de dias faltantes
             def preencher_dias_faltantes(volume_df):
                 dias_completos = pd.DataFrame({'DIA': range(1, 32)})
-                return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0)
+                return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0).infer_objects(copy=False)
 
 
             # Calculando volume diário para LOCCOD 44 e 62
@@ -664,7 +664,7 @@ def calculos_graficos(request):
             # Função para preencher os meses faltantes com 0
             def preencher_meses_faltantes(volume_df):
                 meses_completos = pd.DataFrame({'MES': range(1, 13)})
-                return meses_completos.merge(volume_df, on='MES', how='left').fillna(0)    
+                return meses_completos.merge(volume_df, on='MES', how='left').fillna(0).infer_objects(copy=False)    
 
 
             # Calculando volume diário para LOCCOD 44 e 62

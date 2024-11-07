@@ -179,7 +179,7 @@ def calculos_graficos_calcario(request):
         #Função para preencher em caso de dias faltantes
         def preencher_dias_faltantes(volume_df):
             dias_completos = pd.DataFrame({'DIA': range(1, 32)})
-            return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0)
+            return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0).infer_objects(copy=False)
 
         #calculo do volume acumulado das tres fabricas
         volume_diario_fcmi_df = consulta_fcm[consulta_fcm['EQPLOC'] == 23].groupby('DIA')['PESO'].sum().reset_index()
@@ -292,7 +292,7 @@ def calculos_graficos_calcario(request):
         # Função para preencher os meses faltantes com 0
         def preencher_meses_faltantes(volume_df):
             meses_completos = pd.DataFrame({'MES': range(1, 13)})
-            return meses_completos.merge(volume_df, on='MES', how='left').fillna(0)
+            return meses_completos.merge(volume_df, on='MES', how='left').fillna(0).infer_objects(copy=False)
 
         #calculo do volume acumulado das tres fabricas
         volume_mensal_fcmi_df = consulta_fcm[consulta_fcm['EQPLOC'] == 23].groupby('MES')['PESO'].sum().reset_index()
@@ -867,7 +867,7 @@ def calculos_calcario_graficos_carregamento(request):
         #Função para preencher em caso de dias faltantes
         def preencher_dias_faltantes(volume_df):
             dias_completos = pd.DataFrame({'DIA': range(1, 32)})
-            return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0)
+            return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0).infer_objects(copy=False)
         
         #calculo do volume acumulado das tres fabricas
         volume_diario_fcmi_df = consulta_carregamento[consulta_carregamento['INFLOC'] == 23].groupby('DIA')['INFQUANT'].sum().reset_index()
@@ -969,8 +969,7 @@ def calculos_calcario_graficos_carregamento(request):
         # Função para preencher os meses faltantes com 0
         def preencher_meses_faltantes(volume_df):
             meses_completos = pd.DataFrame({'MES': range(1, 13)})
-            return meses_completos.merge(volume_df, on='MES', how='left').fillna(0)
-
+            return meses_completos.merge(volume_df, on='MES', how='left').fillna(0).infer_objects(copy=False)
         #calculo do volume acumulado das tres fabricas
         volume_mensal_fcmi_df = consulta_carregamento[consulta_carregamento['INFLOC'] == 23].groupby('MES')['INFQUANT'].sum().reset_index()
         volume_mensal_fcmii_df = consulta_carregamento[consulta_carregamento['INFLOC'] == 24].groupby('MES')['INFQUANT'].sum().reset_index()

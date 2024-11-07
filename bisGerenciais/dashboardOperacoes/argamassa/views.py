@@ -530,10 +530,16 @@ def calculos_argamassa_graficos(request):
     if tipo_calculo == 'mensal':
         consulta_argamassa['DIA'] = consulta_argamassa['BPRODATA'].dt.day
         #Função para preencher em caso de dias faltantes
+        # def preencher_dias_faltantes(volume_df):
+        #     dias_completos = pd.DataFrame({'DIA': range(1, 32)})
+        #     return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0)
+        
         def preencher_dias_faltantes(volume_df):
             dias_completos = pd.DataFrame({'DIA': range(1, 32)})
-            return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0)
-        
+         # Preenche valores nulos com 0 e converte tipos de dados
+            return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0).infer_objects(copy=False)
+
+
         #calculo do volume acumulado dos ensacados
         volume_diario_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('DIA')['IBPROQUANT'].sum().reset_index()
         
@@ -597,9 +603,14 @@ def calculos_argamassa_graficos(request):
         consulta_argamassa['MES'] = consulta_argamassa['BPRODATA'].dt.month
 
         # Função para preencher os meses faltantes com 0
+        # def preencher_meses_faltantes(volume_df):
+        #     meses_completos = pd.DataFrame({'MES': range(1, 13)})
+        #     return meses_completos.merge(volume_df, on='MES', how='left').fillna(0)
+
         def preencher_meses_faltantes(volume_df):
             meses_completos = pd.DataFrame({'MES': range(1, 13)})
-            return meses_completos.merge(volume_df, on='MES', how='left').fillna(0)
+         # Preenche valores nulos com 0 e converte tipos de dados
+            return meses_completos.merge(volume_df, on='MES', how='left').fillna(0).infer_objects(copy=False)
         
         #calculo do volume acumulado dos ensacados
         volume_mensal_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('MES')['IBPROQUANT'].sum().reset_index()
@@ -742,7 +753,7 @@ def calculos_argamassa_graficos_carregamento(request):
         #Função para preencher em caso de dias faltantes
         def preencher_dias_faltantes(volume_df):
             dias_completos = pd.DataFrame({'DIA': range(1, 32)})
-            return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0)    
+            return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0).infer_objects(copy=False)   
 
         #calculo do volume acumulado dos ensacados
         volume_diario_df = consulta_carregamento[consulta_carregamento['ESTQCOD'] == produto].groupby('DIA')['INFQUANT'].sum().reset_index()
@@ -808,7 +819,7 @@ def calculos_argamassa_graficos_carregamento(request):
         # Função para preencher os meses faltantes com 0
         def preencher_meses_faltantes(volume_df):
             meses_completos = pd.DataFrame({'MES': range(1, 13)})
-            return meses_completos.merge(volume_df, on='MES', how='left').fillna(0)
+            return meses_completos.merge(volume_df, on='MES', how='left').fillna(0).infer_objects(copy=False)
         
         #calculo do volume acumulado dos ensacados
         volume_mensal_df = consulta_carregamento[consulta_carregamento['ESTQCOD'] == produto].groupby('MES')['INFQUANT'].sum().reset_index()
