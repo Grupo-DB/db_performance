@@ -1,5 +1,8 @@
 from django.shortcuts import render,HttpResponse
 
+from baseOrcamentaria.orcamento.models import Gestor
+from baseOrcamentaria.orcamento.serializers import GestorSerializer
+
 # Create your views here.
 def management(request):
     return HttpResponse(request,'ok')
@@ -756,7 +759,7 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
         password = self.request.data.get('password', None)
         tornar_avaliado = self.request.data.get('tornar_avaliado', False)
         tornar_avaliador = self.request.data.get('tornar_avaliador', False)
-
+        tornar_gestor = self.request.data.get('tornar_gestor', False)
         colaborador = serializer.save()
         
         if username and password:
@@ -775,6 +778,12 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
 
+        if tornar_gestor and not hasattr(colaborador, 'gestor'):
+            Gestor.objects.create(
+                colaborador_ptr=colaborador,
+                **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
+            )    
+
     @action(detail=False, methods=['get'])
     def meInfo(self, request):
         try:
@@ -792,6 +801,7 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
         password = self.request.data.get('password', None)
         tornar_avaliado = self.request.data.get('tornar_avaliado', False)
         tornar_avaliador = self.request.data.get('tornar_avaliador', False)
+        tornar_gestor = self.request.data.get('tornar_gestor', False)
 
         colaborador = serializer.save()
 
@@ -818,7 +828,12 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
-            
+
+        if tornar_gestor and not hasattr(colaborador, 'gestor'):
+            Gestor.objects.create(
+                colaborador_ptr=colaborador,
+                **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
+            )    
                 
         
     
@@ -1550,3 +1565,54 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 class HistoricoAlteracaoViewSet(viewsets.ModelViewSet):
     queryset = HistoricoAlteracao.objects.all()
     serializer_class = HistoricoAlteracaoSerializer
+
+#########------------------------CONVERTER GESTOR-----------------------------###############
+class GestorViewSet(viewsets.ModelViewSet):
+    queryset = Gestor.objects.all()
+    serializer_class = GestorSerializer
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        if 'image' in serializer.validated_data:
+            image_url = request.build_absolute_uri(instance.image.url)
+            return Response({'image_url': image_url, **serializer.data})
+        return Response(serializer.data)    
+    
+    @action(detail=True, methods=['post'], url_path='transformar_em_gestor')
+    def transformar_em_gestor(self, request, pk=None):
+        colaborador = get_object_or_404(Colaborador, pk=pk)
+
+        # Transformar o colaborador em avaliado
+        gestor = Gestor(
+            colaborador_ptr=colaborador,
+            empresa=colaborador.empresa,
+            filial=colaborador.filial,
+            setor=colaborador.setor,
+            area=colaborador.area,
+            cargo=colaborador.cargo,
+            ambiente=colaborador.ambiente,
+            tipocontrato=colaborador.tipocontrato,
+            nome=colaborador.nome,
+            data_admissao=colaborador.data_admissao,
+            situacao=colaborador.situacao,
+            genero=colaborador.genero,
+            estado_civil=colaborador.estado_civil,
+            data_nascimento=colaborador.data_nascimento,
+            data_troca_setor=colaborador.data_troca_setor,
+            data_troca_cargo=colaborador.data_troca_cargo,
+            data_demissao=colaborador.data_demissao,
+            create_at=colaborador.create_at,
+            image=colaborador.image,
+            email=colaborador.email
+        )
+        gestor.save()
+
+        serializer = self.get_serializer(gestor)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    @action(detail=True, methods=['get'])
+    def get_gestor(self, request, pk=None):
+        gestor = self.get_object()
+        serializer = self.get_serializer(gestor)
+        return Response(serializer.data)

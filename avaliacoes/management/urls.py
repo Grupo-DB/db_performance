@@ -3,7 +3,7 @@ from django.conf.urls.static import static
 from django.conf import settings
 from rest_framework import routers
 from . import views
-from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet,TipoContratoViewSet,PerguntaViewSet,FormularioViewSet,AvaliacaoViewSet,TipoAvaliacaoViewSet,send_email_view2,NotificationViewSet
+from . views import AvaliadoViewSet,ColaboradorViewSet,AvaliadorViewSet,EmpresaViewSet,FilialViewSet,AreaViewSet, GestorViewSet,SetorViewSet,AmbienteViewSet,CargoViewSet,TipoContratoViewSet,PerguntaViewSet,FormularioViewSet,AvaliacaoViewSet,TipoAvaliacaoViewSet,send_email_view2,NotificationViewSet
 from .views import update_password_first_login,CustomTokenObtainPairView,forgot_password,reset_password,HistoricoAlteracaoViewSet
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView,TokenVerifyView
 from rest_framework.routers import DefaultRouter
@@ -11,6 +11,7 @@ router = DefaultRouter()
 router.register(r'colaboradores', ColaboradorViewSet, basename='Colaborador')
 router.register(r'avaliadores', AvaliadorViewSet, basename='Avaliador')
 router.register(r'avaliados', AvaliadoViewSet, basename='Avaliado')
+router.register(r'gestores', GestorViewSet, basename='Gestor')
 router.register(r'empresas', EmpresaViewSet, basename='Empresa')
 router.register(r'filiais', FilialViewSet, basename='Filial')
 router.register(r'areas', AreaViewSet, basename='Areas')

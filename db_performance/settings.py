@@ -51,7 +51,8 @@ INSTALLED_APPS = [
     'bisGerenciais.dashboardOperacoes.rebritagem',
     'bisGerenciais.dashboardOperacoes.calcario',
     'bisGerenciais.dashboardOperacoes.fertilizante',
-    'bisGerenciais.dashboardOperacoes.argamassa'
+    'bisGerenciais.dashboardOperacoes.argamassa',
+    'baseOrcamentaria.orcamento'
 
 ]
 
@@ -103,30 +104,30 @@ DATABASES = {
 #         }
 #     },
 
-    'default':{
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'db_performance',
-        'USER':'grupodb',
-        'PASSWORD': '!@#123qweQWE',
-        'HOST': '172.50.10.79',
-        'PORT': '3306',
-        'OPTIONS': {
-            'charset': 'utf8mb4',  # para MySQL
-        },
-    }
-
-    #Dev Enviroment
     # 'default':{
     #     'ENGINE': 'django.db.backends.mysql',
     #     'NAME': 'db_performance',
-    #     'USER':'root',
+    #     'USER':'grupodb',
     #     'PASSWORD': '!@#123qweQWE',
-    #     'HOST': 'localhost',
+    #     'HOST': '172.50.10.79',
     #     'PORT': '3306',
     #     'OPTIONS': {
     #         'charset': 'utf8mb4',  # para MySQL
     #     },
     # }
+
+    #Dev Enviroment
+    'default':{
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'db_performance',
+        'USER':'root',
+        'PASSWORD': '!@#123qweQWE',
+        'HOST': 'localhost',
+        'PORT': '3306',
+        'OPTIONS': {
+            'charset': 'utf8mb4',  # para MySQL
+        },
+    }
 }
 
 

@@ -17,6 +17,7 @@ urlpatterns = [
     path('calcario/', include('bisGerenciais.dashboardOperacoes.calcario.urls')),
     path('fertilizante/',include('bisGerenciais.dashboardOperacoes.fertilizante.urls')),
     path('argamassa/',include('bisGerenciais.dashboardOperacoes.argamassa.urls')),
+    path('orcamento/',include('baseOrcamentaria.orcamento.urls')),
 
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
