@@ -47,7 +47,7 @@ class RaizSintetica(models.Model):
     raiz_contabil = models.CharField(max_length=80 ,null=False, blank=False) #input from user  4primeiros dig
     descricao = models.CharField(max_length=555, blank=False, null=False) #nome n3 where 4 primeiros dig conta contabil = input 
     natureza = models.CharField(max_length=80, blank=False, null=False) # primeiro caracter da raiz contabil
-    centro_custo_codigo = models.CharField(max_length=80, blank=False, null=False) 
+    centro_custo = models.ForeignKey(CentroCusto,on_delete=models.RESTRICT, related_name='Riazes Sinteticas-Centros de custo+') 
     
     class Meta:
         verbose_name = 'Raiz Sintetica'
@@ -100,17 +100,17 @@ class OrcamentoBase(models.Model):
     ano = models.CharField(max_length=255, blank=False, null=False)
     centro_de_custo_pai = models.ForeignKey(CentroCustoPai, on_delete=models.RESTRICT, related_name='orcamentosPai+')
     centro_custo_nome = models.ForeignKey(CentroCusto, on_delete=models.RESTRICT, related_name='orçamentos_ccs+') #cascata selecionavel
-    gestor = models.ForeignKey(Gestor, on_delete=models.RESTRICT, related_name='gestores_orcamentos+') #cascata conforme o CC
-    empresa = models.ForeignKey(Empresa, on_delete=models.RESTRICT, related_name='gestores_empresas+')#informações obtidas pelo cc pai apenas visivel
-    filial = models.ForeignKey(Filial, on_delete=models.RESTRICT, related_name='gestores_filiais+')
-    area = models.ForeignKey(Area, on_delete=models.RESTRICT, related_name='gestores_areas+')
-    setor = models.ForeignKey(Setor, on_delete=models.RESTRICT, related_name='orcamentos_setores+')
-    ambiente = models.ForeignKey(Ambiente, on_delete=models.RESTRICT, related_name='orcamentos_ambientes')######
+    gestor = models.CharField(max_length=255, blank=False, null=False) #cascata conforme o CC
+    empresa = models.CharField(max_length=255, blank=False, null=False)#informações obtidas pelo cc pai apenas visivel
+    filial = models.CharField(max_length=255, blank=False, null=False)
+    area = models.CharField(max_length=255, blank=False, null=False)
+    setor = models.CharField(max_length=255, blank=False, null=False)
+    ambiente = models.CharField(max_length=255, blank=False, null=False)######
     raiz_sintetica = models.ForeignKey(RaizSintetica, on_delete=models.RESTRICT, related_name='orcamentos_raiz_sintetica+') # raiz pertencente ao centro de custo
-    raiz_sintetica_desc = models.CharField(max_length=255, blank=False, null=False) # descrição da raiz sintetica informada #somente visivel a desc
+    raiz_sintetica_desc = models.CharField(max_length=255, blank=False, null=False) # descrição da raiz sintetica informada #somente visivel a desc byCC
     raiz_analitica = models.ForeignKey(RaizAnalitica, on_delete=models.RESTRICT, related_name='orcamentos_raiz_analitica+') # listar da tabela do banco
     raiz_analitica_desc = models.CharField(max_length=555, blank=False, null=False) #descrição da raiz anatica informada #somente visivel a desc
-    conta_contabil = models.ForeignKey(ContaContabil, on_delete=models.RESTRICT, related_name='orcamentos_contas+') # concatenar codigos raiz sintetica e analitica #apenas gravar
+    conta_contabil = models.CharField(max_length=255, blank=False, null=False) # concatenar codigos raiz sintetica e analitica #apenas gravar
     conta_contabil_descricao = models.CharField(max_length=555, blank=True, null=True) #apenas gravar N analiitico nome
     raiz_contabil_grupo = models.CharField(max_length=255,blank=False, null=False) #raiz sintetica 4dig + 2 primeiros da Raiz analitica #apenas gravar
     raiz_contabil_grupo_desc = models.CharField(max_length=555, blank=True, null=True) #n4 conta contabil informada apenas exibe
