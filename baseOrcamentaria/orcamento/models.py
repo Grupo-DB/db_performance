@@ -47,7 +47,7 @@ class RaizSintetica(models.Model):
     raiz_contabil = models.CharField(max_length=80 ,null=False, blank=False) #input from user  4primeiros dig
     descricao = models.CharField(max_length=555, blank=False, null=False) #nome n3 where 4 primeiros dig conta contabil = input 
     natureza = models.CharField(max_length=80, blank=False, null=False) # primeiro caracter da raiz contabil
-    centro_custo = models.ForeignKey(CentroCusto,on_delete=models.RESTRICT, related_name='Riazes Sinteticas-Centros de custo+') 
+    centro_custo = models.OneToOneField(CentroCusto,on_delete=models.RESTRICT, related_name='raiz_sintetica+') 
     
     class Meta:
         verbose_name = 'Raiz Sintetica'
@@ -114,7 +114,7 @@ class OrcamentoBase(models.Model):
     conta_contabil_descricao = models.CharField(max_length=555, blank=True, null=True) #apenas gravar N analiitico nome
     raiz_contabil_grupo = models.CharField(max_length=255,blank=False, null=False) #raiz sintetica 4dig + 2 primeiros da Raiz analitica #apenas gravar
     raiz_contabil_grupo_desc = models.CharField(max_length=555, blank=True, null=True) #n4 conta contabil informada apenas exibe
-    recorrencia = models.CharField(max_length=255,choices=PERIODICIDADE_CHOICES) #mensal ou anual
+    periodicidade = models.CharField(max_length=255, null=False, blank=False) #mensal ou anual
     mensal_tipo = models.CharField(max_length=255, choices=MENSAL_CHOICES, blank=True)
     mes_especifico = models.IntegerField(blank=True)  # 1-12
     meses_recorrentes = models.CharField(max_length=255, blank=True)  # Ex: 1,2,3,4

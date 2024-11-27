@@ -3,6 +3,7 @@ from django.contrib.auth.models import User,Group
 from rest_framework import serializers
 
 from avaliacoes.management.models import Colaborador
+from avaliacoes.management.serializers import AmbienteSerializer, AreaSerializer, EmpresaSerializer, FilialSerializer, SetorSerializer
 from .models import ContaContabil,Gestor,RaizAnalitica,CentroCustoPai,CentroCusto,RaizSintetica,GrupoItens,OrcamentoBase
 
 class GestorSerializer(serializers.ModelSerializer):
@@ -60,14 +61,23 @@ class RaizAnaliticaSerializer(serializers.ModelSerializer):
         return instance
     
 class CentroCustoPaiSerializer(serializers.ModelSerializer):
+    empresa = EmpresaSerializer()
+    filial = FilialSerializer()
+    area = AreaSerializer()
+    setor = SetorSerializer()
+    ambiente = AmbienteSerializer() 
     class Meta:
         model = CentroCustoPai
         fields = '__all__'
 
 class CentroCustoSerializer(serializers.ModelSerializer):
+    gestor = serializers.PrimaryKeyRelatedField(queryset=Gestor.objects.all(), write_only=True)  # Entrada
+    gestor_detalhes = GestorSerializer(source='gestor', read_only=True)  # Exibição
+
     class Meta:
         model = CentroCusto
-        fields = '__all__'
+        fields = ['id','codigo','nome','cc_pai','gestor','gestor_detalhes']
+
 
 class RaizSinteticaSerializer(serializers.ModelSerializer):
     class Meta:
@@ -128,6 +138,13 @@ class OrcamentoBaseSerializer(serializers.ModelSerializer):
             'raiz_contabil_grupo_desc','id_base',
             ]
         
+        def get_periodicidade_choices(self, obj):
+            return OrcamentoBase.PERIODICIDADE_CHOICES
+
+        def get_mensal_choices(self, obj):
+            return OrcamentoBase.MENSAL_CHOICES
+
+
         def validate(self,data):
             centro_de_custo_pai = data.get('centro_de_custo_pai')
             centro_custo = data.get('centro_de_custo')

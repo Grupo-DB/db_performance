@@ -64,6 +64,14 @@ class CentroCustoViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
     
+    @action(detail=False, methods=['get'], url_path='byCcPai')
+    def byCcPai(self, request):
+        cc_pai_id = request.query_params.get('cc_pai_id')
+        centros_custo = CentroCusto.objects.filter(cc_pai_id=cc_pai_id)
+        serializer = self.get_serializer(centros_custo, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+     
 class RaizSinteticaViewSet(viewsets.ModelViewSet):
     queryset = RaizSintetica.objects.all() 
     serializer_class = RaizSinteticaSerializer
@@ -73,6 +81,28 @@ class RaizSinteticaViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], url_path='byCc')
+    def byCc(self, request):
+        cc_id = request.query_params.get('centro_custo_id') 
+        
+        if not cc_id:
+            return Response(
+                {"error": "O parâmetro 'gestor_id' é obrigatório."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            raiz_sintetica = RaizSintetica.objects.filter(centro_custo_id=cc_id)
+            serializer = self.get_serializer(raiz_sintetica, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {"error": f"Erro ao buscar registros: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+     
     
 class GrupoItensViewSet(viewsets.ModelViewSet):
     queryset = GrupoItens.objects.all()
@@ -103,3 +133,9 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)  
+@api_view(['GET'])
+def ChoicesView(request):
+        return Response({
+            "periodicidade_choices": OrcamentoBase.PERIODICIDADE_CHOICES,
+            "mensal_choices": OrcamentoBase.MENSAL_CHOICES,
+        })
