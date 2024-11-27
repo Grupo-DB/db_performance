@@ -112,7 +112,6 @@ class OrcamentoBase(models.Model):
     raiz_analitica_desc = models.CharField(max_length=555, blank=False, null=False) #descrição da raiz anatica informada #somente visivel a desc
     conta_contabil = models.CharField(max_length=255, blank=False, null=False) # concatenar codigos raiz sintetica e analitica #apenas gravar
     conta_contabil_descricao = models.CharField(max_length=555, blank=True, null=True) #apenas gravar N analiitico nome
-    raiz_contabil_grupo = models.CharField(max_length=255,blank=False, null=False) #raiz sintetica 4dig + 2 primeiros da Raiz analitica #apenas gravar
     raiz_contabil_grupo_desc = models.CharField(max_length=555, blank=True, null=True) #n4 conta contabil informada apenas exibe
     periodicidade = models.CharField(max_length=255, null=False, blank=False) #mensal ou anual
     mensal_tipo = models.CharField(max_length=255, choices=MENSAL_CHOICES, blank=True)
@@ -122,6 +121,7 @@ class OrcamentoBase(models.Model):
     base_orcamento = models.CharField(max_length=555, blank=True, null=True) #lista na tela
     id_base = models.CharField(max_length=255, null=True, blank=True) #concatenar cod_cc + cod_conta_contabil completa informada #apenas grvar
     valor = models.DecimalField(max_digits=10, decimal_places=2, null=False, blank=False, default=0.00, verbose_name='Valor') #BRL
+    valor_ajustado = models.DecimalField(max_digits=10,decimal_places=2, null=True,blank=True)
     class Meta:
         verbose_name = 'Orcamento Base'
         verbose_name_plural = 'Orcamentos Base'

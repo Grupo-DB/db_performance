@@ -123,6 +123,13 @@ class ContaContabilViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], url_path='byOb')
+    def byOb(self, request):
+        n4_conta = request.query_params.get('nivel_analitico_conta')
+        conta_contabil = ContaContabil.objects.filter(nivel_analitico_conta=n4_conta)
+        serializer = self.get_serializer(conta_contabil, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 class OrcamentoBaseViewSet(viewsets.ModelViewSet):
     queryset = OrcamentoBase.objects.all
