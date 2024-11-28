@@ -123,95 +123,96 @@ class GrupoItensSerializer(serializers.ModelSerializer):
 
 
 class OrcamentoBaseSerializer(serializers.ModelSerializer):
-    class meta:
-        model = OrcamentoBase.objects.all()
-        fields = [
-            'centro_de_custo_pai','centro_de_custo_nome','gestor','empresa','filial','area','setor',
-            'ambiente','raiz_sintetica','raiz_sintetica_desc','raiz_analitica','raiz_analitica_desc',
-            'conta_contabil','conta_contabil_descricao','raiz_contabil_grupo','raiz_contabil_grupo_desc',
-            'recorrencia','mensal_tipo','mes_especifico','meses_recorrentes','suplementacao',
-            'base_orcamento','id_base','valor'
-            ]
-        read_only_fields = [
-            'empresa','filial','area','setor','ambiente','raiz_sintetica_desc',
-            'raiz_analitica_desc','conta_contabil','conta_contabil_descricao','raiz_contabil_grupo',
-            'raiz_contabil_grupo_desc','id_base',
-            ]
+    class Meta:
+        model = OrcamentoBase
+        fields = '__all__'
+        # fields = [
+        #     'centro_de_custo_pai','centro_de_custo_nome','gestor','empresa','filial','area','setor',
+        #     'ambiente','raiz_sintetica','raiz_sintetica_desc','raiz_analitica','raiz_analitica_desc',
+        #     'conta_contabil','conta_contabil_descricao','raiz_contabil_grupo','raiz_contabil_grupo_desc',
+        #     'recorrencia','mensal_tipo','mes_especifico','meses_recorrentes','suplementacao',
+        #     'base_orcamento','id_base','valor'
+        #     ]
+        # read_only_fields = [
+        #     'empresa','filial','area','setor','ambiente','raiz_sintetica_desc',
+        #     'raiz_analitica_desc','conta_contabil','conta_contabil_descricao','raiz_contabil_grupo',
+        #     'raiz_contabil_grupo_desc','id_base',
+        #     ]
         
-        def get_periodicidade_choices(self, obj):
-            return OrcamentoBase.PERIODICIDADE_CHOICES
+        # def get_periodicidade_choices(self, obj):
+        #     return OrcamentoBase.PERIODICIDADE_CHOICES
 
-        def get_mensal_choices(self, obj):
-            return OrcamentoBase.MENSAL_CHOICES
+        # def get_mensal_choices(self, obj):
+        #     return OrcamentoBase.MENSAL_CHOICES
 
 
-        def validate(self,data):
-            centro_de_custo_pai = data.get('centro_de_custo_pai')
-            centro_custo = data.get('centro_de_custo')
-            raiz_sintetica = data.get('raiz_sintetica')
-            raiz_analitica = data.get('raiz_analitica')
-            conta_contabil = data.get('conta_contabil')
+        # def validate(self,data):
+        #     centro_de_custo_pai = data.get('centro_de_custo_pai')
+        #     centro_custo = data.get('centro_de_custo')
+        #     raiz_sintetica = data.get('raiz_sintetica')
+        #     raiz_analitica = data.get('raiz_analitica')
+        #     conta_contabil = data.get('conta_contabil')
 
-            if centro_de_custo_pai:
-                # Preenche os campos empresa, filial, area, setor e ambiente com base no centro_de_custo_pai
-                data['empresa'] = centro_de_custo_pai.empresa.nome
-                data['filial'] = centro_de_custo_pai.filial.nome
-                data['area'] = centro_de_custo_pai.area.nome
-                data['setor'] = centro_de_custo_pai.setor.nome
-                data['ambiente'] = centro_de_custo_pai.ambiente.nome
+        #     if centro_de_custo_pai:
+        #         # Preenche os campos empresa, filial, area, setor e ambiente com base no centro_de_custo_pai
+        #         data['empresa'] = centro_de_custo_pai.empresa.nome
+        #         data['filial'] = centro_de_custo_pai.filial.nome
+        #         data['area'] = centro_de_custo_pai.area.nome
+        #         data['setor'] = centro_de_custo_pai.setor.nome
+        #         data['ambiente'] = centro_de_custo_pai.ambiente.nome
 
             
-            if raiz_sintetica and raiz_analitica and conta_contabil and centro_custo:
-                data['raiz_sintetica_desc'] = raiz_sintetica.descricao
-                data['raiz_analitica_desc'] = raiz_analitica.descricao
-                data['conta_contabil'] = f"{raiz_sintetica.raiz_contabil}{raiz_analitica.raiz_contabil}"
-                data['conta_contabil_desc'] = f"{conta_contabil.nivel_analitico_nome}"
-                data['raiz_contabil_grupo'] = f"{raiz_sintetica.raiz_contabil[:4]}{raiz_analitica.raiz_contabil[:2]}"
-                data['raiz_contabil_grupo_desc']=f'{conta_contabil.nivel_4_nome}'
-                data['id_base'] = f"{centro_custo.codigo}{conta_contabil.nivel_analitico_conta}"
+        #     if raiz_sintetica and raiz_analitica and conta_contabil and centro_custo:
+        #         data['raiz_sintetica_desc'] = raiz_sintetica.descricao
+        #         data['raiz_analitica_desc'] = raiz_analitica.descricao
+        #         data['conta_contabil'] = f"{raiz_sintetica.raiz_contabil}{raiz_analitica.raiz_contabil}"
+        #         data['conta_contabil_desc'] = f"{conta_contabil.nivel_analitico_nome}"
+        #         data['raiz_contabil_grupo'] = f"{raiz_sintetica.raiz_contabil[:4]}{raiz_analitica.raiz_contabil[:2]}"
+        #         data['raiz_contabil_grupo_desc']=f'{conta_contabil.nivel_4_nome}'
+        #         data['id_base'] = f"{centro_custo.codigo}{conta_contabil.nivel_analitico_conta}"
             
-            return data   
+        #     return data   
 
-        def create(self, validated_data):
-        # Cria a instância de RaizAnalitica com a descrição preenchida
-            return OrcamentoBase.objects.create(**validated_data)     
+        # def create(self, validated_data):
+        # # Cria a instância de RaizAnalitica com a descrição preenchida
+        #     return OrcamentoBase.objects.create(**validated_data)     
         
-        def update(self, instance, validated_data):
-            # Atualiza campos editáveis
-            instance.centro_de_custo_pai = validated_data.get('centro_de_custo_pai', instance.centro_de_custo_pai)
-            instance.centro_de_custo_nome = validated_data.get('centro_de_custo_nome', instance.centro_de_custo_nome)
-            instance.gestor = validated_data.get('gestor', instance.gestor)
-            instance.recorrencia = validated_data.get('recorrencia', instance.recorrencia)
-            instance.mensal_tipo = validated_data.get('mensal_tipo', instance.mensal_tipo)
-            instance.mes_especifico = validated_data.get('mes_especifico', instance.mes_especifico)
-            instance.meses_recorrentes = validated_data.get('meses_recorrentes', instance.meses_recorrentes)
-            instance.suplementacao = validated_data.get('suplementacao', instance.suplementacao)
-            instance.base_orcamento = validated_data.get('base_orcamento', instance.base_orcamento)
-            instance.valor = validated_data.get('valor', instance.valor)
+        # def update(self, instance, validated_data):
+        #     # Atualiza campos editáveis
+        #     instance.centro_de_custo_pai = validated_data.get('centro_de_custo_pai', instance.centro_de_custo_pai)
+        #     instance.centro_de_custo_nome = validated_data.get('centro_de_custo_nome', instance.centro_de_custo_nome)
+        #     instance.gestor = validated_data.get('gestor', instance.gestor)
+        #     instance.recorrencia = validated_data.get('recorrencia', instance.recorrencia)
+        #     instance.mensal_tipo = validated_data.get('mensal_tipo', instance.mensal_tipo)
+        #     instance.mes_especifico = validated_data.get('mes_especifico', instance.mes_especifico)
+        #     instance.meses_recorrentes = validated_data.get('meses_recorrentes', instance.meses_recorrentes)
+        #     instance.suplementacao = validated_data.get('suplementacao', instance.suplementacao)
+        #     instance.base_orcamento = validated_data.get('base_orcamento', instance.base_orcamento)
+        #     instance.valor = validated_data.get('valor', instance.valor)
 
-            # Atualiza campos relacionados dinamicamente
-            centro_de_custo_pai = validated_data.get('centro_de_custo_pai')
-            if centro_de_custo_pai:
-                instance.empresa = centro_de_custo_pai.empresa.nome
-                instance.filial = centro_de_custo_pai.filial.nome
-                instance.area = centro_de_custo_pai.area.nome
-                instance.setor = centro_de_custo_pai.setor.nome
-                instance.ambiente = centro_de_custo_pai.ambiente.nome
+        #     # Atualiza campos relacionados dinamicamente
+        #     centro_de_custo_pai = validated_data.get('centro_de_custo_pai')
+        #     if centro_de_custo_pai:
+        #         instance.empresa = centro_de_custo_pai.empresa.nome
+        #         instance.filial = centro_de_custo_pai.filial.nome
+        #         instance.area = centro_de_custo_pai.area.nome
+        #         instance.setor = centro_de_custo_pai.setor.nome
+        #         instance.ambiente = centro_de_custo_pai.ambiente.nome
 
-            raiz_sintetica = validated_data.get('raiz_sintetica')
-            raiz_analitica = validated_data.get('raiz_analitica')
-            conta_contabil = validated_data.get('conta_contabil')
-            centro_custo = validated_data.get('centro_de_custo_nome')
+        #     raiz_sintetica = validated_data.get('raiz_sintetica')
+        #     raiz_analitica = validated_data.get('raiz_analitica')
+        #     conta_contabil = validated_data.get('conta_contabil')
+        #     centro_custo = validated_data.get('centro_de_custo_nome')
 
-            if raiz_sintetica and raiz_analitica and conta_contabil and centro_custo:
-                instance.raiz_sintetica_desc = raiz_sintetica.descricao
-                instance.raiz_analitica_desc = raiz_analitica.descricao
-                instance.conta_contabil = f"{raiz_sintetica.raiz_contabil}{raiz_analitica.raiz_contabil}"
-                instance.conta_contabil_descricao = conta_contabil.nivel_analitico_nome
-                instance.raiz_contabil_grupo = f"{raiz_sintetica.raiz_contabil[:4]}{raiz_analitica.raiz_contabil[:2]}"
-                instance.raiz_contabil_grupo_desc = conta_contabil.nivel_4_nome
-                instance.id_base = f"{centro_custo.codigo}{conta_contabil.nivel_analitico_conta}"
+        #     if raiz_sintetica and raiz_analitica and conta_contabil and centro_custo:
+        #         instance.raiz_sintetica_desc = raiz_sintetica.descricao
+        #         instance.raiz_analitica_desc = raiz_analitica.descricao
+        #         instance.conta_contabil = f"{raiz_sintetica.raiz_contabil}{raiz_analitica.raiz_contabil}"
+        #         instance.conta_contabil_descricao = conta_contabil.nivel_analitico_nome
+        #         instance.raiz_contabil_grupo = f"{raiz_sintetica.raiz_contabil[:4]}{raiz_analitica.raiz_contabil[:2]}"
+        #         instance.raiz_contabil_grupo_desc = conta_contabil.nivel_4_nome
+        #         instance.id_base = f"{centro_custo.codigo}{conta_contabil.nivel_analitico_conta}"
 
-            # Salva a instância atualizada
-            instance.save()
-            return instance
+        #     # Salva a instância atualizada
+        #     instance.save()
+        #     return instance

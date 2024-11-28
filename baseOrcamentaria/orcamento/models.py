@@ -106,16 +106,17 @@ class OrcamentoBase(models.Model):
     area = models.CharField(max_length=255, blank=False, null=False)
     setor = models.CharField(max_length=255, blank=False, null=False)
     ambiente = models.CharField(max_length=255, blank=False, null=False)######
-    raiz_sintetica = models.ForeignKey(RaizSintetica, on_delete=models.RESTRICT, related_name='orcamentos_raiz_sintetica+') # raiz pertencente ao centro de custo
+    raiz_sintetica = models.CharField(max_length=4, blank=False, null=False) # raiz pertencente ao centro de custo
     raiz_sintetica_desc = models.CharField(max_length=255, blank=False, null=False) # descrição da raiz sintetica informada #somente visivel a desc byCC
     raiz_analitica = models.ForeignKey(RaizAnalitica, on_delete=models.RESTRICT, related_name='orcamentos_raiz_analitica+') # listar da tabela do banco
     raiz_analitica_desc = models.CharField(max_length=555, blank=False, null=False) #descrição da raiz anatica informada #somente visivel a desc
+    raiz_analitica_cod = models.CharField(max_length=9, blank=True, null=True)
     conta_contabil = models.CharField(max_length=255, blank=False, null=False) # concatenar codigos raiz sintetica e analitica #apenas gravar
     conta_contabil_descricao = models.CharField(max_length=555, blank=True, null=True) #apenas gravar N analiitico nome
     raiz_contabil_grupo_desc = models.CharField(max_length=555, blank=True, null=True) #n4 conta contabil informada apenas exibe
     periodicidade = models.CharField(max_length=255, null=False, blank=False) #mensal ou anual
     mensal_tipo = models.CharField(max_length=255, choices=MENSAL_CHOICES, blank=True)
-    mes_especifico = models.IntegerField(blank=True)  # 1-12
+    mes_especifico = models.CharField(max_length=255, null=True, blank=True)  # 1-12
     meses_recorrentes = models.CharField(max_length=255, blank=True)  # Ex: 1,2,3,4
     suplementacao = models.BooleanField(blank=False, null=True) #seleção na tela
     base_orcamento = models.CharField(max_length=555, blank=True, null=True) #lista na tela
