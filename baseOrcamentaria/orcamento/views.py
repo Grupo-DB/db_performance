@@ -266,7 +266,7 @@ def AplicarPorcentagem(request):
                 orcamento.valor_ajustado = Decimal(0.00)
 
             orcamento.valor_ajustado = orcamento.valor * (porcentagem_decimal /Decimal(100))
-            orcamento.valor += orcamento.valor_ajustado
+            orcamento.valor_real = orcamento.valor + orcamento.valor_ajustado
             orcamento.save()
 
         return Response(

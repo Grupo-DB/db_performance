@@ -123,6 +123,7 @@ class OrcamentoBase(models.Model):
     id_base = models.CharField(max_length=255, null=True, blank=True) #concatenar cod_cc + cod_conta_contabil completa informada #apenas grvar
     valor = models.DecimalField(max_digits=10, decimal_places=2, null=False, blank=False, default=0.00, verbose_name='Valor') #BRL
     valor_ajustado = models.DecimalField(max_digits=10,decimal_places=2, null=True,blank=True)
+    valor_real = models.DecimalField(max_digits=10,decimal_places=2, null=True,blank=True)
     class Meta:
         verbose_name = 'Orcamento Base'
         verbose_name_plural = 'Orcamentos Base'
