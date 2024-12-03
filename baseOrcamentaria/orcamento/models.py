@@ -110,7 +110,7 @@ class OrcamentoBase(models.Model):
     raiz_sintetica_desc = models.CharField(max_length=255, blank=False, null=False) # descrição da raiz sintetica informada #somente visivel a desc byCC
     raiz_analitica = models.ForeignKey(RaizAnalitica, on_delete=models.RESTRICT, related_name='orcamentos_raiz_analitica+') # listar da tabela do banco
     raiz_analitica_desc = models.CharField(max_length=555, blank=False, null=False) #descrição da raiz anatica informada #somente visivel a desc
-    raiz_analitica_cod = models.CharField(max_length=9, blank=True, null=True)
+    raiz_analitica_cod = models.CharField(max_length=20, blank=True, null=True)
     conta_contabil = models.CharField(max_length=255, blank=False, null=False) # concatenar codigos raiz sintetica e analitica #apenas gravar
     conta_contabil_descricao = models.CharField(max_length=555, blank=True, null=True) #apenas gravar N analiitico nome
     raiz_contabil_grupo_desc = models.CharField(max_length=555, blank=True, null=True) #n4 conta contabil informada apenas exibe
@@ -124,6 +124,7 @@ class OrcamentoBase(models.Model):
     valor = models.DecimalField(max_digits=10, decimal_places=2, null=False, blank=False, default=0.00, verbose_name='Valor') #BRL
     valor_ajustado = models.DecimalField(max_digits=10,decimal_places=2, null=True,blank=True)
     valor_real = models.DecimalField(max_digits=10,decimal_places=2, null=True,blank=True)
+    tipo_custo = models.CharField(max_length=255, blank=True, null=True)
     class Meta:
         verbose_name = 'Orcamento Base'
         verbose_name_plural = 'Orcamentos Base'

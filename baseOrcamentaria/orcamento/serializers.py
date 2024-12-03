@@ -36,7 +36,7 @@ class RaizAnaliticaSerializer(serializers.ModelSerializer):
         if raiz_contabil:
             # Buscando o registro correspondente em ContaContabil
             conta = ContaContabil.objects.filter(
-                nivel_analitico_conta__endswith=raiz_contabil[-9:]
+                nivel_analitico_conta__endswith=raiz_contabil[-13:]
             ).first()
             
             if conta:
