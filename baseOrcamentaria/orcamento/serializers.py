@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User,Group
 from rest_framework import serializers
 
-from avaliacoes.management.models import Colaborador
+from avaliacoes.management.models import Ambiente, Area, Colaborador, Empresa, Filial, Setor
 from avaliacoes.management.serializers import AmbienteSerializer, AreaSerializer, EmpresaSerializer, FilialSerializer, SetorSerializer
 from .models import ContaContabil,Gestor,RaizAnalitica,CentroCustoPai,CentroCusto,RaizSintetica,GrupoItens,OrcamentoBase
 
@@ -61,14 +61,30 @@ class RaizAnaliticaSerializer(serializers.ModelSerializer):
         return instance
     
 class CentroCustoPaiSerializer(serializers.ModelSerializer):
-    empresa = EmpresaSerializer()
-    filial = FilialSerializer()
-    area = AreaSerializer()
-    setor = SetorSerializer()
-    ambiente = AmbienteSerializer() 
+    # Para escrita, aceita apenas IDs
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all(), write_only=True)
+    filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all(), write_only=True)
+    area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all(), write_only=True)
+    setor = serializers.PrimaryKeyRelatedField(queryset=Setor.objects.all(), write_only=True)
+    ambiente = serializers.PrimaryKeyRelatedField(queryset=Ambiente.objects.all(), write_only=True)
+
+    # Para leitura, retorna os dados completos
+    empresa_detalhes = EmpresaSerializer(source='empresa', read_only=True)
+    filial_detalhes = FilialSerializer(source='filial', read_only=True)
+    area_detalhes = AreaSerializer(source='area', read_only=True)
+    setor_detalhes = SetorSerializer(source='setor', read_only=True)
+    ambiente_detalhes = AmbienteSerializer(source='ambiente', read_only=True)
+
     class Meta:
         model = CentroCustoPai
-        fields = '__all__'
+        fields = [
+            'id',  'nome', 
+            'empresa', 'empresa_detalhes', 
+            'filial', 'filial_detalhes',
+            'area', 'area_detalhes',
+            'setor', 'setor_detalhes',
+            'ambiente', 'ambiente_detalhes'
+        ]
 
 class CentroCustoSerializer(serializers.ModelSerializer):
     gestor = serializers.PrimaryKeyRelatedField(queryset=Gestor.objects.all(), write_only=True)  # Entrada

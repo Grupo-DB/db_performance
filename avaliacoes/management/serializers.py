@@ -3,7 +3,7 @@ from django.contrib.auth.models import User,Group
 from rest_framework import serializers
 from .models import Empresa,Filial,Area,Cargo,Setor,TipoAvaliacao,TipoContrato,Colaborador,Avaliador,Avaliacao,Formulario,Pergunta,Avaliado,Ambiente,HistoricoAlteracao
 from notifications.models import Notification
-
+#from .serializers import EmpresaSerializer,FilialSerializer,AmbienteSerializer,AreaSerializer,CargoSerializer,SetorSerializer
 
 class GroupSerializer(serializers.ModelSerializer):
     class Meta:
@@ -57,58 +57,7 @@ class FormularioCreateSerializer(serializers.ModelSerializer):
 
  
 
-class ColaboradorSerializer(serializers.ModelSerializer):
-    # user = UserSerializer(required=False)
-    # tornar_avaliado = serializers.BooleanField(write_only=True, required=False)
-    # tornar_avaliador = serializers.BooleanField(write_only=True, required=False)
 
-
-    class Meta:
-        model = Colaborador
-        fields = '__all__'
-
-    
-
-    # def update(self, instance, validated_data):
-    #     user_data = validated_data.pop('user', None)
-    #     tornar_avaliado = validated_data.pop('tornar_avaliado', False)
-    #     tornar_avaliador = validated_data.pop('tornar_avaliador', False)
-
-    #     for attr, value in validated_data.items():
-    #         setattr(instance, attr, value)
-    #     instance.save()
-
-    #     if user_data:
-    #         if instance.user:
-    #             user = instance.user
-    #             user.username = user_data.get('username', user.username)
-    #             user.email = user_data.get('email', user.email)
-    #             if 'password' in user_data:
-    #                 user.set_password(user_data['password'])
-    #             user.save()
-    #         else:
-    #             user = User.objects.create_user(**user_data)
-    #             instance.user = user
-    #             instance.save()
-
-    #     if tornar_avaliado and not Avaliado.objects.filter(colaborador_ptr=instance).exists():
-    #         Avaliado.objects.create(**validated_data, colaborador_ptr=instance)
-    #     elif tornar_avaliador and not Avaliador.objects.filter(colaborador_ptr=instance).exists():
-    #         Avaliador.objects.create(**validated_data, colaborador_ptr=instance)
-
-        # return instance
-
-# class AvaliadoSerializer(serializers.ModelSerializer):
-#     colaborador_id = serializers.IntegerField(write_only=True)
-#     formulario_id = serializers.IntegerField(write_only=True)
-#     class Meta:
-#         model = Avaliado
-#         fields = '__all__'  # Ou liste os campos que deseja incluir no serializer
-#     def create(self, validated_data):
-#         colaborador_data = validated_data.pop('colaborador_ptr', None)
-#         formulario = validated_data.pop('formulario', None)
-#         avaliado = Avaliado.objects.create(colaborador_ptr=colaborador_data, formulario=formulario, **validated_data)
-#         return avaliado
 
 class AvaliadoSerializer(serializers.ModelSerializer):
     colaborador_id = serializers.IntegerField(write_only=True)
@@ -229,4 +178,25 @@ class NotificationSerializer(serializers.ModelSerializer):
 class HistoricoAlteracaoSerializer(serializers.ModelSerializer):
     class Meta:
         model = HistoricoAlteracao
+        fields = '__all__'
+
+class ColaboradorSerializer(serializers.ModelSerializer):
+    # Para escrita, aceita apenas IDs
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all(), write_only=True)
+    filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all(), write_only=True)
+    area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all(), write_only=True)
+    setor = serializers.PrimaryKeyRelatedField(queryset=Setor.objects.all(), write_only=True)
+    ambiente = serializers.PrimaryKeyRelatedField(queryset=Ambiente.objects.all(), write_only=True)
+    cargo = serializers.PrimaryKeyRelatedField(queryset=Cargo.objects.all(), write_only=True)
+    # Para leitura, retorna os dados completos
+    empresa_detalhes = EmpresaSerializer(source='empresa', read_only=True)
+    filial_detalhes = FilialSerializer(source='filial', read_only=True)
+    area_detalhes = AreaSerializer(source='area', read_only=True)
+    setor_detalhes = SetorSerializer(source='setor', read_only=True)
+    ambiente_detalhes = AmbienteSerializer(source='ambiente', read_only=True)
+    cargo_detalhes = CargoSerializer(source='cargo', read_only=True)
+
+
+    class Meta:
+        model = Colaborador
         fields = '__all__'
