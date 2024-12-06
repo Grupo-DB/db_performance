@@ -89,10 +89,12 @@ class CentroCustoPaiSerializer(serializers.ModelSerializer):
 class CentroCustoSerializer(serializers.ModelSerializer):
     gestor = serializers.PrimaryKeyRelatedField(queryset=Gestor.objects.all(), write_only=True)  # Entrada
     gestor_detalhes = GestorSerializer(source='gestor', read_only=True)  # Exibição
+    cc_pai = serializers.PrimaryKeyRelatedField(queryset=CentroCustoPai.objects.all(), write_only=True)  # Entrada
+    cc_pai_detalhes = CentroCustoPaiSerializer(source='cc_pai', read_only=True)  # Exibição
 
     class Meta:
         model = CentroCusto
-        fields = ['id','codigo','nome','cc_pai','gestor','gestor_detalhes']
+        fields = ['id','codigo','nome','cc_pai','cc_pai_detalhes','gestor','gestor_detalhes']
 
 
 class RaizSinteticaSerializer(serializers.ModelSerializer):
