@@ -256,7 +256,7 @@ def AplicarPorcentagem(request):
             meses_recorrentes = [int(mes.strip()) for mes in meses_recorrentes.split(',')]
 
         # Obter os registros da tabela OrcamentoBase onde o mes_especifico está entre 4 e 12
-        orcamentos = OrcamentoBase.objects.filter(mes_especifico__in=meses_recorrentes, raiz_analitica_cod=raiz_analitica_cod)
+        orcamentos = OrcamentoBase.objects.filter(mes_especifico__in=meses_recorrentes, raiz_analitica_cod__endswith=raiz_analitica_cod)
         porcentagem_decimal = Decimal(porcentagem)
 
         # Atualizar o campo valor com a porcentagem
