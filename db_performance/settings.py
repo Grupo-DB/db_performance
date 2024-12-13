@@ -52,7 +52,8 @@ INSTALLED_APPS = [
     'bisGerenciais.dashboardOperacoes.calcario',
     'bisGerenciais.dashboardOperacoes.fertilizante',
     'bisGerenciais.dashboardOperacoes.argamassa',
-    'baseOrcamentaria.orcamento'
+    'baseOrcamentaria.orcamento',
+    'baseOrcamentaria.realizado'
 
 ]
 
