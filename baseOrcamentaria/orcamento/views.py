@@ -250,6 +250,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         centro_de_custo_pai_id = request.query_params.get('centro_de_custo_pai_id')
         ano = request.query_params.get('ano')
         mes = request.query_params.get('mes')
+        filial = request.query_params.get('filial')
 
         # Filtro inicial obrigatório
         filters = Q(centro_de_custo_pai_id=centro_de_custo_pai_id)
@@ -259,6 +260,9 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             filters &= Q(ano=ano)
         if mes:
             filters &= Q(mes_especifico=mes)
+        if filial:
+            filiais = filial.split(",")  # Divide a string em uma lista de filiais
+            filters &= Q(filial__in=filiais)   
 
         # Consulta no banco
         orcamentos_base = OrcamentoBase.objects.filter(filters)

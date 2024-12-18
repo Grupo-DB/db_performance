@@ -20,16 +20,27 @@ engine = create_engine(connection_string)
 @api_view(['POST'])
 def calculos_realizado(request):
     cc_list = request.data.get('ccs',[])
-    #data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')
-    #data_fim = datetime.now().strftime('%Y-%m-%d 23:59:00')
+    filiais_list = request.data.get('filiais',[])
     ano = request.data.get('ano', None)
-    # data_inicio = "2024-01-01"
-    # data_fim = "2024-11-30"
-    
     conta1 = '3401%'
     conta2 = '3402%'
     conta = '4%'
 
+    if isinstance(filiais_list, list):
+        try:
+            # Remove quaisquer valores não numéricos ou vazios
+            filiais_list = [int(filial) for filial in filiais_list if str(filial).isdigit()]
+        except ValueError:
+            raise ValueError("A lista de filiais contém valores não numéricos.")
+    else:
+        raise ValueError("O parâmetro 'filiais' deve ser uma lista.")
+
+    # Garante que a lista não está vazia
+    if not filiais_list:
+        raise ValueError("A lista de filiais está vazia ou contém apenas valores inválidos.")
+
+    # Converte a lista de inteiros para uma string no formato esperado pelo SQL
+    filiais_string = ", ".join(map(str, filiais_list))
 
     # Constrói a cláusula dinâmica para o filtro 'CCSTCOD'
     if cc_list:
@@ -38,8 +49,9 @@ def calculos_realizado(request):
         cc_conditions = "1=1"  # Condição neutra se 'cc' não for fornecido
 
     if ano:
-        data_inicio = "2024-01-01"
-        data_fim = "2024-11-30"    
+        data_inicio = f"{ano}-01-01"
+        data_fim = f"{ano}-12-31"
+
 
     consulta_realizado = pd.read_sql(f"""        
             WITH LANCAMENTOS_BASE AS (
@@ -65,6 +77,7 @@ def calculos_realizado(request):
                 WHERE 
                     CAST(LC.LANCDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
                     AND LC.LANCEMP = 1
+                    AND LC.LANCFIL IN ({filiais_string})
                     AND LANCSIT = 0
                     AND ({cc_conditions})
                     AND (
@@ -151,12 +164,16 @@ def calculos_realizado(request):
 """,engine)
     
     consulta_realizado['SALDO'] = consulta_realizado.apply(
-    lambda row: row["DEB_VALOR"] if row["CONTA_DEB"][1] in ['3', '4'] else row["CRED_VALOR"],
+    #lambda row: row["DEB_VALOR"] if row["CONTA_DEB"][1] in ['3', '4'] else row["CRED_VALOR"],
+    lambda row: row["DEB_VALOR"] if str(row["CONTA_DEB"])[1] in ['3', '4'] else row["CRED_VALOR"],
     axis=1
 )
     #total = int(consulta_realizado['SALDO'])
-    total = consulta_realizado['SALDO'].sum()
-    total = locale.format_string("%.0f",total, grouping=True)
+    if consulta_realizado['SALDO'].empty or consulta_realizado['SALDO'].sum() == 0:
+        total = "0"  # Define como zero formatado
+    else:
+        total = consulta_realizado['SALDO'].sum()  # Soma os valores
+        total = locale.format_string("%.0f", total, grouping=True)
     
     
     consulta_realizado['conta_deb_7'] = consulta_realizado['CONTA_DEB'].str[:7]
