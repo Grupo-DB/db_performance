@@ -5,6 +5,7 @@ from django.http import JsonResponse
 from rest_framework.decorators import api_view
 from django.db import connections
 from sqlalchemy import create_engine
+from baseOrcamentaria.orcamento.models import ContaContabil
 import pandas as pd
 import locale
 
@@ -18,18 +19,29 @@ engine = create_engine(connection_string)
 @csrf_exempt
 @api_view(['POST'])
 def calculos_realizado(request):
-    cc = request.data.get('cc')
+    cc_list = request.data.get('ccs',[])
     #data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')
     #data_fim = datetime.now().strftime('%Y-%m-%d 23:59:00')
-    data_inicio = "2024-01-01"
-    data_fim = "2024-11-30"
-    conta = '4%'
+    ano = request.data.get('ano', None)
+    # data_inicio = "2024-01-01"
+    # data_fim = "2024-11-30"
+    
     conta1 = '3401%'
     conta2 = '3402%'
+    conta = '4%'
 
-    consulta_realizado = pd.read_sql(f"""
 
-        
+    # Constrói a cláusula dinâmica para o filtro 'CCSTCOD'
+    if cc_list:
+        cc_conditions = " OR ".join([f"CCSTCOD LIKE '%{cc}%'" for cc in cc_list])
+    else:
+        cc_conditions = "1=1"  # Condição neutra se 'cc' não for fornecido
+
+    if ano:
+        data_inicio = "2024-01-01"
+        data_fim = "2024-11-30"    
+
+    consulta_realizado = pd.read_sql(f"""        
             WITH LANCAMENTOS_BASE AS (
                 SELECT 
                     LC.LANCCOD, 
@@ -54,7 +66,7 @@ def calculos_realizado(request):
                     CAST(LC.LANCDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
                     AND LC.LANCEMP = 1
                     AND LANCSIT = 0
-                    AND CCSTCOD LIKE '%' + '{cc}' + '%'
+                    AND ({cc_conditions})
                     AND (
                         LC.LANCCRED LIKE '{conta}'
                         OR LC.LANCCRED LIKE '{conta1}'
@@ -145,13 +157,166 @@ def calculos_realizado(request):
     #total = int(consulta_realizado['SALDO'])
     total = consulta_realizado['SALDO'].sum()
     total = locale.format_string("%.0f",total, grouping=True)
+    
+    
+    consulta_realizado['conta_deb_7'] = consulta_realizado['CONTA_DEB'].str[:7]
+    consulta_realizado['conta_cred_7'] = consulta_realizado['CONTA_CRED'].str[:7]
+
+
+    def definir_grupo_conta(conta_deb, conta_cred):
+        conta_deb = str(conta_deb).lstrip("'")  # Remove a ' extra  
+        conta_cred = str(conta_cred).lstrip("'")
+        
+        # Filtra apenas as contas que começam com '3' ou '4'
+        if conta_deb[:1] in ['3', '4'] and conta_cred[:1] in ['3', '4']:
+            return max(conta_deb[:6], conta_cred[:6])  # Retorna o valor maior entre as duas contas
+        elif conta_deb[:1] in ['3', '4']:
+            return conta_deb[:6]  # Retorna conta_deb se ela começar com '3' ou '4'
+        elif conta_cred[:1] in ['3', '4']:
+            return conta_cred[:6]  # Retorna conta_cred se ela começar com '3' ou '4'
+        else:
+            return None  # Retorna None se nenhuma das contas começar com '3' ou '4'
+
+
+
+    consulta_realizado['GRUPO_CONTA'] = consulta_realizado.apply(
+    lambda row: definir_grupo_conta(row['CONTA_DEB'], row['CONTA_CRED']),
+    axis=1
+)
+
+    total_grupo = consulta_realizado.groupby('GRUPO_CONTA')['SALDO'].sum().to_dict()
+    codigos = list(total_grupo.keys())
+
+    consulta_conta = ContaContabil.objects.filter(
+     nivel_4_conta__in=codigos
+    ).values('nivel_4_conta', 'nivel_4_nome')
+
+    # Converte o resultado da consulta para um dicionário
+    grupo_contabil = {conta['nivel_4_conta']: conta['nivel_4_nome'] for conta in consulta_conta}
+
+    # Substitui os códigos pelos nomes no dicionário total_grupo
+    #total_grupo_com_nomes = {grupo_contabil.get(codigo, codigo): valor for codigo, valor in total_grupo.items()}
+
+    total_grupo_com_nomes = {}
+    for conta, valor in total_grupo.items():
+        nome = grupo_contabil.get(conta, conta)  # Obtém o nome da conta, ou mantém o código
+        if nome in  total_grupo_com_nomes:
+            total_grupo_com_nomes[nome] += valor  # Soma os valores se o nome já existir
+        else:
+            total_grupo_com_nomes[nome] = valor
+
+
+    def definir_conta_contabil(conta_deb, conta_cred):
+        conta_deb = str(conta_deb).lstrip("'")  # Remove a ' extra  
+        conta_cred = str(conta_cred).lstrip("'")  
+       
+        if conta_deb[:1] in ['3', '4'] and conta_cred[:1] in ['3', '4']:
+            return max(conta_deb[:13], conta_cred[:13])  # Retorna o valor maior entre as duas contas
+        elif conta_deb[:1] in ['3', '4']:
+            return conta_deb[:13]  # Retorna conta_deb se ela começar com '3' ou '4'
+        elif conta_cred[:1] in ['3', '4']:
+            return conta_cred[:13]  # Retorna conta_cred se ela começar com '3' ou '4'
+        else:
+            return None  # Retorna None se nenhuma das contas começar com '3' ou '4'
+    consulta_realizado['CONTA_COMPLETA'] = consulta_realizado.apply(
+        lambda row: definir_conta_contabil(row['CONTA_DEB'], row['CONTA_CRED']),
+        axis=1
+    )
+    total_conta = consulta_realizado.groupby('CONTA_COMPLETA')['SALDO'].sum().to_dict()
+    contas = list(total_conta.keys())
+
+    consulta_completa = ContaContabil.objects.filter(
+        nivel_analitico_conta__in=contas
+    ).values('nivel_analitico_conta', 'nivel_5_nome','nivel_analitico_nome')
+
+    conta_completa = {
+        conta['nivel_analitico_conta']: f"{conta['nivel_5_nome']} - {conta['nivel_analitico_nome']}"
+        for conta in consulta_completa
+    }
+
+    conta_completa_nomes = {}
+
+    for conta, valor in total_conta.items():
+        nome = conta_completa.get(conta, conta)  # Obtém o nome da conta, ou mantém o código
+        if nome in conta_completa_nomes:
+            conta_completa_nomes[nome] += valor  # Soma os valores se o nome já existir
+        else:
+            conta_completa_nomes[nome] = valor
+
+    ##################################################################################
+    codigos_requisicao = request.data.get('ccs',[])
+    
+    def extrair_codigos(codigos):
+    # Limpa a string, remove os "+" e transforma em uma lista de códigos
+        return codigos.strip('+').split('+')    
+
+    # Aplicar a função para criar uma lista de códigos em cada linha
+    consulta_realizado['CODIGOS_SEPARADOS'] = consulta_realizado['CCSTCOD'].apply(extrair_codigos)
+
+    # Explodir a lista de códigos em várias linhas, um código por linha
+    df_explodido = consulta_realizado.explode('CODIGOS_SEPARADOS')
+
+    # Filtrar as linhas que contêm os códigos recebidos na requisição
+    df_filtrado = df_explodido[df_explodido['CODIGOS_SEPARADOS'].isin(codigos_requisicao)]
+
+    # Agrupar por código e somar os valores
+    df_agrupado = df_filtrado.groupby('CODIGOS_SEPARADOS')['SALDO'].sum().to_dict()
+
+
+    def mapear_tipo_custo(conta_deb, conta_cred):
+        custos_insumos = {'4101021', '4102021', '4103021', '4104021', '4105021', '4106021', '4107021', '4108021', '4109021', '4110021', '4111021', '4112021'}
+        custos_materia_prima = {'4101023', '4102023', '4103023', '4104023', '4105023', '4106023', '4107023', '4108023', '4109023', '4110023', '4111023', '4112023'}
+        custos_embalagens = {'4101022', '4102022', '4103022', '4104022', '4105022', '4106022', '4107022', '4108022', '4109022', '4110022', '4111022', '4112022'}
+
+        for conta in [conta_deb, conta_cred]:  
+            conta = str(conta).lstrip("'")  # Remove a ' extra
+            prefixo = conta[:4]
+            conta_completa = conta[:7]
+
+            if prefixo == '3401':
+                return 'Despesas Administrativas'
+            elif prefixo == '3402':
+                return 'Despesas Comerciais'
+            elif prefixo.startswith('42'):
+                return 'Custos Indiretos'
+            elif prefixo.startswith('41'):
+                if conta_completa in custos_insumos:
+                    return 'Custo Direto Variável Insumos'
+                elif conta_completa in custos_materia_prima:
+                    return 'Custo Direto Variável Matéria Prima'
+                elif conta_completa in custos_embalagens:
+                    return 'Custo Direto Variável Embalagens'
+                else:
+                    return 'Custo Direto Fixo'
+        return 'Tipo de custo desconhecido'
+
+    # Aplicar a função a cada linha, passando ambas as colunas
+    consulta_realizado['TIPO_CUSTO'] = consulta_realizado.apply(
+        lambda row: mapear_tipo_custo(row['CONTA_DEB'], row['CONTA_CRED']),
+        axis=1
+    )
+
+    
+    total_tipo_deb = consulta_realizado.groupby('TIPO_CUSTO')['SALDO'].sum().to_dict()
 
     
 
     #Converte o DataFrame em um formato JSON serializável
     data_json = {
         'total': total,
-        'respostas':consulta_realizado.to_dict(orient='records')
+        #'total_deb_grupo_lista': consulta_realizado.to_dict(orient='records'),
+        #'total_cred_grupo_lista': consulta_realizado.to_dict(orient='records'),
+        #'respostas':consulta_realizado.to_dict(orient='records')
+        'total_tipo_deb': total_tipo_deb,
+        #'total_tipo_cred': total_tipo_cred,
+        'total_grupo': total_grupo,
+        'total_conta': total_conta,
+        'df_agrupado':df_agrupado,
+        'grupo_contabil': grupo_contabil,
+        'total_grupo_com_nomes': total_grupo_com_nomes,
+        'conta_completa_nomes': conta_completa_nomes,
+        'conta_completa':conta_completa,
+        'contas':contas
         }
     
     # Retorna o JSON como resposta
