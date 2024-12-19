@@ -5,7 +5,7 @@ from django.http import JsonResponse
 from rest_framework.decorators import api_view
 from django.db import connections
 from sqlalchemy import create_engine
-from baseOrcamentaria.orcamento.models import ContaContabil
+from baseOrcamentaria.orcamento.models import ContaContabil,CentroCusto
 import pandas as pd
 import locale
 
@@ -162,28 +162,21 @@ def calculos_realizado(request):
                 
                 
 """,engine)
-    
+    #Regra para obtenção dos valores usados
     consulta_realizado['SALDO'] = consulta_realizado.apply(
-    #lambda row: row["DEB_VALOR"] if row["CONTA_DEB"][1] in ['3', '4'] else row["CRED_VALOR"],
     lambda row: row["DEB_VALOR"] if str(row["CONTA_DEB"])[1] in ['3', '4'] else row["CRED_VALOR"],
     axis=1
 )
-    #total = int(consulta_realizado['SALDO'])
     if consulta_realizado['SALDO'].empty or consulta_realizado['SALDO'].sum() == 0:
         total = "0"  # Define como zero formatado
     else:
         total = consulta_realizado['SALDO'].sum()  # Soma os valores
         total = locale.format_string("%.0f", total, grouping=True)
-    
-    
-    consulta_realizado['conta_deb_7'] = consulta_realizado['CONTA_DEB'].str[:7]
-    consulta_realizado['conta_cred_7'] = consulta_realizado['CONTA_CRED'].str[:7]
 
-
+    ###-------------------------Obtem e agrua por grupo de contas----------------------------##   
     def definir_grupo_conta(conta_deb, conta_cred):
         conta_deb = str(conta_deb).lstrip("'")  # Remove a ' extra  
         conta_cred = str(conta_cred).lstrip("'")
-        
         # Filtra apenas as contas que começam com '3' ou '4'
         if conta_deb[:1] in ['3', '4'] and conta_cred[:1] in ['3', '4']:
             return max(conta_deb[:6], conta_cred[:6])  # Retorna o valor maior entre as duas contas
@@ -192,28 +185,33 @@ def calculos_realizado(request):
         elif conta_cred[:1] in ['3', '4']:
             return conta_cred[:6]  # Retorna conta_cred se ela começar com '3' ou '4'
         else:
-            return None  # Retorna None se nenhuma das contas começar com '3' ou '4'
-
-
+            return None  
 
     consulta_realizado['GRUPO_CONTA'] = consulta_realizado.apply(
     lambda row: definir_grupo_conta(row['CONTA_DEB'], row['CONTA_CRED']),
     axis=1
 )
+    # Função para formatar valores com locale
+    def format_locale(value):
+        try:
+            if not isinstance(value, (int, float)):
+                value = float(value)  # Garante que seja numérico
+            return locale.format_string("%.0f", value, grouping=True)
+        except Exception as e:
+            return str(value)  # Em caso de erro, retorna como string simples
+
 
     total_grupo = consulta_realizado.groupby('GRUPO_CONTA')['SALDO'].sum().to_dict()
+    
+    #Pega os nomes na tabela conta contabil 
     codigos = list(total_grupo.keys())
-
     consulta_conta = ContaContabil.objects.filter(
      nivel_4_conta__in=codigos
     ).values('nivel_4_conta', 'nivel_4_nome')
-
     # Converte o resultado da consulta para um dicionário
     grupo_contabil = {conta['nivel_4_conta']: conta['nivel_4_nome'] for conta in consulta_conta}
 
     # Substitui os códigos pelos nomes no dicionário total_grupo
-    #total_grupo_com_nomes = {grupo_contabil.get(codigo, codigo): valor for codigo, valor in total_grupo.items()}
-
     total_grupo_com_nomes = {}
     for conta, valor in total_grupo.items():
         nome = grupo_contabil.get(conta, conta)  # Obtém o nome da conta, ou mantém o código
@@ -221,8 +219,9 @@ def calculos_realizado(request):
             total_grupo_com_nomes[nome] += valor  # Soma os valores se o nome já existir
         else:
             total_grupo_com_nomes[nome] = valor
+    total_grupo_com_nomes_formatado = {grupo: format_locale(valor) for grupo, valor in total_grupo_com_nomes.items()}
 
-
+###-------------------------Obtem e agrua por grupo de contas----------------------------## 
     def definir_conta_contabil(conta_deb, conta_cred):
         conta_deb = str(conta_deb).lstrip("'")  # Remove a ' extra  
         conta_cred = str(conta_cred).lstrip("'")  
@@ -234,38 +233,53 @@ def calculos_realizado(request):
         elif conta_cred[:1] in ['3', '4']:
             return conta_cred[:13]  # Retorna conta_cred se ela começar com '3' ou '4'
         else:
-            return None  # Retorna None se nenhuma das contas começar com '3' ou '4'
+            return None 
+
     consulta_realizado['CONTA_COMPLETA'] = consulta_realizado.apply(
         lambda row: definir_conta_contabil(row['CONTA_DEB'], row['CONTA_CRED']),
         axis=1
     )
-    total_conta = consulta_realizado.groupby('CONTA_COMPLETA')['SALDO'].sum().to_dict()
-    contas = list(total_conta.keys())
 
+    total_conta = consulta_realizado.groupby('CONTA_COMPLETA')['SALDO'].sum().to_dict()
+
+     #Pega os nomes na tabela conta contabil 
+    contas = list(total_conta.keys())
     consulta_completa = ContaContabil.objects.filter(
         nivel_analitico_conta__in=contas
     ).values('nivel_analitico_conta', 'nivel_5_nome','nivel_analitico_nome')
-
+    # Converte o resultado da consulta para um dicionário
     conta_completa = {
         conta['nivel_analitico_conta']: f"{conta['nivel_5_nome']} - {conta['nivel_analitico_nome']}"
         for conta in consulta_completa
     }
 
+    # Substitui os códigos pelos nomes no dicionário total_grupo
     conta_completa_nomes = {}
-
     for conta, valor in total_conta.items():
         nome = conta_completa.get(conta, conta)  # Obtém o nome da conta, ou mantém o código
         if nome in conta_completa_nomes:
             conta_completa_nomes[nome] += valor  # Soma os valores se o nome já existir
         else:
             conta_completa_nomes[nome] = valor
+    conta_completa_nomes_formatado = {conta: format_locale(valor) for conta, valor in conta_completa_nomes.items()}
 
     ##################################################################################
     codigos_requisicao = request.data.get('ccs',[])
-    
+
+    # Função para extrair códigos da string
     def extrair_codigos(codigos):
-    # Limpa a string, remove os "+" e transforma em uma lista de códigos
-        return codigos.strip('+').split('+')    
+        # Remove "+" e transforma em lista de códigos
+        return codigos.strip('+').split('+')
+
+    # Consulta os nomes correspondentes aos códigos requisitados
+    consulta_ccs = CentroCusto.objects.filter(
+        codigo__in=codigos_requisicao
+    ).values('codigo', 'nome')
+
+    # Converte o resultado da consulta para um dicionário
+    mapa_codigos_nomes = {
+        item['codigo']: item['nome'] for item in consulta_ccs
+    }
 
     # Aplicar a função para criar uma lista de códigos em cada linha
     consulta_realizado['CODIGOS_SEPARADOS'] = consulta_realizado['CCSTCOD'].apply(extrair_codigos)
@@ -278,6 +292,17 @@ def calculos_realizado(request):
 
     # Agrupar por código e somar os valores
     df_agrupado = df_filtrado.groupby('CODIGOS_SEPARADOS')['SALDO'].sum().to_dict()
+
+    # Substituir os códigos pelos nomes no agrupamento
+    df_agrupado_nomes = {
+        mapa_codigos_nomes.get(codigo, codigo): saldo
+        for codigo, saldo in df_agrupado.items()
+    }
+
+    # Formatar os valores finais (opcional)
+    df_agrupado_nomes_formatado = {
+        nome: format_locale(valor) for nome, valor in df_agrupado_nomes.items()
+    }
 
 
     def mapear_tipo_custo(conta_deb, conta_cred):
@@ -313,25 +338,24 @@ def calculos_realizado(request):
         axis=1
     )
 
-    
     total_tipo_deb = consulta_realizado.groupby('TIPO_CUSTO')['SALDO'].sum().to_dict()
-
+    total_tipo_deb_formatado = {tipo: format_locale(valor) for tipo, valor in total_tipo_deb.items()}
     
 
     #Converte o DataFrame em um formato JSON serializável
     data_json = {
-        'total': total,
+        'total_realizado': total,
         #'total_deb_grupo_lista': consulta_realizado.to_dict(orient='records'),
         #'total_cred_grupo_lista': consulta_realizado.to_dict(orient='records'),
         #'respostas':consulta_realizado.to_dict(orient='records')
-        'total_tipo_deb': total_tipo_deb,
+        'total_tipo_deb': total_tipo_deb_formatado,
         #'total_tipo_cred': total_tipo_cred,
-        'total_grupo': total_grupo,
+        #'total_grupo': total_grupo_com_nomes_formatado,
         'total_conta': total_conta,
-        'df_agrupado':df_agrupado,
+        'df_agrupado':df_agrupado_nomes_formatado,
         'grupo_contabil': grupo_contabil,
-        'total_grupo_com_nomes': total_grupo_com_nomes,
-        'conta_completa_nomes': conta_completa_nomes,
+        'total_grupo_com_nomes': total_grupo_com_nomes_formatado,
+        'conta_completa_nomes': conta_completa_nomes_formatado,
         'conta_completa':conta_completa,
         'contas':contas
         }
