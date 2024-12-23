@@ -286,7 +286,9 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         raiz_por_ano = defaultdict(float)
         tipo_por_mes = defaultdict(float)
         tipo_por_ano = defaultdict(float)
-
+        base_por_mes = defaultdict(float)
+        base_por_ano = defaultdict(float)
+        total_bases = defaultdict(float) #inicializa dict vazio 
         # Dicionários para detalhamento das linhas
         detalhamento_mensal = defaultdict(list)
         detalhamento_anual = defaultdict(list)
@@ -302,6 +304,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
                 raiz = row.get('raiz_analitica_desc')
                 tipo = row.get('tipo_custo')
                 periodicidade = row.get('periodicidade')
+                base = row.get('base_orcamento')
                 valor_real = row['valor_real']
                 valor = row['valor']
 
@@ -314,6 +317,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
                     conta_por_mes[conta] += valor_utilizado
                     raiz_por_mes[raiz] += valor_utilizado
                     tipo_por_mes[tipo] += valor_utilizado
+                    base_por_mes[base] += valor_utilizado
                     detalhamento_mensal[mes].append(row.to_dict())
                 elif periodicidade == 'anual':
                     total_anual += valor_utilizado
@@ -321,10 +325,18 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
                     conta_por_ano[conta] += valor_utilizado
                     raiz_por_ano[raiz] += valor_utilizado
                     tipo_por_ano[tipo] += valor_utilizado
+                    base_por_ano[base] += valor_utilizado
                     detalhamento_anual[mes].append(row.to_dict())
 
+        # Soma bases
+        for chave, valor in base_por_mes.items():
+            total_bases[chave] += float(valor)
+
+            for chave, valor in base_por_ano.items():
+                total_bases[chave] += float(valor)
+  
        
-        total = locale.format_string("%.0f",total,grouping=True) if total > 0 else 0
+        total_formatado = locale.format_string("%.0f",total,grouping=True) if total > 0 else 0
         total_mensal = locale.format_string("%.0f",total_mensal,grouping=True) if total_mensal > 0 else 0
         total_anual = locale.format_string("%.0f",total_anual,grouping=True) if total_anual > 0 else 0
 
@@ -345,9 +357,15 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         tipo_por_mes_formatted = {tipo: format_locale(valor) for tipo, valor in tipo_por_mes.items()}
         tipo_por_ano_formatted = {tipo: format_locale(valor) for tipo, valor in tipo_por_ano.items()}
 
+        total_bases_formatted = {chave: format_locale(valor) for chave, valor in total_bases.items()}
+       
+        total_int = int(total)
+
         response_data = {
+            'total_int':total_int,
             "orcamentosBase": serialized_data,
-            "total": total,
+            "total": total_formatado,
+            'total_real':total, 
             'total_mensal': total_mensal,
             'total_anual': total_anual,
             "mensal_por_mes": mensal_por_mes_formatted,
@@ -356,10 +374,11 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             'conta_por_ano': conta_por_ano_formatted,
             "raiz_por_mes": raiz_por_mes_formatted,
             "raiz_por_ano": raiz_por_ano_formatted,
-            "tipo_por_mes": tipo_por_mes_formatted,
+            "tipo_por_grupo_mes": tipo_por_mes_formatted,
             "tipo_por_ano": tipo_por_ano_formatted,
             'detalhamento_mensal': detalhamento_mensal,
             'detalhamento_anual': detalhamento_anual,
+            'total_bases': total_bases_formatted,
         }      
 
 

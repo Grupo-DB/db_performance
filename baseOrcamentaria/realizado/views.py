@@ -171,7 +171,7 @@ def calculos_realizado(request):
         total = "0"  # Define como zero formatado
     else:
         total = consulta_realizado['SALDO'].sum()  # Soma os valores
-        total = locale.format_string("%.0f", total, grouping=True)
+        total_formatado = locale.format_string("%.0f", total, grouping=True)
 
     ###-------------------------Obtem e agrua por grupo de contas----------------------------##   
     def definir_grupo_conta(conta_deb, conta_cred):
@@ -344,7 +344,8 @@ def calculos_realizado(request):
 
     #Converte o DataFrame em um formato JSON serializável
     data_json = {
-        'total_realizado': total,
+        'total_realizado': total_formatado,
+        'total_real': total,
         #'total_deb_grupo_lista': consulta_realizado.to_dict(orient='records'),
         #'total_cred_grupo_lista': consulta_realizado.to_dict(orient='records'),
         #'respostas':consulta_realizado.to_dict(orient='records')
