@@ -247,13 +247,18 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='byCcPai')
     def byCcPai(self, request):
-        centro_de_custo_pai_id = request.query_params.get('centro_de_custo_pai_id')
+        centro_de_custo_pai_ids = request.query_params.get('centro_de_custo_pai_id')
         ano = request.query_params.get('ano')
         mes = request.query_params.get('mes')
         filial = request.query_params.get('filial')
 
         # Filtro inicial obrigatório
-        filters = Q(centro_de_custo_pai_id=centro_de_custo_pai_id)
+        filters = Q()
+
+        # Adiciona o filtro por centro_de_custo_pai_ids, se fornecido
+        if centro_de_custo_pai_ids:
+            ids_list = centro_de_custo_pai_ids.split(",")  # Divide os IDs em uma lista
+            filters &= Q(centro_de_custo_pai_id__in=ids_list)
 
         # Adiciona filtros opcionais
         if ano:
@@ -383,6 +388,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
 
 
         return Response(response_data, status=status.HTTP_200_OK)
+
 
 @api_view(['POST'])
 def AplicarPorcentagem(request):
