@@ -19,38 +19,50 @@ engine = create_engine(connection_string)
 @csrf_exempt
 @api_view(['POST'])
 def calculos_realizado(request):
-    cc_list = request.data.get('ccs',[])
-    filiais_list = request.data.get('filiais',[])
+    cc_list = request.data.get('ccs', [])
+    filiais_list = request.data.get('filiais', [])
     ano = request.data.get('ano', None)
     conta1 = '3401%'
     conta2 = '3402%'
     conta = '4%'
 
+    # Validação das filiais
     if isinstance(filiais_list, list):
         try:
-            # Remove quaisquer valores não numéricos ou vazios
             filiais_list = [int(filial) for filial in filiais_list if str(filial).isdigit()]
         except ValueError:
             raise ValueError("A lista de filiais contém valores não numéricos.")
     else:
         raise ValueError("O parâmetro 'filiais' deve ser uma lista.")
 
-    # Garante que a lista não está vazia
     if not filiais_list:
         raise ValueError("A lista de filiais está vazia ou contém apenas valores inválidos.")
 
-    # Converte a lista de inteiros para uma string no formato esperado pelo SQL
-    filiais_string = ", ".join(map(str, filiais_list))
+    # Validação de cc_list
+    if isinstance(cc_list, list):
+        try:
+            cc_list = [int(cc) for cc in cc_list if str(cc).isdigit()]
+        except ValueError:
+            raise ValueError("A lista de 'ccs' contém valores não numéricos.")
+    else:
+        raise ValueError("O parâmetro 'ccs' deve ser uma lista.")
 
-    # Constrói a cláusula dinâmica para o filtro 'CCSTCOD'
+    # Converte listas para strings no formato esperado pelo SQL
+    filiais_string = ", ".join(map(str, filiais_list))
+    cc_string = ", ".join(map(str, cc_list))
+
+    # Constrói cláusula dinâmica para filtro 'CCSTCOD'
     if cc_list:
         cc_conditions = " OR ".join([f"CCSTCOD LIKE '%{cc}%'" for cc in cc_list])
     else:
-        cc_conditions = "1=1"  # Condição neutra se 'cc' não for fornecido
+        cc_conditions = "1=1"  # Condição neutra se 'cc_list' não for fornecida
 
+    # Gera o intervalo de datas com base no ano
     if ano:
         data_inicio = f"{ano}-01-01"
         data_fim = f"{ano}-12-31"
+    else:
+        raise ValueError("O parâmetro 'ano' é obrigatório.")
 
 
     consulta_realizado = pd.read_sql(f"""        
@@ -169,6 +181,7 @@ def calculos_realizado(request):
 )
     if consulta_realizado['SALDO'].empty or consulta_realizado['SALDO'].sum() == 0:
         total = "0"  # Define como zero formatado
+        total_formatado = "0"
     else:
         total = consulta_realizado['SALDO'].sum()  # Soma os valores
         total_formatado = locale.format_string("%.0f", total, grouping=True)
