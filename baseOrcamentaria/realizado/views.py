@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from baseOrcamentaria.orcamento.models import ContaContabil,CentroCusto
 import pandas as pd
 import locale
-
+import datetime
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')  # br
 
 # String de conexão
@@ -60,7 +60,8 @@ def calculos_realizado(request):
     # Gera o intervalo de datas com base no ano
     if ano:
         data_inicio = f"{ano}-01-01"
-        data_fim = f"{ano}-12-31"
+        #data_fim = f"{ano}-12-31"
+        data_fim = datetime.date.today().strftime("%Y-%m-%d")
     else:
         raise ValueError("O parâmetro 'ano' é obrigatório.")
 

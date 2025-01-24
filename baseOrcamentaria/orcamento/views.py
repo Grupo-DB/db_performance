@@ -426,6 +426,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         # Inicializa acumuladores
         tipo_total = defaultdict(float)  # Acumulador de totais por tipo
         tipo_por_cc_pai = defaultdict(lambda: defaultdict(float))  # Acumulador por tipo e cc_pai
+        custo_total = 0  # Inicializa a variável custo_total
 
         if 'valor' in df.columns and 'valor_real' in df.columns:
             # Converte as colunas para numérico
@@ -445,10 +446,13 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
                 cc_pai_nome = cc_pai_id_to_name.get(cc_pai_id, "Indefinido")
 
                 valor_utilizado = valor_real if valor_real > 0 else valor
-                
-               
-                tipo_total[tipo] += valor_utilizado
-                tipo_por_cc_pai[tipo][cc_pai_nome] += valor_utilizado
+
+                # Verifica se a conta_contabil começa com 4 e adiciona ao custo_total
+                conta_contabil = row.get('conta_contabil', '')
+                if str(conta_contabil).startswith('4'):
+                    custo_total += valor_utilizado
+                    tipo_total[tipo] += valor_utilizado
+                    tipo_por_cc_pai[tipo][cc_pai_nome] += valor_utilizado
 
         total_global = 0
 
@@ -472,188 +476,88 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
 
             resultado.append(tipo_detalhado)
 
-        return JsonResponse({"resultado": resultado}, safe=False)
+        # Adiciona custo_total ao resultado
+        #resultado.append({"tipo": "Custo Total", "total": custo_total})
+
+        return JsonResponse({"resultado": resultado, "total":custo_total}, safe=False)
     
-    # @action(detail=False, methods=['get'], url_path='calculosOrcado')
-    # def calculosOrcado(self, request):
-    #     orcamentos = OrcamentoBase.objects.all()
-    #     serializer = self.get_serializer(orcamentos, many=True)
-    #     serialized_orcamentos = serializer.data
+    
+    @action(detail=False, methods=['get'], url_path='calculosDespesa')
+    def calculosDespesa(self, request):
+        # Sereliza os dados dos orçamentos
+        orcamentos = OrcamentoBase.objects.all()
+        serializer = OrcamentoBaseSerializer(orcamentos, many=True)
+        serialized_orcamentos = serializer.data
 
-    #     df = pd.DataFrame(serialized_orcamentos)
+        # Cria DataFrame a partir dos dados serializados
+        df = pd.DataFrame(serialized_orcamentos)
 
-    #     centros_custo = CentroCusto.objects.all().values('id', 'nome')
-    #     cc_id_to_name = {cc['id']: cc['nome'] for cc in centros_custo}
+        # Mapeia Centros de Custo e Centros de Custo Pai
+        cc_id_to_name = {cc['id']: cc['nome'] for cc in CentroCusto.objects.all().values('id', 'nome')}
+        cc_id_to_pai_id = {cc['id']: cc['cc_pai_id'] for cc in CentroCusto.objects.all().values('id', 'cc_pai_id')}
+        ccs_pai = CentroCustoPai.objects.all().values('id', 'nome')
+        cc_pai_id_to_name = {cc_pai['id']: cc_pai['nome'] for cc_pai in ccs_pai}
 
-    #     ccs_pai = CentroCustoPai.objects.all().values('id','nome')
-    #     cc_pai_id_to_name = {cc_pai['id']: cc_pai['nome'] for cc_pai in ccs_pai}
+        # Inicializa acumuladores
+        tipo_total = defaultdict(float)
+        tipo_por_cc_pai = defaultdict(lambda: defaultdict(float))
+        custo_total = 0  # Inicializa a variável custo_total
 
-    #      # Inicializa o acumulador para o total geral por tipo
-    #     tipo_total = defaultdict(float)
-    #     total_ccs = defaultdict(float)
-    #     total_ccs_pai = defaultdict(float)
-    #     # Inicializa o total
-    #     total = 0
+        if 'valor' in df.columns and 'valor_real' in df.columns:
+            # Converte as colunas para numérico
+            df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
+            df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce').fillna(0)
 
-    #     if 'valor' in df.columns and 'valor_real' in df.columns:
-    #         # Converte as colunas para numérico
-    #         df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
-    #         df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce').fillna(0)
+            # Calcula o total por tipo e detalha por cc_pai
+            for _, row in df.iterrows():
+                valor_real = row['valor_real']
+                valor = row['valor']
+                tipo = row.get('tipo_custo')
 
-    #         # Calcula o total
-    #         for _, row in df.iterrows():
-    #             valor_real = row['valor_real']
-    #             valor = row['valor']
-    #             tipo = row.get('tipo_custo')
-    #             cc = row.get('centro_custo_nome')
-    #             cc_nome = cc_id_to_name.get(cc, "Indefinido")
-    #             cc_pai = row.get('centro_de_custo_pai')
-    #             cc_pai_nome = cc_pai_id_to_name.get(cc_pai,"Indefinido")
-    #             valor_utilizado = valor_real if valor_real > 0 else valor
+                cc_id = row.get('centro_custo_nome')  # Supõe-se que contenha IDs
+                cc_nome = cc_id_to_name.get(cc_id, "Indefinido")
 
-    #             total += valor_utilizado
-    #             tipo_total[tipo] += valor_utilizado
-    #             total_ccs[cc_nome] += valor_utilizado
-    #             total_ccs_pai[cc_pai_nome] += valor_utilizado
+                cc_pai_id = cc_id_to_pai_id.get(cc_id)  # Obtém o ID do pai
+                cc_pai_nome = cc_pai_id_to_name.get(cc_pai_id, "Indefinido")
 
-    #     def format_locale(value):
-    #         return locale.format_string("%.0f",value, grouping=True)
+                valor_utilizado = valor_real if valor_real > 0 else valor
 
-    #     # Define o response_data fora do bloco if
-    #     response_data = {
-    #         'total': total,
-    #         'tipo_total': tipo_total,
-    #         'total_ccs':total_ccs,
-    #         'total_ccs_pai':total_ccs_pai
-    #     }
+                # Verifica se a conta_contabil é despsesa comercial ou administrativa
+                conta_contabil = row.get('conta_contabil', '')
+                if str(conta_contabil).startswith('3402'):
+                    tipo_total['despesas_comerciais'] += valor_utilizado
+                    tipo_por_cc_pai['despesas_comerciais'][cc_pai_nome] += valor_utilizado
+                elif str(conta_contabil).startswith('3401'):
+                    tipo_total['despesas_administrativas'] += valor_utilizado
+                    tipo_por_cc_pai['despesas_administrativas'][cc_pai_nome] += valor_utilizado
 
-    #     return JsonResponse(response_data, safe=False)
+        total_global = 0
 
-    # @action(detail=False, methods=['get'], url_path='calculosOrcado')
-    # def calculosOrcado(self, request):
-    #     # Serializa os dados dos orçamentos
-    #     orcamentos = OrcamentoBase.objects.all()
-    #     serializer = self.get_serializer(orcamentos, many=True)
-    #     serialized_orcamentos = serializer.data
+        # Formata os valores para o JSON de saída
+        resultado = []
+        for tipo, total_tipo in tipo_total.items():    
+            # Detalha os valores por tipo e cc_paiz
+            tipo_detalhado = {
+                "tipo": tipo,
+                "total": total_tipo,
+                "centros_custo": []
+            }
 
-    #     # Cria DataFrame a partir dos dados serializados
-    #     df = pd.DataFrame(serialized_orcamentos)
+            for cc_pai_nome, total_cc_pai in tipo_por_cc_pai[tipo].items():
+                tipo_detalhado["centros_custo"].append({
+                    "nome": cc_pai_nome,
+                    "total": total_cc_pai
+                })
 
-    #     # Mapeia Centros de Custo e Centros de Custo Pai
-    #     centros_custo = CentroCusto.objects.all().values('id', 'nome', 'cc_pai_id')
-    #     cc_id_to_name = {cc['id']: cc['nome'] for cc in centros_custo}
-    #     cc_id_to_pai_id = {cc['id']: cc['cc_pai_id'] for cc in centros_custo}
+                total_global += total_cc_pai   
 
-    #     ccs_pai = CentroCustoPai.objects.all().values('id', 'nome')
-    #     cc_pai_id_to_name = {cc_pai['id']: cc_pai['nome'] for cc_pai in ccs_pai}
+            resultado.append(tipo_detalhado)    
 
-    #     # Inicializa acumuladores
-    #     hierarquia = defaultdict(lambda: {'total': 0, 'filhos': []})
-    #     tipo_total = defaultdict(float)
-    #     total = 0
+        # Adiciona custo_total ao resultado 
+        #resultado.append({"tipo": "Custo Total", "total": custo_total})
 
-    #     if 'valor' in df.columns and 'valor_real' in df.columns:
-    #         # Converte as colunas para numérico
-    #         df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
-    #         df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce').fillna(0)
-
-    #         # Calcula o total
-    #         for _, row in df.iterrows():
-    #             valor_real = row['valor_real']
-    #             valor = row['valor']
-    #             tipo = row.get('tipo_custo')
-
-    #             cc_id = row.get('centro_custo_nome')  # Supõe-se que contenha IDs
-    #             cc_nome = cc_id_to_name.get(cc_id, "Indefinido")
-
-    #             cc_pai_id = cc_id_to_pai_id.get(cc_id)  # Obtém o ID do pai
-    #             cc_pai_nome = cc_pai_id_to_name.get(cc_pai_id, "Indefinido")
-
-    #             valor_utilizado = valor_real if valor_real > 0 else valor
-
-    #             # Acumula valores
-    #             total += valor_utilizado
-    #             tipo_total[tipo] += valor_utilizado
-
-    #             # Adiciona o valor ao centro de custo pai e seus filhos
-    #             hierarquia[cc_pai_id]['total'] += valor_utilizado
-    #             hierarquia[cc_pai_id]['nome'] = cc_pai_nome
-    #             hierarquia[cc_pai_id]['filhos'].append({
-    #                 'id': cc_id,
-    #                 'nome': cc_nome,
-    #                 'valor': valor_utilizado
-    #             })
-
-    #     # Formata os dados para JSON
-    #     response_data = {
-    #         'total': total,
-    #         'tipo_total': dict(tipo_total),
-    #         'hierarquia': [
-    #             {
-    #                 'id': pai_id,
-    #                 'nome': dados['nome'],
-    #                 'total': dados['total'],
-    #                 'filhos': dados['filhos']
-    #             }
-    #             for pai_id, dados in hierarquia.items()
-    #         ]
-    #     }
-
-    #     return JsonResponse(response_data, safe=False)
-
-    # @action(detail=False, methods=['get'], url_path='calculosOrcado')
-    # def calculosOrcado(self, request):
-    #     # Serializa os dados dos orçamentos
-    #     orcamentos = OrcamentoBase.objects.all()
-    #     serializer = self.get_serializer(orcamentos, many=True)
-    #     serialized_orcamentos = serializer.data
-
-    #     # Cria DataFrame a partir dos dados serializados
-    #     df = pd.DataFrame(serialized_orcamentos)
-
-    #     # Mapeia Centros de Custo e Centros de Custo Pai
-    #     centros_custo = CentroCusto.objects.all().values('id', 'nome', 'cc_pai_id')
-    #     cc_id_to_name = {cc['id']: cc['nome'] for cc in centros_custo}
-    #     cc_id_to_pai_id = {cc['id']: cc['cc_pai_id'] for cc in centros_custo}
-
-    #     ccs_pai = CentroCustoPai.objects.all().values('id', 'nome')
-    #     cc_pai_id_to_name = {cc_pai['id']: cc_pai['nome'] for cc_pai in ccs_pai}
-
-    #     # Inicializa estrutura hierárquica
-    #     hierarquia = defaultdict(lambda: {"nome": "", "total": 0, "filhos": defaultdict(float)})
-
-    #     if 'valor' in df.columns and 'valor_real' in df.columns:
-    #         # Converte as colunas para numérico
-    #         df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
-    #         df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce').fillna(0)
-
-    #         # Calcula o total agregado por Centro de Custo Pai e seus filhos
-    #         for _, row in df.iterrows():
-    #             valor_real = row['valor_real']
-    #             valor = row['valor']
-    #             valor_utilizado = valor_real if valor_real > 0 else valor
-
-    #             cc_id = row.get('centro_custo_nome')  # Supõe-se que contenha IDs
-    #             cc_nome = cc_id_to_name.get(cc_id, "Indefinido")
-    #             cc_pai_id = cc_id_to_pai_id.get(cc_id)  # Obtém o ID do pai
-    #             cc_pai_nome = cc_pai_id_to_name.get(cc_pai_id, "Indefinido")
-
-    #             hierarquia[cc_pai_id]["nome"] = cc_pai_nome
-    #             hierarquia[cc_pai_id]["total"] += valor_utilizado
-    #             hierarquia[cc_pai_id]["filhos"][cc_nome] += valor_utilizado
-
-    #     # Formata os valores para o JSON de saída
-    #     hierarquia_formatada = []
-    #     for cc_pai_id, data in hierarquia.items():
-    #         filhos = [{"nome": nome, "total": total} for nome, total in data["filhos"].items()]
-    #         hierarquia_formatada.append({
-    #             "id": cc_pai_id,
-    #             "nome": data["nome"],
-    #             "total": data["total"],
-    #             "filhos": filhos
-    #         })
-
-    #     return JsonResponse({"hierarquia": hierarquia_formatada}, safe=False)
+        return JsonResponse({"resultado": resultado, "total":total_global}, safe=False)
+                        
 
 @api_view(['POST'])
 def AplicarPorcentagem(request):

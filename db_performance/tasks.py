@@ -48,6 +48,29 @@ def enviar_notificacoes():
                         print(f"Erro ao enviar notificação: {str(e)}")
 
     # Retornar uma mensagem simples que pode ser serializada como JSON
+    #return f"Notificações enviadas: {notificacoes_enviadas}"
+
+    # Construir a mensagem para o grupo RH
+    lista_avaliados = "\n".join([avaliado.nome for avaliado in avaliados_sem_avaliacao])
+    mensagem_rh = f"Avaliações pendentes no período atual para os seguintes avaliados:\n{lista_avaliados}"
+
+    # Notificar usuários do grupo RH
+    grupo_rh = Group.objects.get(name='RH')
+    usuarios_rh = grupo_rh.user_set.all()
+    for usuario in usuarios_rh:
+        try:
+            notify.send(
+                sender=None,
+                recipient=usuario,
+                verb='Notificação de RH',
+                description=mensagem_rh
+            )
+            notificacoes_enviadas += 1
+        except IntegrityError as e:
+            # Log do erro e continue
+            print(f"Erro ao enviar notificação para o grupo RH: {str(e)}")
+
+    # Retornar uma mensagem simples que pode ser serializada como JSON
     return f"Notificações enviadas: {notificacoes_enviadas}"
 
 @shared_task

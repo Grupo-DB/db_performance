@@ -67,9 +67,16 @@ class LinhaViewSet(viewsets.ModelViewSet):
 
         df = pd.DataFrame(serialized_linhas)
 
+        produtos = Produto.objects.all()
+        serializer = ProdutoSerializer(produtos, many=True)
+        serialized_produtos = serializer.data
+
+        df_produtos = pd.DataFrame(serialized_produtos)
+
 
         # Extraindo o nome do produto de 'produto_detalhes'
         df["produto"] = df["produto_detalhes"].apply(lambda x: x["nome"])
+        df["aliquota"] = df["produto_detalhes"].apply(lambda x: float(x["aliquota"]))
 
         # Convertendo 'quantidade_carregada' para float
         df["quantidade_carregada"] = df["quantidade_carregada"].astype(float)
@@ -97,6 +104,9 @@ class LinhaViewSet(viewsets.ModelViewSet):
         # Calculando o faturamento total por produto
         faturamento_por_produto = df.groupby("produto")["faturamento"].sum()
 
+          
+        # Extraindo a alíquota de 'produto_detalhes'
+        aliquota_dict = df.groupby("produto")["aliquota"].first().to_dict()
 
         deducao = (media_aliquota * faturamento_por_produto).to_dict()
 
@@ -120,7 +130,8 @@ class LinhaViewSet(viewsets.ModelViewSet):
             'receita_liquida': receita_liquida_dict,
             'receita_bruta': receita_bruta,
             'deducao_total': deducao_total,
-            'receita_liquida_total': receita_liquida_total
+            'receita_liquida_total': receita_liquida_total,
+            'aliquota': aliquota_dict
         }
 
         return JsonResponse(response_data, safe=False)
