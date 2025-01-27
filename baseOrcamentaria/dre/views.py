@@ -77,6 +77,7 @@ class LinhaViewSet(viewsets.ModelViewSet):
         # Extraindo o nome do produto de 'produto_detalhes'
         df["produto"] = df["produto_detalhes"].apply(lambda x: x["nome"])
         df["aliquota"] = df["produto_detalhes"].apply(lambda x: float(x["aliquota"]))
+        #df["preco_media_venda"] = df["produto_detalhes"].apply(lambda x: float(x["preco_media_venda"]))
 
         # Convertendo 'quantidade_carregada' para float
         df["quantidade_carregada"] = df["quantidade_carregada"].astype(float)
@@ -96,7 +97,7 @@ class LinhaViewSet(viewsets.ModelViewSet):
         faturamento = df.groupby("produto")["faturamento"].sum().to_dict()
 
         # Extraindo o nome do produto de 'produto_detalhes'
-        df["aliquota"] = df["produto_detalhes"].apply(lambda x: float(x["aliquota"]))
+        #df["aliquota"] = df["produto_detalhes"].apply(lambda x: float(x["aliquota"]))
 
         # Calculando a média da aliquota agrupada por produto
         media_aliquota = df.groupby("produto")["aliquota"].mean()
@@ -107,6 +108,7 @@ class LinhaViewSet(viewsets.ModelViewSet):
           
         # Extraindo a alíquota de 'produto_detalhes'
         aliquota_dict = df.groupby("produto")["aliquota"].first().to_dict()
+        preco_dict = df.groupby("produto")["preco_medio_venda"].first().to_dict()
 
         deducao = (media_aliquota * faturamento_por_produto).to_dict()
 
@@ -122,6 +124,13 @@ class LinhaViewSet(viewsets.ModelViewSet):
         receita_liquida_total = receita_liquida.sum()
         quantidade_total = quantidade.sum()
 
+         # Adiciona a porcentagem da receita líquida de cada produto em relação à receita líquida total
+        receita_liquida_percent_dict = {produto: (valor / receita_liquida_total) * 100 for produto, valor in receita_liquida_dict.items()}
+
+        # Calculando o percentual de deducao_total e receita_liquida_total em relação à receita_bruta
+        percentual_deducao_total = (deducao_total / receita_bruta) * 100 if receita_bruta != 0 else 0
+        percentual_receita_liquida_total = (receita_liquida_total / receita_bruta) * 100 if receita_bruta != 0 else 0
+
         response_data = {
             'quantidade': quantidade_dict,
             'quantidade_total': quantidade_total,
@@ -131,7 +140,11 @@ class LinhaViewSet(viewsets.ModelViewSet):
             'receita_bruta': receita_bruta,
             'deducao_total': deducao_total,
             'receita_liquida_total': receita_liquida_total,
-            'aliquota': aliquota_dict
+            'aliquota': aliquota_dict,
+            'preco_medio_venda': preco_dict,
+            'receita_liquida_percent': receita_liquida_percent_dict,
+            'percentual_deducao_total':percentual_deducao_total,
+            'percentual_receita_liquida_total':percentual_receita_liquida_total
         }
 
         return JsonResponse(response_data, safe=False)

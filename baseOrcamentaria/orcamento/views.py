@@ -525,11 +525,11 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
                 # Verifica se a conta_contabil é despsesa comercial ou administrativa
                 conta_contabil = row.get('conta_contabil', '')
                 if str(conta_contabil).startswith('3402'):
-                    tipo_total['despesas_comerciais'] += valor_utilizado
-                    tipo_por_cc_pai['despesas_comerciais'][cc_pai_nome] += valor_utilizado
+                    tipo_total['Despesas Comerciais'] += valor_utilizado
+                    tipo_por_cc_pai['Despesas Comerciais'][cc_pai_nome] += valor_utilizado
                 elif str(conta_contabil).startswith('3401'):
-                    tipo_total['despesas_administrativas'] += valor_utilizado
-                    tipo_por_cc_pai['despesas_administrativas'][cc_pai_nome] += valor_utilizado
+                    tipo_total['Despesas Administrativas'] += valor_utilizado
+                    tipo_por_cc_pai['Despesas Administrativas'][cc_pai_nome] += valor_utilizado
 
         total_global = 0
 
