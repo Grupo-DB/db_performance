@@ -46,6 +46,18 @@ class RaizAnaliticaViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
     
+    @action(detail=False, methods=['POST'], url_path='byInicio')
+    def byInicio(self, request):
+        ini_raiz = request.data.get('filterValue')
+    
+        if ini_raiz is None:
+            return Response({"error": "filterValue parameter is required"}, status=status.HTTP_400_BAD_REQUEST)
+    
+        raizes_analiticas = RaizAnalitica.objects.filter(raiz_contabil__startswith=ini_raiz)
+        serializer = self.get_serializer(raizes_analiticas, many=True)
+        return Response(serializer.data)
+
+    
 class CentroCustoPaiViewSet(viewsets.ModelViewSet):
     queryset = CentroCustoPai.objects.all() 
     serializer_class = CentroCustoPaiSerializer
@@ -66,13 +78,7 @@ class CentroCustoViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
     
-    # @action(detail=False, methods=['get'], url_path='byCcPai')
-    # def byCcPai(self, request):
-    #     cc_pai_id = request.query_params.get('cc_pai_id',)
-    #     centros_custo = CentroCusto.objects.filter(cc_pai_id=cc_pai_id)
-    #     serializer = self.get_serializer(centros_custo, many=True)
-    #     return Response(serializer.data, status=status.HTTP_200_OK)
-    
+
     @action(detail=False, methods=['get'], url_path='byCcPai')
     def byCcPai(self, request):
         # Obtém os IDs de cc_pai, separados por vírgula
@@ -492,6 +498,13 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         # Cria DataFrame a partir dos dados serializados
         df = pd.DataFrame(serialized_orcamentos)
 
+        df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
+        # Filtra o DataFrame para incluir apenas linhas onde tipo_custo é "depreciação"
+        df_depreciacao = df[df['base_orcamento'] == 'Depreciação']
+
+        # Soma os valores onde tipo_custo é "depreciação"
+        depreciacao_total = df_depreciacao['valor'].sum()
+
         # Mapeia Centros de Custo e Centros de Custo Pai
         cc_id_to_name = {cc['id']: cc['nome'] for cc in CentroCusto.objects.all().values('id', 'nome')}
         cc_id_to_pai_id = {cc['id']: cc['cc_pai_id'] for cc in CentroCusto.objects.all().values('id', 'cc_pai_id')}
@@ -556,7 +569,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         # Adiciona custo_total ao resultado 
         #resultado.append({"tipo": "Custo Total", "total": custo_total})
 
-        return JsonResponse({"resultado": resultado, "total":total_global}, safe=False)
+        return JsonResponse({"resultado": resultado, "total":total_global, "depreciacao": depreciacao_total}, safe=False)
                         
 
 @api_view(['POST'])
