@@ -62,7 +62,8 @@ class FormularioCreateSerializer(serializers.ModelSerializer):
 class AvaliadoSerializer(serializers.ModelSerializer):
     colaborador_id = serializers.IntegerField(write_only=True)
     tipoAvaliacao_id = serializers.IntegerField(write_only=True)
-    setor = serializers.CharField(source='ambiente.nome', read_only=True)
+    setor = serializers.CharField(source='setor.nome', read_only=True)
+    ambiente = serializers.CharField(source='ambiente.nome', read_only=True)
     cargo = serializers.CharField(source='cargo.nome', read_only=True)
 
     class Meta:
@@ -95,6 +96,7 @@ class AvaliadorSerializer(serializers.ModelSerializer):
     colaborador_id = serializers.IntegerField(write_only=True)
     avaliados = AvaliadoSerializer(many=True, read_only=True)
     setor = serializers.CharField(source='ambiente.nome', read_only=True)
+    ambiente = serializers.CharField(source='setor.nome', read_only=True)
     cargo = serializers.CharField(source='cargo.nome', read_only=True)
     class Meta:
         model = Avaliador
