@@ -30,7 +30,8 @@ def filtrar_colaboradores(request):
         data_inicio = data.get('data_inicio', None)
         data_fim = data.get('data_fim', None)
         
-        queryset = Colaborador.objects.all()
+        #queryset = Colaborador.objects.all()
+        queryset = Colaborador.objects.filter(situacao=1)
 
         if selected_filiais:
             queryset = queryset.filter(filial_id__in=selected_filiais)
@@ -43,21 +44,16 @@ def filtrar_colaboradores(request):
         if selected_setores:
             queryset = queryset.filter(setor_id__in=selected_setores)
         
-
         df = pd.DataFrame(queryset.values())
 
-        # Log the DataFrame columns and head
-        
-        # querysetidade = Colaborador.objects.all().values('data_nascimento')
-        # dfidade = pd.DataFrame(querysetidade)
-
+       
         hoje = timezone.now().date()
         # Converte a data de nascimento para a data local
         hoje = timezone.now().date()
     
         if 'data_nascimento' in df.columns:
             df['data_nascimento'] = pd.to_datetime(df['data_nascimento'], errors='coerce').dt.date
-            df['data_nascimento'].fillna(pd.to_datetime('1900-01-01').date(), inplace=True)  # Preenche NaNs com uma data padrão
+            df['data_nascimento'] = df['data_nascimento'].fillna(pd.to_datetime('1900-01-01').date())  # Preenche NaNs com uma data padrão
             df['idade'] = (hoje - df['data_nascimento']).apply(lambda x: x.days // 365)
             media_idade = round(df['idade'].mean())
         else:
@@ -65,7 +61,7 @@ def filtrar_colaboradores(request):
 
         if 'data_admissao' in df.columns:
             df['data_admissao'] = pd.to_datetime(df['data_admissao'], errors='coerce').dt.date
-            df['data_admissao'].fillna(pd.to_datetime('1900-01-01').date(), inplace=True)  # Preenche NaNs com uma data padrão
+            df['data_admissao'] = df['data_admissao'].fillna(pd.to_datetime('1900-01-01').date())  # Preenche NaNs com uma data padrão
             df['tempo'] = (hoje - df['data_admissao']).apply(lambda x: x.days // 365)
             media_tempo = round(df['tempo'].mean())
         else:

@@ -30,6 +30,7 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes
 from baseOrcamentaria.orcamento.models import RaizAnalitica,CentroCustoPai,CentroCusto,RaizSintetica,ContaContabil,GrupoItens,OrcamentoBase
 from baseOrcamentaria.orcamento.serializers import RaizAnaliticaSerializer,CentroCustoPaiSerializer,CentroCustoSerializer,RaizSinteticaSerializer,ContaContabilSerializer,GrupoItensSerializer,OrcamentoBaseSerializer
+from baseOrcamentaria.orcamento.models import Gestor
 import pandas as pd
 import locale
 from collections import defaultdict
@@ -68,6 +69,7 @@ class CentroCustoPaiViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
     
+      
 class CentroCustoViewSet(viewsets.ModelViewSet):
     queryset = CentroCusto.objects.all()
     serializer_class = CentroCustoSerializer
@@ -77,6 +79,19 @@ class CentroCustoViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], url_path='meusCcs')
+    def meusCcs(self,request):
+        try:
+            user = request.user
+            gestor = Gestor.objects.get(user=user)
+            ccs = CentroCusto.objects.filter(gestor=gestor)
+            serializer = CentroCustoSerializer(ccs, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Gestor.DoesNotExist:
+            return Response({"error": "Gestor nao encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 
     @action(detail=False, methods=['get'], url_path='byCcPai')

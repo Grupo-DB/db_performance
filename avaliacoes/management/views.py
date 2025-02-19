@@ -42,47 +42,6 @@ from django.utils.encoding import force_bytes
 from .permissions import IsInGroup
 from db_performance.tasks import enviar_notificacoes
 
-#logger = logging.getLogger(__name__)
-# @api_view(['GET','POST'])
-# def login(request):
-#     if request.method == "GET":
-#         return render(request,'login.html')
-#     else:    
-#         serializer = LoginSerializer(data=request.data)
-#         if serializer.is_valid():
-#             username = serializer.validated_data['username']
-#             password = serializer.validated_data['password']
-#             user = authenticate(username=username, password=password)
-#             if user is not None:
-#                 login(request, user)
-                
-#                 return Response({'message': 'Login bem-sucedido'}, status=status.HTTP_200_OK)
-#             else:
-#                 # Credenciais inválidas
-#                 return Response({'message': 'Credenciais inválidas'}, status=status.HTTP_401_UNAUTHORIZED)
-#         else:
-#             # Dados inválidos
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-# @api_view(['POST'])
-# def login(request):
-#         serializer = LoginSerializer(data=request.data)
-#         if serializer.is_valid():
-#             username = serializer.validated_data['username']
-#             password = serializer.validated_data['password']
-#             user = authenticate(username=username, password=password)
-#             if user is not None:
-#                 refresh = RefreshToken.for_user(user)
-#                 return Response({
-#                     'refresh': str(refresh),
-#                     'access': str(refresh.access_token),
-#                     'primeiro_acesso': user.primeiro_acesso,
-#                 })
-#             return Response({'detail': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
 
 User = get_user_model()
 
@@ -144,48 +103,6 @@ def reset_password(request, uidb64, token):
 
 
 
-
-# def cadastro(request):
-#     if request.method == 'GET':
-#         return render(request, 'cadastro_user.html')
-#     else:
-#         username = request.POST.get('username')
-#         email = request.POST.get('email')
-#         senha = request.POST.get('senha')
-        
-#         #verifica se já tem esse username cadastrado
-#         user = User.objects.filter(username=username).first()
-
-#         if user:
-#             return HttpResponse('Username já cadastrado!')
-        
-#         user = User.objects.create_user(username=username, email=email, password=senha)
-#         user.save()
-        
-#         return HttpResponse('Usuário cadastrado com sucesso!')
-
-# def login(request):
-#     #inca que se o metodo for GET, sem preenceher e enviar o formulário. somente renderiza a pagina
-#     if request.method == "GET":
-#         return render(request,'login.html')
-#     else:
-#         username = request.POST.get('username')
-#         senha = request.POST.get('senha')
-
-#         user = authenticate(username=username, password=senha)
-
-#         if user: #significa não none
-#             login_django(request, user)
-#             return HttpResponse('autenticado')
-#         else:
-#             return HttpResponse('email ou senha inválidos')
-
-# @login_required(login_url='/auth/login/')        
-# def plataforma(request):
-#     return HttpResponse('You are in')
-
-
-
 @api_view(['GET'])
 #@permission_classes([IsAuthenticated])
 def get_users(request):
@@ -214,268 +131,6 @@ def create_user(request):
 
 
 
-# #Empresas    
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def registercompany(request):
-#     if request.method == 'POST':
-#         serializer = RegisterCompanySerializer(data=request.data)
-#         if serializer.is_valid():
-#             empresa = serializer.save()
-#             return Response({'message': 'Empresa cadastrada com sucesso!', 'empresa_id': empresa.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-    
-
-# @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# def get_company(request):
-#     if request.method == 'GET':
-
-#         companys = Empresa.objects.all()                         
-
-#         serializer = RegisterCompanySerializer(companys, many=True)       
-
-#         return Response(serializer.data)                    
-    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-
-
-#--------------------------------------------------------------------Areas
-# @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# def get_area(request):
-#     if request.method == 'GET':
-
-#         areas = Area.objects.all()                         
-
-#         serializer = AreaSerializer(areas, many=True)       
-
-#         return Response(serializer.data)                    
-    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-
-
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def registerarea(request):
-#     if request.method == 'POST':
-#         serializer = AreaSerializer(data=request.data)
-#         if serializer.is_valid():
-#             area = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'area_id': area.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-    
-#---------------------------------------------------------------------------------------Setores
-# @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# def get_setor(request):
-#     if request.method == 'GET':
-#         setores = Setor.objects.all()                         
-#         serializer = SetorSerializer(setores, many=True)       
-#         return Response(serializer.data)                    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def registersetor(request):
-#     if request.method == 'POST':
-#         serializer = SetorSerializer(data=request.data)
-#         if serializer.is_valid():
-#             setor = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'setor_id': setor.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-
-
-
-#####################################################################################------------Filiais-------------------------################################################
-# @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# def get_filial(request):
-#     if request.method == 'GET':
-#         filiais = Filial.objects.all()                         
-#         serializer = FilialSerializer(filiais, many=True)       
-#         return Response(serializer.data)                    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def registerfilial(request):
-#     if request.method == 'POST':
-#         serializer = FilialSerializer(data=request.data)
-#         if serializer.is_valid():
-#             filial = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'filial_id': filial.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-
-##################################################################################------------------Cargos--------------------------------------#############################
-
-# @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# def get_cargo(request):
-#     if request.method == 'GET':
-#         cargos = Cargo.objects.all()                         
-#         serializer = CargoSerializer(cargos, many=True)       
-#         return Response(serializer.data)                    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def registercargo(request):
-#     if request.method == 'POST':
-#         serializer = CargoSerializer(data=request.data)
-#         if serializer.is_valid():
-#             cargo = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'cargo_id': cargo.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-
-
-###############################-------------------------------------------Tipos-de-contratos-------------------##############
-
-# @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# def get_tipocontrato(request):
-#     if request.method == 'GET':
-#         tipocontratos = TipoContrato.objects.all()                         
-#         serializer = TipoContratoSerializer(tipocontratos, many=True)       
-#         return Response(serializer.data)                    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def registertipocontrato(request):
-#     if request.method == 'POST':
-#         serializer = TipoContratoSerializer(data=request.data)
-#         if serializer.is_valid():
-#             tipocontrato = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'tipocontrato_id': tipocontrato.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-
-
-#########################################----------------------------Colaboradores---------------------------#####################
-# @api_view(['GET'])
-# #@permission_classes([IsAuthenticated])
-# def get_colaborador(request):
-#     if request.method == 'GET':
-#         colaboradores = Colaborador.objects.all()                         
-#         serializer = ColaboradorSerializer(colaboradores, many=True)       
-#         return Response(serializer.data)                    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-# #@permission_classes([IsAuthenticated])
-# @api_view(['POST'])
-# @parser_classes([MultiPartParser, FormParser])
-# def registercolaborador(request):
-#     if request.method == 'POST':
-#         serializer = ColaboradorSerializer(data=request.data)
-#         if serializer.is_valid():
-#             colaborador = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'colaborador_id': colaborador.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-    
-################################-------------------------Tipos de Avaliacao----------------------------------############
-# @permission_classes([IsAuthenticated])
-# @api_view(['GET'])
-# def get_tipoavaliacao(request):
-#     if request.method == 'GET':
-#         tipoavaliacoes = TipoAvaliacao.objects.all()                         
-#         serializer = TipoAvaliacaoSerializer(tipoavaliacoes, many=True)       
-#         return Response(serializer.data)                    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-# #@permission_classes([IsAuthenticated])
-# @api_view(['POST'])
-# def registertipoavaliacao(request):
-#     if request.method == 'POST':
-#         serializer = TipoAvaliacaoSerializer(data=request.data)
-#         if serializer.is_valid():
-#             tipoavaliacao = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'colaborador_id': tipoavaliacao.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-
-
-############################################------------------AVALIAÇÔES--------------------##########################################
-# @permission_classes([IsAuthenticated])
-# @api_view(['GET'])
-# def get_avaliacao(request):
-#     if request.method == 'GET':
-#         avaliacoes = Avaliacao.objects.all()                         
-#         serializer = AvaliacaoSerializer(avaliacoes, many=True)       
-#         return Response(serializer.data)                    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-
-# @permission_classes([IsAuthenticated])
-# @api_view(['POST'])
-# #@parser_classes([MultiPartParser, FormParser])
-# def registeravaliacao(request):
-#     if request.method == 'POST':
-#         serializer = AvaliacaoSerializer(data=request.data)
-#         if serializer.is_valid():
-#             avaliacao = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'colaborador_id': avaliacao.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-
-
-#####################------------------------------------------------Avaliadores-----------------------------------------########
-# @permission_classes([IsAuthenticated])
-# @api_view(['GET'])
-# def get_avaliador(request):
-#     if request.method == 'GET':
-#         avaliadores = Avaliador.objects.all()                         
-#         serializer = AvaliadorSerializer(avaliadores, many=True)       
-#         return Response(serializer.data)                    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-
-# @permission_classes([IsAuthenticated])
-# @api_view(['POST'])
-# #@parser_classes([MultiPartParser, FormParser])
-# def registeravaliador(request):
-#     if request.method == 'POST':
-#         serializer = AvaliadorSerializer(data=request.data)
-#         if serializer.is_valid():
-#             avaliador = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'avaliador_id': avaliador.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-
-###########-------------------------------------------------------------Formulaios--------------------------------############
-# @permission_classes([IsAuthenticated])
-# @api_view(['GET'])
-# def get_formulario(request):
-#     if request.method == 'GET':
-#         formularios = Formulario.objects.all()                         
-#         serializer = FormularioSerializer(formularios, many=True)       
-#         return Response(serializer.data)                    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-
-# @permission_classes([IsAuthenticated])
-# @api_view(['POST'])
-# #@parser_classes([MultiPartParser, FormParser])
-# def registerformulario(request):
-#     if request.method == 'POST':
-#         serializer = FormularioSerializer(data=request.data)
-#         if serializer.is_valid():
-#             formulario = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'formulario_id': formulario.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-
-######################----------------------------------------PERGUNTAS-----------------------------------##########################
-# @permission_classes([IsAuthenticated])
-# @api_view(['GET'])
-# def get_pergunta(request):
-#     if request.method == 'GET':
-#         perguntas = Pergunta.objects.all()                         
-#         serializer = PerguntaSerializer(perguntas, many=True)       
-#         return Response(serializer.data)                    
-#     return Response(status=status.HTTP_400_BAD_REQUEST)
-
-# @permission_classes([IsAuthenticated])
-# @api_view(['POST'])
-# #@parser_classes([MultiPartParser, FormParser])
-# def registerpergunta(request):
-#     if request.method == 'POST':
-#         serializer = PerguntaSerializer(data=request.data)
-#         if serializer.is_valid():
-#             pergunta = serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'pergunta_id': pergunta.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-
 
 #################-----------------------------------Inserir Pergunta no formulário-------------------===========###################
 @api_view(['POST'])
@@ -501,15 +156,6 @@ def add_pergunta_formulario(request, formulario_id):
 
 
 
-# @api_view(['POST'])
-# def upload(request):
-#     if request.method == 'POST':
-#         serializer = UploadSerializer(data=request.data)
-#         if serializer.is_valid():
-#             upload= serializer.save()
-#             return Response({'message': 'Area cadastrada com sucesso!', 'upload_id': upload.id})
-#         return Response(status=status.HTTP_400_BAD_REQUEST)
-
 ###########################----------------------------------------------------------######################
 
 
@@ -528,34 +174,6 @@ def get_perguntas_formularios(request, formulario_id):
 
 #####################################################################
 
-# @api_view(['POST'])
-# class AvaliadoViewSet(viewsets.ModelViewSet):
-#     queryset = Avaliado.objects.all()
-#     serializer_class = AvaliadoSerializer
-
-#     def create(self, request, *args, **kwargs):
-#         serializer = self.get_serializer(data=request.data)
-#         serializer.is_valid(raise_exception=True)
-#         avaliado = self.perform_create(serializer)
-#         headers = self.get_success_headers(serializer.data)
-#         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-
-#     def perform_create(self, serializer):
-#         avaliadores_data = self.request.data.get('avaliadores', [])  # Extrai os dados dos avaliadores do avaliado
-#         avaliado = serializer.save()
-
-#         # Adiciona os avaliadores ao avaliado recém-criado
-#         for avaliador_data in avaliadores_data:
-#             avaliador = Avaliador.objects.create(**avaliador_data)
-#             avaliado.avaliadores.add(avaliador)
-
-#         return avaliado
-
-
-
-
-
-
     #get as funções
 @api_view(['GET'])
 #@permission_classes([IsAuthenticated])
@@ -571,76 +189,6 @@ def get_funcao(request):
     return Response(status=status.HTTP_400_BAD_REQUEST)
 
 
-# @api_view(['GET'])
-# def informacoes_avaliador(request, user_id):
-#     avaliador = get_object_or_404(Avaliador, usuario_id=user_id)
-#     colaborador = avaliador.colaborador
-#     avaliador_serializer = AvaliadorSerializer(avaliador)
-#     colaborador_serializer = ColaboradorSerializer(colaborador)  # Adicione o serializer do Colaborador
-#     return Response({
-#         'avaliador': avaliador_serializer.data,
-#         'colaborador': colaborador_serializer.data,  # Inclua os dados do Colaborador na resposta
-#     })
-
-# @api_view(['GET'])
-# def informacoes_avaliador(request, avaliador_id):
-#     try:
-#         avaliador = Avaliador.objects.get(id=avaliador_id)
-#         serializer = AvaliadorSerializer(avaliador)
-#         return Response(serializer.data)
-#     except Avaliador.DoesNotExist:
-#         return Response({"error": "Avaliador não encontrado."}, status=404)
-
-# @api_view(['GET'])
-
-# def avaliador_do_usuario(request):
-#     user_id = request.user.id
-#     try:
-#         avaliador = Avaliador.objects.get(usuario_id=user_id)
-#         serializer = AvaliadorSerializer(avaliador)
-#         return Response(serializer.data)
-#     except Avaliador.DoesNotExist:
-#         return Response({"error": "Avaliador não encontrado para este usuário."}, status=404)
-
-
-    
-
-# @api_view(['POST'])
-# def add_avaliado_avaliador(request, avaliador_id):
-#     try:
-#         avaliador = Avaliador.objects.get(pk=avaliador_id)
-#     except Avaliador.DoesNotExist:
-#         return Response({'error': 'Avaliador não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
-
-#     avaliado_id = request.data.get('avaliado_id')  # Supondo que você envia o ID do avaliado no corpo da requisição
-
-#     try:
-#         avaliado = Avaliado.objects.get(pk=avaliado_id)
-#     except Avaliado.DoesNotExist:
-#         return Response({'error': 'Avaliado não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
-
-#     # Verifica se o avaliado já está associado ao avaliador
-#     if avaliador.avaliados.filter(pk=avaliado_id).exists():
-#         return Response({'error': 'Este avaliado já está associado ao avaliador.'}, status=status.HTTP_400_BAD_REQUEST)
-
-#     # Adiciona o avaliado ao avaliador na tabela intermediária
-#     avaliador.avaliados.add(avaliado)
-
-#     # Serializa o avaliador atualizado para retornar na resposta
-#     serializer = AvaliadorSerializer(avaliador)
-#     return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-# @api_view(['GET'])
-# def get_avaliados_avaliador(request, avaliador_id):
-#     try:
-#         avaliador = Avaliador.objects.get(pk=avaliador_id)
-#     except Avaliador.DoesNotExist:
-#         return Response({'error': 'Avaliador não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
-
-#     avaliados = avaliador.avaliados.all()
-#     serializer = AvaliadoSerializer(avaliados, many=True)
-#     return Response(serializer.data)
 
 ##########------------------------------------------------------------------------------------------------------------------------------------------------------#################
 class AvaliadoViewSet(viewsets.ModelViewSet):
@@ -738,51 +286,44 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
     serializer_class = ColaboradorSerializer  
 
 
-    # c
 
-
-
-    # def partial_update(self, request, *args, **kwargs):
-    #     kwargs['partial'] = True
-    #     instance = self.get_object()
-    #     serializer = self.get_serializer(instance, data=request.data, partial=True)
-    #     serializer.is_valid(raise_exception=True)
-    #     self.perform_update(serializer)
-    #     if 'image' in serializer.validated_data:
-    #         image_url = request.build_absolute_uri(instance.image.url)
-    #         return Response({'image_url': image_url, **serializer.data})
-        
-    #     return Response(serializer.data)
-    
     def perform_create(self, serializer):
         username = self.request.data.get('username', None)
         password = self.request.data.get('password', None)
-        tornar_avaliado = self.request.data.get('tornar_avaliado', False)
-        tornar_avaliador = self.request.data.get('tornar_avaliador', False)
-        tornar_gestor = self.request.data.get('tornar_gestor', False)
+        tornar_avaliado = self.request.data.get('tornar_avaliado', 'false').lower() == 'true'
+        tornar_avaliador = self.request.data.get('tornar_avaliador', 'false').lower() == 'true'
+        tornar_gestor = self.request.data.get('tornar_gestor', 'false').lower() == 'true'
+        
         colaborador = serializer.save()
         
         if username and password:
             user = User.objects.create_user(username=username, password=password)
             colaborador.user = user
             colaborador.save()
-        if tornar_avaliado and not hasattr(colaborador, 'avaliado'):
+        
+        # Adicionando verificações de depuração
+        print(f"tornar_avaliado: {tornar_avaliado}, tornar_avaliador: {tornar_avaliador}, tornar_gestor: {tornar_gestor}")
+        
+        if tornar_avaliado and not Avaliado.objects.filter(colaborador_ptr=colaborador).exists():
+            print("Criando Avaliado")
             Avaliado.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
 
-        if tornar_avaliador and not hasattr(colaborador, 'avaliador'):
+        if tornar_avaliador and not Avaliador.objects.filter(colaborador_ptr=colaborador).exists():
+            print("Criando Avaliador")
             Avaliador.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
 
-        if tornar_gestor and not hasattr(colaborador, 'gestor'):
+        if tornar_gestor and not Gestor.objects.filter(colaborador_ptr=colaborador).exists():
+            print("Criando Gestor")
             Gestor.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
-            )    
+            )
 
     @action(detail=False, methods=['get'])
     def meInfo(self, request):
@@ -817,23 +358,28 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
                 colaborador.user = user
                 colaborador.save()
 
-        if tornar_avaliado and not hasattr(colaborador, 'avaliado'):
+        print(f"tornar_avaliado: {tornar_avaliado}, tornar_avaliador: {tornar_avaliador}, tornar_gestor: {tornar_gestor}")
+        
+        if tornar_avaliado and not Avaliado.objects.filter(colaborador_ptr=colaborador).exists():
+            print("Criando Avaliado")
             Avaliado.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
 
-        if tornar_avaliador and not hasattr(colaborador, 'avaliador'):
+        if tornar_avaliador and not Avaliador.objects.filter(colaborador_ptr=colaborador).exists():
+            print("Criando Avaliador")
             Avaliador.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
 
-        if tornar_gestor and not hasattr(colaborador, 'gestor'):
+        if tornar_gestor and not Gestor.objects.filter(colaborador_ptr=colaborador).exists():
+            print("Criando Gestor")
             Gestor.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
-            )    
+            )
                 
         
     
@@ -1112,28 +658,6 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
         except Avaliacao.DoesNotExist:
             return Response({'status': 'error', 'message': 'Avaliação não encontrada'}, status=404)
     
-   # @action(detail=False, methods=['get'], url_path='meus_avaliados_sem_avaliacao')
-   # def meus_avaliados_sem_avaliacao(self, request):
-    #    try:
-     #       user = request.user
-      #      periodo = request.query_params.get('periodo')
-
-       #     if not periodo:
-        #        return Response({'status': 'error', 'message': 'Período não fornecido'}, status=status.HTTP_400_BAD_REQUEST)
-
-         #   avaliador = Avaliador.objects.get(user=user)
-          #  avaliados = avaliador.avaliados.all()
-
-            # Filtrar avaliados que não têm avaliação no período especificado
-           # avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
-            #avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao)
-
-            #serializer = AvaliadoSerializer(avaliados_sem_avaliacao, many=True)
-            #return Response(serializer.data, status=status.HTTP_200_OK)
-        #except Avaliador.DoesNotExist:
-            #return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
-        #except Exception as e:
-            #return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         
     @action(detail=False, methods=['get'], url_path='meus_avaliados_sem_avaliacao')
     def meus_avaliados_sem_avaliacao(self, request):
@@ -1195,31 +719,7 @@ class PerguntaViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
 
-# class FormularioViewSet(viewsets.ModelViewSet):
-#     queryset = Pergunta.objects.all()
-#     serializer_class = PerguntaSerializer     
-#     def partial_update(self, request, *args, **kwargs):
-#         instance = self.get_object()
-#         serializer = self.get_serializer(instance, data=request.data, partial=True)
-#         serializer.is_valid(raise_exception=True)
-#         self.perform_update(serializer)
-#         return Response(serializer.data)    
 
-# class FormularioViewSet(viewsets.ModelViewSet):
-#     queryset = Formulario.objects.all()
-#     def partial_update(self, request, *args, **kwargs):
-#         instance = self.get_object()
-#         serializer = self.get_serializer(instance, data=request.data, partial=True)
-#         serializer.is_valid(raise_exception=True)
-#         self.perform_update(serializer)
-#         return Response(serializer.data)
-
-#     def get_serializer_class(self):
-#         if self.action == 'create':
-#             return FormularioCreateSerializer
-#         if self.action in ['update', 'partial_update']:
-#             return FormularioUpdateSerializer
-#         return FormularioCreateSerializer
 class FormularioViewSet(viewsets.ModelViewSet):
     queryset = Formulario.objects.all()
     serializer_class = FormularioSerializer 
@@ -1398,39 +898,7 @@ class NotificationViewSet(viewsets.ViewSet):
         serializer = NotificationSerializer(notifications, many=True)
         return Response(serializer.data)
     
-    # @action(detail=False, methods=['post'])
-    # def enviar_emails(self, request):
-    #     subject = 'RH Dagoberto Barcellos'
-    #     message = 'Avaliações ainda pendentes no período atual'
-
-    #     if not subject or not message:
-    #         return Response({"error": "Erro ao enviar email"}, status=status.HTTP_400_BAD_REQUEST)
-
-    #     # Obter o avaliador logado
-    #     avaliador = Avaliador.objects.get(user=request.user)
-
-    #     now = timezone.now()
-    #     trimestre_atual = obterTrimestre(now)
-
-    #     # Encontrar avaliados sem avaliação no trimestre atual para o avaliador logado
-    #     avaliados_sem_avaliacao = Avaliado.objects.exclude(
-    #         avaliacoes_avaliado__periodo=trimestre_atual
-    #     ).filter(avaliadores=avaliador).distinct()
-
-    #     if not avaliados_sem_avaliacao.exists():
-    #         return Response({"message": "Nenhum avaliador sem avaliação."}, status=status.HTTP_204_NO_CONTENT)
-
-    #     # Construir o corpo do email incluindo os avaliados sem avaliação para o avaliador atual
-    #     email_body = f"{message}\n\nAvaliados sem avaliação no trimestre atual:\n"
-    #     for avaliado in avaliados_sem_avaliacao:
-    #         email_body += f"- {avaliado.nome}\n"
-
-    #     try:
-    #         send_custom_email(subject, email_body, [avaliador.user.email])  # Enviando para o email do avaliador logado
-    #     except Exception as e:
-    #         return Response({"error": "Erro ao enviar email"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    #     return Response({"success": "Email enviado com sucesso!"}, status=status.HTTP_200_OK)
+    
 
     @action(detail=False, methods=['post'])
     def enviar_notificacoes(self, request):
@@ -1438,42 +906,6 @@ class NotificationViewSet(viewsets.ViewSet):
         return Response({"success": "Notificações enviadas"}, status=status.HTTP_200_OK)
 
 
-        # avaliador_id = request.data.get('avaliador_id')
-
-        # if not avaliador_id:
-        #     return Response({"error": "Avaliador ID não fornecido."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # try:
-        #     avaliador = Avaliador.objects.get(id=avaliador_id)
-        # except Avaliador.DoesNotExist:
-        #     return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
-
-        # now = timezone.now()
-        # trimestre_atual = obterTrimestre(now)
-
-        # avaliados_sem_avaliacao = Avaliado.objects.filter(
-        #     ~Q(avaliacoes_avaliado__periodo=trimestre_atual)
-        # ).distinct()
-
-        # avaliadores_sem_avaliacao = Avaliador.objects.filter(
-        #     avaliados__in=avaliados_sem_avaliacao
-        # ).distinct()
-
-        # # Enviar notificações para os avaliadores sem avaliações no trimestre atual
-        # for avaliador in avaliadores_sem_avaliacao:
-        #     # Verifica se o avaliador tem um usuário associado
-        #     if avaliador.user is None:
-        #         continue  # Pula este avaliador se não tiver usuário associado
-
-        #     for avaliado in avaliador.avaliados.filter(id__in=avaliados_sem_avaliacao).all():
-        #         notify.send(
-        #             sender=request.user,  # Quem envia a notificação (usuário autenticado)
-        #             recipient=avaliador.user,  # Avaliador (instância de User)
-        #             verb='Nova notificação!!',
-        #             description=f'Nova avaliação pendente no período atual para {avaliado.nome}'
-        #         )
-
-        # return Response({"success": "Notificações enviadas"}, status=status.HTTP_200_OK)
         
     @action(detail=False, methods=['post'])
     def marcar_como_lidas(self, request):
@@ -1517,35 +949,7 @@ class YourViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-    # def enviar_email_avaliador(self, avaliador, periodo, avaliados_sem_avaliacao):
-    #     subject = f"Avaliações Pendentes para o Período {periodo}"
-    #     message = f"Prezado {avaliador.user.first_name},\n\nVocê possui os seguintes avaliados sem avaliação para o período {periodo}:\n"
-    #     for avaliado in avaliados_sem_avaliacao:
-    #         message += f"- {avaliado.nome}\n"
-    #     message += "\nPor favor, realize as avaliações pendentes o mais breve possível.\n\nAtenciosamente,\nEquipe de Gestão"
-
-    #     send_mail(
-    #         subject,
-    #         message,
-    #         settings.EMAIL_HOST_USER,
-    #         [avaliador.user.email],
-    #         fail_silently=False,
-    #     )
-
-
-# class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-#     def validate(self, attrs):
-#         data = super().validate(attrs)
-#         refresh = self.get_token(self.user)
-        
-#         data['refresh'] = str(refresh)
-#         data['access'] = str(refresh.access_token)
-#         data['primeiro_acesso'] = self.user.primeiro_acesso  # Adicione o campo personalizado aqui
-
-#         return data
-
-# class CustomTokenObtainPairView(TokenObtainPairView):
-#     serializer_class = CustomTokenObtainPairSerializer  
+     
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
