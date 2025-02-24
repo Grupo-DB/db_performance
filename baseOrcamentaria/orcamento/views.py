@@ -426,10 +426,31 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
 
         return Response(response_data, status=status.HTTP_200_OK)
     
-    @action(detail=False, methods=['get'], url_path='calculosOrcado')
+    @action(detail=False, methods=['POST'], url_path='calculosOrcado')
     def calculosOrcado(self, request):
         # Serializa os dados dos orçamentos
-        orcamentos = OrcamentoBase.objects.all()
+        ano = request.data.get('ano')
+        meses = request.data.get('periodo')
+
+        # Verifica se 'meses' é uma lista, caso contrário, converte para lista
+        if not isinstance(meses, list):
+            meses = [meses]
+
+        # Remove valores None da lista de meses
+        meses = [mes for mes in meses if mes is not None]
+
+        # Construir a consulta de forma condicional
+        filters = {}
+        if ano:
+            filters['ano'] = ano
+        if meses:
+            filters['mes_especifico__in'] = meses
+
+        if filters: 
+            orcamentos = OrcamentoBase.objects.filter(**filters)
+        else:
+            orcamentos = OrcamentoBase.objects.all()
+            
         serializer = self.get_serializer(orcamentos, many=True)
         serialized_orcamentos = serializer.data
 
@@ -503,10 +524,31 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         return JsonResponse({"resultado": resultado, "total":custo_total}, safe=False)
     
     
-    @action(detail=False, methods=['get'], url_path='calculosDespesa')
+    @action(detail=False, methods=['POST'], url_path='calculosDespesa')
     def calculosDespesa(self, request):
+        ano = request.data.get('ano')
+        meses = request.data.get('periodo')
+
+        # Verifica se 'meses' é uma lista, caso contrário, converte para lista
+        if not isinstance(meses, list):
+            meses = [meses]
+
+        # Remove valores None da lista de meses
+        meses = [mes for mes in meses if mes is not None]
+
+        # Construir a consulta de forma condicional
+        filters = {}
+        if ano:
+            filters['ano'] = ano
+        if meses:
+            filters['mes_especifico__in'] = meses
+
         # Sereliza os dados dos orçamentos
-        orcamentos = OrcamentoBase.objects.all()
+        if filters: 
+            orcamentos = OrcamentoBase.objects.filter(**filters)
+        else:
+            orcamentos = OrcamentoBase.objects.all()
+
         serializer = OrcamentoBaseSerializer(orcamentos, many=True)
         serialized_orcamentos = serializer.data
 

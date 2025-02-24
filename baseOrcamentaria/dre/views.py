@@ -59,11 +59,28 @@ class LinhaViewSet(viewsets.ModelViewSet):
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    @action(detail=False, methods=['get'], url_path='calculosDre')
+    @action(detail=False, methods=['post'], url_path='calculosDre')
     def calculosDre(self,request):
-        linhas = Linha.objects.all()
+        ano = request.data.get('ano')
+        periodo = request.data.get('periodo')
+        
+        filters = {}
+        if ano: 
+            filters['ano'] = ano
+        if periodo: 
+            filters['periodo__in'] = periodo
+
+        if filters: 
+            linhas = Linha.objects.filter(**filters)
+        else:
+            linhas = Linha.objects.all()    
+        
+
         serializer = self.get_serializer(linhas, many=True)
         serialized_linhas = serializer.data
+
+        if not serialized_linhas:
+            return JsonResponse({"error": "Nenhum registro encontrado."}, status=status.HTTP_404_NOT_FOUND)
 
         df = pd.DataFrame(serialized_linhas)
 
@@ -110,10 +127,10 @@ class LinhaViewSet(viewsets.ModelViewSet):
         aliquota_dict = df.groupby("produto")["aliquota"].first().to_dict()
         preco_dict = df.groupby("produto")["preco_medio_venda"].first().to_dict()
 
-        deducao = (media_aliquota * faturamento_por_produto).to_dict()
+        deducao = ((media_aliquota / 100) * faturamento_por_produto).to_dict()
 
         # Multiplicando a média da aliquota pelo faturamento total por produto
-        deducao_produto = (media_aliquota * faturamento_por_produto)
+        deducao_produto = ((media_aliquota / 100) * faturamento_por_produto)
         #receita liquida
         receita_liquida = faturamento_por_produto - deducao_produto 
         receita_liquida_dict = receita_liquida.to_dict()
