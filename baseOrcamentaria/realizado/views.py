@@ -67,112 +67,124 @@ def calculos_realizado(request):
 
 
     consulta_realizado = pd.read_sql(f"""        
-            WITH LANCAMENTOS_BASE AS (
+           
+                WITH LANCAMENTOS_BASE AS (
+                    SELECT 
+                        LC.LANCCOD, 
+                        LC.LANCDATA, 
+                        '''' + LC.LANCDEB AS CONTA_DEB, 
+                        (SELECT PCNOME FROM PLANO WHERE PCCONTA = LC.LANCDEB) AS CONTA_NOME_DEB,
+                        '''' + LC.LANCCRED AS CONTA_CRED, 
+                        (SELECT PCNOME FROM PLANO WHERE PCCONTA = LC.LANCCRED) AS CONTA_NOME_CRED,
+                        CCNOMECOMP,
+                        CCSTCOD,
+                        LC.LANCVALOR,
+                        LC.LANCHIST,
+                        LC.LANCCOMP,
+                        LC.LANCTIPOREF,
+                        LC.LANCREF,
+                        LC.LANCSIT,
+                        LC.LANCFIL,
+                        LC.LANCEMP,
+                        ESTQNOME AS ITEM,
+                        BEST.BESTQUANT AS QTD
+                    FROM LANCAMENTO LC
+                    LEFT OUTER JOIN CENTROCUSTO ON CCCOD = LC.LANCCC
+                    LEFT OUTER JOIN BAIXAESTOQUE BEST ON BEST.BESTCOD = LC.LANCREF
+                                                    AND BEST.BESTEMP = LC.LANCEMP 
+                                                    AND BEST.BESTFIL = LC.LANCFIL
+                                                    AND LC.LANCTIPOREF = 13
+                                                    AND LC.LANCSIT = 0      
+                    LEFT OUTER JOIN ESTOQUE ESTQ ON ESTQ.ESTQCOD = BEST.BESTESTQ
+                    WHERE 
+                        CAST(LC.LANCDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+                        AND LC.LANCEMP = 1
+                        AND LC.LANCFIL IN ({filiais_string})
+                        AND LANCSIT = 0
+                        AND ({cc_conditions})
+                        AND (
+                            LC.LANCCRED LIKE '{conta}'
+                            OR LC.LANCCRED LIKE '{conta1}'
+                            OR LC.LANCCRED LIKE '{conta2}'
+                            OR LC.LANCDEB LIKE '{conta}'
+                            OR LC.LANCDEB LIKE '{conta1}'
+                            OR LC.LANCDEB LIKE '{conta2}'
+                        )
+                )
+
                 SELECT 
-                    LC.LANCCOD, 
-                    LC.LANCDATA, 
-                    '''' + LC.LANCDEB AS CONTA_DEB, 
-                    (SELECT PCNOME FROM PLANO WHERE PCCONTA = LC.LANCDEB) AS CONTA_NOME_DEB,
-                    '''' + LC.LANCCRED AS CONTA_CRED, 
-                    (SELECT PCNOME FROM PLANO WHERE PCCONTA = LC.LANCCRED) AS CONTA_NOME_CRED,
+                    LANCCOD, 
+                    LANCDATA, 
+                    CONTA_DEB, 
+                    CONTA_NOME_DEB, 
+                    CONTA_CRED, 
+                    CONTA_NOME_CRED,
                     CCNOMECOMP,
-                    CCSTCOD,
-                    LC.LANCVALOR,
-                    LC.LANCHIST,
-                    LC.LANCCOMP,
-                    LC.LANCTIPOREF,
-                    LC.LANCREF,
-                    LC.LANCSIT,
-                    LC.LANCFIL,
-                    LC.LANCEMP
-                FROM LANCAMENTO LC
-                LEFT OUTER JOIN CENTROCUSTO ON CCCOD = LC.LANCCC
-                WHERE 
-                    CAST(LC.LANCDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
-                    AND LC.LANCEMP = 1
-                    AND LC.LANCFIL IN ({filiais_string})
-                    AND LANCSIT = 0
-                    AND ({cc_conditions})
-                    AND (
-                        LC.LANCCRED LIKE '{conta}'
-                        OR LC.LANCCRED LIKE '{conta1}'
-                        OR LC.LANCCRED LIKE '{conta2}'
-                        OR LC.LANCDEB LIKE '{conta}'
-                        OR LC.LANCDEB LIKE '{conta1}'
-                        OR LC.LANCDEB LIKE '{conta2}'
-                    )
-            )
-            
-            SELECT 
-                LANCCOD, 
-                LANCDATA, 
-                CONTA_DEB, 
-                CONTA_NOME_DEB, 
-                CONTA_CRED, 
-                CONTA_NOME_CRED,
-                CCNOMECOMP,
-                CCSTCOD, 
-                LANCVALOR AS DEB_VALOR, 
-                0.00 AS CRED_VALOR, 
-                'AUT' AS TIPO,
-                CASE 
-                    WHEN LANCTIPOREF = 14 THEN 
-                        (SELECT TREGNOME 
-                        FROM TIPOREGISTRO
-                        JOIN REGISTRO ON REGTREG = TREGCOD
-                        WHERE REGCOD = LANCREF)
-                    ELSE 
-                        (SELECT REFNOME FROM REFERENCIA WHERE REFCOD = LANCTIPOREF)
-                END AS REFERENCIA, 
-                LANCREF,
-                (SELECT HISTMASCARA FROM HISTORICO WHERE HISTCOD = LANCHIST) + ' ' + LANCCOMP AS HISTORICO,
-                CASE 
-                    WHEN LANCSIT = 0 THEN 'ATIVO' 
-                    WHEN LANCSIT = 1 THEN 'CANCELADO' 
-                    ELSE '?????' 
-                END AS SITUACAO,
-                CASE 
-                    WHEN LANCFIL = 0 THEN (SELECT EMPSIGLA FROM EMPRESA WHERE EMPCOD = LANCEMP) 
-                    ELSE (SELECT FILSIGLA FROM FILIAL WHERE FILCOD = LANCFIL) 
-                END AS UNIDADE
-            FROM LANCAMENTOS_BASE
+                    CCSTCOD, 
+                    LANCVALOR AS DEB_VALOR, 
+                    0.00 AS CRED_VALOR, 
+                    'AUT' AS TIPO,
+                    CASE 
+                        WHEN LANCTIPOREF = 14 THEN 
+                            (SELECT TREGNOME 
+                            FROM TIPOREGISTRO
+                            JOIN REGISTRO ON REGTREG = TREGCOD
+                            WHERE REGCOD = LANCREF)
+                        ELSE 
+                            (SELECT REFNOME FROM REFERENCIA WHERE REFCOD = LANCTIPOREF)
+                    END AS REFERENCIA, 
+                    LANCREF,
+                    (SELECT HISTMASCARA FROM HISTORICO WHERE HISTCOD = LANCHIST) + ' ' + LANCCOMP AS HISTORICO,
+                    CASE 
+                        WHEN LANCSIT = 0 THEN 'ATIVO' 
+                        WHEN LANCSIT = 1 THEN 'CANCELADO' 
+                        ELSE '?????' 
+                    END AS SITUACAO,
+                    CASE 
+                        WHEN LANCFIL = 0 THEN (SELECT EMPSIGLA FROM EMPRESA WHERE EMPCOD = LANCEMP) 
+                        ELSE (SELECT FILSIGLA FROM FILIAL WHERE FILCOD = LANCFIL) 
+                    END AS UNIDADE,
+                    ITEM,
+                    QTD
+                FROM LANCAMENTOS_BASE
 
-            UNION
+                UNION
 
-            SELECT 
-                LANCCOD, 
-                LANCDATA, 
-                CONTA_DEB, 
-                CONTA_NOME_DEB, 
-                CONTA_CRED, 
-                CONTA_NOME_CRED,
-                CCNOMECOMP,
-                CCSTCOD, 
-                0.00 AS DEB_VALOR, 
-                -LANCVALOR AS CRED_VALOR, 
-                'AUT' AS TIPO,
+                SELECT 
+                    LANCCOD, 
+                    LANCDATA, 
+                    CONTA_DEB, 
+                    CONTA_NOME_DEB, 
+                    CONTA_CRED, 
+                    CONTA_NOME_CRED,
+                    CCNOMECOMP,
+                    CCSTCOD, 
+                    0.00 AS DEB_VALOR, 
+                    -LANCVALOR AS CRED_VALOR, 
+                    'AUT' AS TIPO,
+                    CASE 
+                        WHEN LANCTIPOREF = 14 THEN 
+                            (SELECT TREGNOME 
+                            FROM TIPOREGISTRO
+                            JOIN REGISTRO ON REGTREG = TREGCOD
+                            WHERE REGCOD = LANCREF)
+                        ELSE 
+                            (SELECT REFNOME FROM REFERENCIA WHERE REFCOD = LANCTIPOREF)
+                    END AS REFERENCIA, 
+                    LANCREF,
+                    (SELECT HISTMASCARA FROM HISTORICO WHERE HISTCOD = LANCHIST) + ' ' + LANCCOMP AS HISTORICO,
+                    CASE 
+                        WHEN LANCSIT = 0 THEN 'ATIVO' 
+                        WHEN LANCSIT = 1 THEN 'CANCELADO' 
+                        ELSE '?????' 
+                    END AS SITUACAO,
                 CASE 
-                    WHEN LANCTIPOREF = 14 THEN 
-                        (SELECT TREGNOME 
-                        FROM TIPOREGISTRO
-                        JOIN REGISTRO ON REGTREG = TREGCOD
-                        WHERE REGCOD = LANCREF)
-                    ELSE 
-                        (SELECT REFNOME FROM REFERENCIA WHERE REFCOD = LANCTIPOREF)
-                END AS REFERENCIA, 
-                LANCREF,
-                (SELECT HISTMASCARA FROM HISTORICO WHERE HISTCOD = LANCHIST) + ' ' + LANCCOMP AS HISTORICO,
-                CASE 
-                    WHEN LANCSIT = 0 THEN 'ATIVO' 
-                    WHEN LANCSIT = 1 THEN 'CANCELADO' 
-                    ELSE '?????' 
-                END AS SITUACAO,
-                CASE 
-                    WHEN LANCFIL = 0 THEN (SELECT EMPSIGLA FROM EMPRESA WHERE EMPCOD = LANCEMP) 
-                    ELSE (SELECT FILSIGLA FROM FILIAL WHERE FILCOD = LANCFIL) 
-                END AS UNIDADE
-            FROM LANCAMENTOS_BASE
-                
+                        WHEN LANCFIL = 0 THEN (SELECT EMPSIGLA FROM EMPRESA WHERE EMPCOD = LANCEMP) 
+                        ELSE (SELECT FILSIGLA FROM FILIAL WHERE FILCOD = LANCFIL) 
+                    END AS UNIDADE,
+                    ITEM,
+                    QTD
+                FROM LANCAMENTOS_BASE
                 
 """,engine)
     #Regra para obtenção dos valores usados
@@ -180,6 +192,19 @@ def calculos_realizado(request):
     lambda row: row["DEB_VALOR"] if str(row["CONTA_DEB"])[1] in ['3', '4'] else row["CRED_VALOR"],
     axis=1
 )
+
+    # Cria a coluna DESCRICAO
+    consulta_realizado['DESCRICAO'] = consulta_realizado.apply(
+        lambda row: row['ITEM'] if pd.notnull(row['ITEM']) else row['HISTORICO'],
+        axis=1
+    )
+
+    # Converte os valores de QTD para 0 quando for null
+    consulta_realizado['QTD'] = consulta_realizado['QTD'].fillna(1)
+
+    #converte a data
+    consulta_realizado['LANCDATA'] = pd.to_datetime(consulta_realizado['LANCDATA']).dt.strftime('%d/%m/%Y')
+
     if consulta_realizado['SALDO'].empty or consulta_realizado['SALDO'].sum() == 0:
         total = "0"  # Define como zero formatado
         total_formatado = "0"
@@ -225,6 +250,8 @@ def calculos_realizado(request):
     # Converte o resultado da consulta para um dicionário
     grupo_contabil = {conta['nivel_4_conta']: conta['nivel_4_nome'] for conta in consulta_conta}
 
+    total_grupo_com_nomes_detalhes = {}
+
     # Substitui os códigos pelos nomes no dicionário total_grupo
     total_grupo_com_nomes = {}
     for conta, valor in total_grupo.items():
@@ -233,6 +260,25 @@ def calculos_realizado(request):
             total_grupo_com_nomes[nome] += valor  # Soma os valores se o nome já existir
         else:
             total_grupo_com_nomes[nome] = valor
+            total_grupo_com_nomes_detalhes[nome] = []
+
+        detalhes = consulta_realizado[consulta_realizado['GRUPO_CONTA']== conta ]
+        for _, row in detalhes.iterrows():
+            if row['SALDO'] != 0:
+                total_grupo_com_nomes_detalhes[nome].append({
+                    'conta': conta,
+                    'valor': valor,
+                    'LANCCOD': row['LANCCOD'],
+                    'LANCDATA': row['LANCDATA'],
+                    'HISTORICO': row['HISTORICO'],
+                    'SALDO': row['SALDO'],
+                    'LANCREF': row['LANCREF'],
+                    'SITUACAO': row['SITUACAO'],
+                    'ITEM': row['ITEM'],
+                    'QTD': row['QTD'],
+                    'DESCRICAO': row['DESCRICAO'] 
+                })
+
     total_grupo_com_nomes_formatado = {grupo: format_locale(valor) for grupo, valor in total_grupo_com_nomes.items()}
 
 ###-------------------------Obtem e agrua por grupo de contas----------------------------## 
@@ -267,14 +313,37 @@ def calculos_realizado(request):
         for conta in consulta_completa
     }
 
-    # Substitui os códigos pelos nomes no dicionário total_grupo
+    
+     # Inicializa o dicionário para armazenar os detalhes das somas
+    conta_completa_detalhes = {}
+
     conta_completa_nomes = {}
     for conta, valor in total_conta.items():
-        nome = conta_completa.get(conta, conta)  # Obtém o nome da conta, ou mantém o código
+        nome = conta_completa.get(conta, conta)  # Obtém o nome da conta ou mantém o código
         if nome in conta_completa_nomes:
             conta_completa_nomes[nome] += valor  # Soma os valores se o nome já existir
         else:
             conta_completa_nomes[nome] = valor
+            conta_completa_detalhes[nome] = []
+
+        # Adiciona os detalhes agrupados
+        detalhes = consulta_realizado[consulta_realizado['CONTA_COMPLETA'] == conta]
+        for _, row in detalhes.iterrows():
+            if row['SALDO'] != 0:  # Condicional para adicionar apenas linhas onde SALDO > 0
+                conta_completa_detalhes[nome].append({
+                    'conta': conta,
+                    'valor': valor,
+                    'LANCCOD': row['LANCCOD'],
+                    'LANCDATA': row['LANCDATA'],
+                    'HISTORICO': row['HISTORICO'],
+                    'SALDO': row['SALDO'],
+                    'LANCREF': row['LANCREF'],
+                    'SITUACAO': row['SITUACAO'],
+                    'ITEM': row['ITEM'],
+                    'QTD': row['QTD'],
+                    'DESCRICAO': row['DESCRICAO']
+                })
+
     conta_completa_nomes_formatado = {conta: format_locale(valor) for conta, valor in conta_completa_nomes.items()}
 
     ##################################################################################
@@ -362,7 +431,9 @@ def calculos_realizado(request):
         'total_real': total,
         #'total_deb_grupo_lista': consulta_realizado.to_dict(orient='records'),
         #'total_cred_grupo_lista': consulta_realizado.to_dict(orient='records'),
-        #'respostas':consulta_realizado.to_dict(orient='records')
+        'respostas':consulta_realizado.to_dict(orient='records'),
+        'conta_completa_detalhes': conta_completa_detalhes,
+        'total_grupo_com_nomes_detalhes': total_grupo_com_nomes_detalhes,
         'total_tipo_deb': total_tipo_deb_formatado,
         #'total_tipo_cred': total_tipo_cred,
         #'total_grupo': total_grupo_com_nomes_formatado,

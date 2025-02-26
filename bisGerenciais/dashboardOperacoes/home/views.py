@@ -24,9 +24,12 @@ def calculos_calcario(request):
     tipo_calculo = request.data.get('tipo_calculo')
 
     # Definindo as datas com base no tipo de cálculo
-    if tipo_calculo == 'atual':
+    if tipo_calculo == 'atualizado':
+        data_inicio = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')
+    elif tipo_calculo == 'atual':
         data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
-        data_fim = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
+        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
     elif tipo_calculo == 'mensal':
         data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
         data_fim = datetime.now().strftime('%Y-%m-%d 07:10:10')  # Data atual
@@ -39,13 +42,19 @@ def calculos_calcario(request):
     # Função para realizar a consulta com base no BPROEP
     def consulta_produto(bproep):
         return pd.read_sql(f"""
-            SELECT SUM(IBPROQUANT * ISNULL(ESTQPESO, 0) / 1000.0) AS PESO
+            SELECT BPROCOD, BPRODATA1, ESTQCOD, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
+                IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
             FROM BAIXAPRODUCAO
             JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
             JOIN ESTOQUE ON ESTQCOD = IBPROREF
-            WHERE CAST (BPRODATA AS datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
-            AND BPROEMP = 1 AND BPROFIL = 0 AND BPROSIT = 1
-            AND IBPROTIPO = 'D' AND BPROEP = {bproep};
+            LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+                           
+            WHERE CAST (BPRODATA1 AS datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
+            AND BPROEMP = 1 
+            AND BPROFIL = 0 
+            AND BPROSIT = 1
+            AND IBPROTIPO = 'D' 
+            AND BPROEP = {bproep};
         """, engine)
 
     # Consultas para diferentes produtos com BPROEP fixos
