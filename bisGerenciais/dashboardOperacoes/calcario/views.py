@@ -38,7 +38,7 @@ def calculos_calcario(request):
 
     consulta_fcm = pd.read_sql(f"""
 
-            SELECT BPROCOD, BPRODATA, ESTQCOD, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
+            SELECT BPROCOD, BPRODATA1, ESTQCOD, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
                 IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
 
                 FROM BAIXAPRODUCAO
@@ -55,7 +55,7 @@ def calculos_calcario(request):
                 AND BPROEP = 6
                 AND EQPLOC = '{fabrica}'
 
-                ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
+                ORDER BY BPRODATA1, BPROCOD, ESTQNOMECOMP, ESTQCOD
             """,engine)
 
     #KPI´S
@@ -145,7 +145,7 @@ def calculos_graficos_calcario(request):
 
     consulta_fcm = pd.read_sql(f"""
 
-            SELECT BPROCOD, BPRODATA, ESTQCOD,EQPLOC, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
+            SELECT BPROCOD, BPRODATA1, ESTQCOD,EQPLOC, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
                 IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
 
                 FROM BAIXAPRODUCAO
@@ -161,20 +161,20 @@ def calculos_graficos_calcario(request):
                 AND IBPROTIPO = 'D'
                 AND BPROEP = 6
                 
-                ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
+                ORDER BY BPRODATA1, BPROCOD, ESTQNOMECOMP, ESTQCOD
             """,engine)
 
     # Inicializar variáveis
     volume_diario = None
     volume_mensal = None
 
-    if 'BPRODATA' in consulta_fcm.columns:
-        consulta_fcm['BPRODATA'] = pd.to_datetime(consulta_fcm['BPRODATA'],errors='coerce')
-        consulta_fcm = consulta_fcm.dropna(subset=['BPRODATA']) # remove as linhas onde a data é nula
+    if 'BPRODATA1' in consulta_fcm.columns:
+        consulta_fcm['BPRODATA1'] = pd.to_datetime(consulta_fcm['BPRODATA1'],errors='coerce')
+        consulta_fcm = consulta_fcm.dropna(subset=['BPRODATA1']) # remove as linhas onde a data é nula
 
     # Quebrando o cálculo mensal em dias
     if tipo_calculo == 'mensal':
-        consulta_fcm['DIA'] = consulta_fcm['BPRODATA'].dt.day
+        consulta_fcm['DIA'] = consulta_fcm['BPRODATA1'].dt.day
 
         #Função para preencher em caso de dias faltantes
         def preencher_dias_faltantes(volume_df):
@@ -217,7 +217,7 @@ def calculos_graficos_calcario(request):
 
          # Calculando projeção
         dias_corridos = consulta_fcm['DIA'].max()  # Último dia do mês em que houve produção
-        dias_no_mes = (consulta_fcm['BPRODATA'].max().replace(day=1) + pd.DateOffset(months=1) - pd.DateOffset(days=1)).day
+        dias_no_mes = (consulta_fcm['BPRODATA1'].max().replace(day=1) + pd.DateOffset(months=1) - pd.DateOffset(days=1)).day
 
         if dias_corridos > 0:
             volume_ultimo_dia_fcmi = consulta_fcm[(consulta_fcm['EQPLOC'] == 23) & (consulta_fcm['DIA'] == dias_corridos)]
@@ -287,7 +287,7 @@ def calculos_graficos_calcario(request):
         }
 
     elif tipo_calculo == 'anual':
-        consulta_fcm['MES'] = consulta_fcm['BPRODATA'].dt.month
+        consulta_fcm['MES'] = consulta_fcm['BPRODATA1'].dt.month
 
         # Função para preencher os meses faltantes com 0
         def preencher_meses_faltantes(volume_df):

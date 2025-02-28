@@ -129,7 +129,7 @@ def calculos_calcario(request):
             WHERE DPRSIT = 1
             AND DPREMP = 1
             AND DPRFIL = 0
-            AND CAST(DPRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+            AND CAST(DPRDATA1 as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
             AND ADPRLOC <> 0
 
             GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHROPER
@@ -143,7 +143,7 @@ def calculos_calcario(request):
             JOIN DIARIAPROD ON DPRCOD = IDTRDPR
             JOIN EQUIPAMENTO ON EQPCOD = DPREQP
             WHERE DTRSIT = 1
-            AND CAST(DTRDATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+            AND CAST(DTRDATA1 as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
             AND IDTRTIPODEST = 1
             AND DTREMP = 1
             AND DTRFIL = 0
@@ -158,19 +158,24 @@ def calculos_calcario(request):
   
     # Primeiro, arredonde os valores da Series para 2 casas decimais
     volume_britado_por_loc = consulta_volume_britado.groupby('LOCCOD')['TOTAL'].sum()
+
+    total_hs_val = consulta_volume_britado['TOTAL_HORAS'].sum()
+    total_hs = locale.format_string("%.1f",total_hs_val,grouping=True)
+
     volume_britado_por_loc = volume_britado_por_loc.reindex([44, 62, 66], fill_value=0)
     # Em seguida, aplique a formatação local a cada valor da Series
     volume_britado_por_loc_formatado = volume_britado_por_loc.apply(lambda x: locale.format_string("%.0f", x, grouping=True))
 
     volume_britado_por_loc_formatado = volume_britado_por_loc_formatado.to_dict()
     
-
-
-
     # Somando os valores dos códigos 44, 62 e 66
-    volume_britado_total = round(volume_britado_por_loc.loc[[44, 62, 66]].sum(),2)
+    volume_britado_total_val = round(volume_britado_por_loc.loc[[44, 62, 66]].sum(),2)
     
-    volume_britado_total = locale.format_string("%.0f",volume_britado_total,grouping=True)
+    volume_britado_total = locale.format_string("%.0f",volume_britado_total_val,grouping=True)
+
+    produtividae_val = volume_britado_total_val / total_hs_val
+    produtividade = locale.format_string("%.1f",produtividae_val,grouping=True)
+
     # Convertendo para dicionário para serialização
     volume_britado_dict = volume_britado_por_loc.to_dict()
     
@@ -186,11 +191,12 @@ def calculos_calcario(request):
     response_data = {
         'producao_britador': producao_britador,
         'volume_britado_total': volume_britado_total,
-        
+        'horas_trabalhadas':total_hs, 
         'vol_brit':vol_brit,
         'resultados': produtos,
         'tipo_calculo': tipo_calculo,
-        'volume_britado':volume_britado_por_loc_formatado
+        'volume_britado':volume_britado_por_loc_formatado,
+        'produtividade':produtividade
     }
 
     return JsonResponse(response_data, safe=False)
