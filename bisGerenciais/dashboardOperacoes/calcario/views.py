@@ -490,6 +490,7 @@ def calculos_equipamentos_detalhes(request):
 
     fcmi_mg01_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
     fcmi_mg01_hora_parado_val = fcmi_mg01_hora_parado_int.item() if not fcmi_mg01_hora_parado_int.empty  else 0
+    fcmi_mg01_hora_parado_val = 24 - fcmi_mg01_hora_producao_val
     fcmi_mg01_hora_parado = locale.format_string("%.1f",fcmi_mg01_hora_parado_val, grouping=True) if fcmi_mg01_hora_parado_val > 0 else 0
 
 
@@ -498,8 +499,8 @@ def calculos_equipamentos_detalhes(request):
     fcmi_mg01_producao = locale.format_string("%.1f",fcmi_mg01_producao_val, grouping=True) if fcmi_mg01_producao_val > 0 else 0
 
     if fcmi_mg01_hora_producao_val > 0:
-        fcmi_mg01_produtividade = fcmi_mg01_producao_val / fcmi_mg01_hora_producao_val
-        #fcmi_mg01_produtividade = locale.format_string("%.1f",fcmi_mg01_produtividade_int, grouping=True)
+        fcmi_mg01_produtividade_val = fcmi_mg01_producao_val / fcmi_mg01_hora_producao_val
+        fcmi_mg01_produtividade = locale.format_string("%.1f",fcmi_mg01_produtividade_val, grouping=True)
     else:
         fcmi_mg01_produtividade = 0    
     
@@ -511,6 +512,7 @@ def calculos_equipamentos_detalhes(request):
    
     fcmi_mg02_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
     fcmi_mg02_hora_parado_val = fcmi_mg02_hora_parado_int.item() if not fcmi_mg02_hora_parado_int.empty else 0
+    fcmi_mg02_hora_parado_val = 24 - fcmi_mg02_hora_producao_val
     fcmi_mg02_hora_parado = locale.format_string("%.1f",fcmi_mg02_hora_parado_val, grouping=True) if fcmi_mg02_hora_parado_val > 0 else 0
 
     fcmi_mg02_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
@@ -518,15 +520,15 @@ def calculos_equipamentos_detalhes(request):
     fcmi_mg02_producao = locale.format_string("%.1f",fcmi_mg02_producao_val, grouping=True) if fcmi_mg02_producao_val >0 else 0
 
     if fcmi_mg02_hora_producao_val > 0:
-        fcmi_mg02_produtividade = fcmi_mg02_producao_val / fcmi_mg02_hora_producao_val
-        #fcmi_mg02_produtividade = locale.format_string("%.1f", fcmi_mg02_produtividade, grouping=True)
+        fcmi_mg02_produtividade_val = fcmi_mg02_producao_val / fcmi_mg02_hora_producao_val
+        fcmi_mg02_produtividade = locale.format_string("%.1f", fcmi_mg02_produtividade_val, grouping=True)
     else:
         fcmi_mg02_produtividade = 0
 
     ##################---------TOTAIS FCMI-----------------####################################
     fcmi_produtividade_geral_val = 0 #inicializando a variavel
     if fcmi_mg01_produtividade or fcmi_mg02_produtividade > 0:
-        fcmi_produtividade_geral_val = fcmi_mg01_produtividade + fcmi_mg02_produtividade / 2
+        fcmi_produtividade_geral_val = fcmi_mg01_produtividade_val + fcmi_mg02_produtividade_val
         fcmi_produtividade_geral = locale.format_string("%.1f",fcmi_produtividade_geral_val, grouping=True)
     else:      
         fcmi_produtividade_geral = 0
@@ -541,6 +543,7 @@ def calculos_equipamentos_detalhes(request):
 
     fcmii_mg01_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 169].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
     fcmii_mg01_hora_parado_val = fcmii_mg01_hora_parado_int.item() if not fcmii_mg01_hora_parado_int.empty else 0
+    fcmii_mg01_hora_parado_val = 24 - fcmii_mg01_hora_prod_val
     fcmii_mg01_hora_parado = locale.format_string("%.1f",fcmii_mg01_hora_parado_val,grouping=True) if fcmii_mg01_hora_parado_val > 0 else 0
 
     fcmii_mg01_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 169].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
@@ -561,6 +564,7 @@ def calculos_equipamentos_detalhes(request):
 
     fcmiii_mg01_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 18 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
     fcmiii_mg01_hora_parado_val = fcmiii_mg01_hora_parado_int.item() if not fcmiii_mg01_hora_parado_int.empty else 0
+    fcmiii_mg01_hora_parado_val = 24 - fcmiii_mg01_hora_prod_val
     fcmiii_mg01_hora_parado = locale.format_string("%.1f",fcmiii_mg01_hora_parado_val,grouping=True) if fcmiii_mg01_hora_parado_val > 0 else 0
 
     fcmiii_mg01_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 18].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
@@ -570,7 +574,7 @@ def calculos_equipamentos_detalhes(request):
     fcmiii_mg01_produtividade_val = 0
     if fcmiii_mg01_hora_prod_val > 0:
         fcmiii_mg01_produtividade_val = fcmiii_mg01_producao_val / fcmiii_mg01_hora_prod_val
-        #fcmiii_mg01_produtividade = locale.format_string("%.1f",fcmiii_mg01_produtividade_val, grouping=True)
+        fcmiii_mg01_produtividade = locale.format_string("%.1f",fcmiii_mg01_produtividade_val, grouping=True)
     else:
         fcmiii_mg01_produtividade= 0     
 
@@ -581,6 +585,7 @@ def calculos_equipamentos_detalhes(request):
 
     fcmiii_mg02_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 19 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
     fcmiii_mg02_hora_parado_val = fcmiii_mg02_hora_parado_int.item() if not fcmiii_mg02_hora_parado_int.empty else 0
+    fcmiii_mg02_hora_parado_val = 24 - fcmiii_mg02_hora_prod_val
     fcmiii_mg02_hora_parado = locale.format_string("%.1f",fcmiii_mg02_hora_parado_val,grouping=True) if fcmiii_mg02_hora_parado_val > 0 else 0
 
     fcmiii_mg02_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 19].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
@@ -590,7 +595,7 @@ def calculos_equipamentos_detalhes(request):
     fcmiii_mg02_produtividade_val = 0
     if fcmiii_mg02_hora_prod_val > 0:
         fcmiii_mg02_produtividade_val = fcmiii_mg02_producao_val / fcmiii_mg02_hora_prod_val
-        #fcmiii_mg02_produtividade = locale.format_string("%.1f",fcmiii_mg02_produtividade_val, grouping=True)
+        fcmiii_mg02_produtividade = locale.format_string("%.1f",fcmiii_mg02_produtividade_val, grouping=True)
     else:
         fcmiii_mg02_produtividade = 0 
 
@@ -601,6 +606,7 @@ def calculos_equipamentos_detalhes(request):
 
     fcmiii_mg03_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 20 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
     fcmiii_mg03_hora_parado_val = fcmiii_mg03_hora_parado_int.item() if not fcmiii_mg03_hora_parado_int.empty else 0
+    fcmiii_mg03_hora_parado_val = 24 - fcmiii_mg03_hora_prod_val
     fcmiii_mg03_hora_parado = locale.format_string("%.1f",fcmiii_mg03_hora_parado_val,grouping=True) if fcmiii_mg03_hora_parado_val > 0 else 0
 
     fcmiii_mg03_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 20 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
@@ -610,13 +616,13 @@ def calculos_equipamentos_detalhes(request):
     fcmiii_mg03_produtividade_val =0
     if fcmiii_mg03_hora_prod_val > 0:
         fcmiii_mg03_produtividade_val = fcmiii_mg03_producao_val / fcmiii_mg03_hora_prod_val
-        #fcmiii_mg03_produtividade = locale.format_string("%.1f",fcmiii_mg03_produtividade_val, grouping=True)
+        fcmiii_mg03_produtividade = locale.format_string("%.1f",fcmiii_mg03_produtividade_val, grouping=True)
     else:
         fcmiii_mg03_produtividade = 0 
 
     fcmiii_produtividade_geral_val = 0
     if fcmiii_mg01_produtividade_val or fcmiii_mg02_produtividade_val or fcmiii_mg03_produtividade_val > 0 :
-        fcmiii_produtividade_geral_val = (fcmiii_mg01_produtividade_val + fcmiii_mg02_produtividade_val + fcmiii_mg03_produtividade_val) / 3
+        fcmiii_produtividade_geral_val = (fcmiii_mg01_produtividade_val + fcmiii_mg02_produtividade_val + fcmiii_mg03_produtividade_val)
         fcmiii_produtividade_geral = locale.format_string("%.1f",fcmiii_produtividade_geral_val,grouping=True)
     else:
         fcmiii_produtividade_geral = 0  
@@ -633,7 +639,7 @@ def calculos_equipamentos_detalhes(request):
 
     produtividade_geral_fabricas_val = 0
     if fcmi_produtividade_geral_val or fcmii_produtividade_geral_val or fcmiii_produtividade_geral_val > 0 :
-        produtividade_geral_fabricas_val = (fcmi_produtividade_geral_val + fcmii_produtividade_geral_val + fcmiii_produtividade_geral_val) / 3
+        produtividade_geral_fabricas_val = (fcmi_produtividade_geral_val + fcmii_produtividade_geral_val + fcmiii_produtividade_geral_val) 
         produtividade_geral_fabricas = locale.format_string("%.1f",produtividade_geral_fabricas_val, grouping=True)
     else:
         produtividade_geral_fabricas = 0
@@ -679,55 +685,103 @@ def calculos_equipamentos_detalhes(request):
 ##-------------------------------CONSULTA ESTOQUE CALCARIO--------------------------------------############
     data = request.data.get('data')
     consulta_estoque = pd.read_sql (f"""
-        SELECT DISTINCT ESTQNOME, ESTQCOD, DADOS.DT DATA, EMPCOD EMPRESA, QESTQFIL FILIAL,
-        QUANTESTOQUE, QUANTMOV, (QUANTESTOQUE - QUANTMOV) SALDO,
-        ((QUANTESTOQUE * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END) / 1000) QUANTESTOQUETN,
-        ((QUANTMOV * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END) / 1000) QUANTMOVTN,
-        ((QUANTESTOQUE * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END) / 1000) -
-        ((QUANTMOV * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END) / 1000) SALDOTN
-        FROM (
-            SELECT CAST('{data}' AS DATE) AS DT
-            FROM master..spt_values
-            WHERE type = 'P'
-        ) DADOS
-        JOIN ESTOQUE EQ ON 1=1  
-        JOIN EMPRESA EE ON 1=1  
-        JOIN GRUPOALMOXARIFADO G1 ON G1.GALMCOD = ESTQGALM
-        LEFT OUTER JOIN GRUPOALMOXARIFADO G2 ON G2.GALMCOD = G1.GALMGALMPAI
-        LEFT OUTER JOIN GRUPOALMOXARIFADO G3 ON G3.GALMCOD = G2.GALMGALMPAI
-        LEFT OUTER JOIN GRUPOALMOXARIFADO G4 ON G4.GALMCOD = G3.GALMGALMPAI
-        LEFT OUTER JOIN GRUPOALMOXARIFADO G5 ON G5.GALMCOD = G4.GALMGALMPAI
-        LEFT OUTER JOIN GRUPOALMOXARIFADO G6 ON G6.GALMCOD = G5.GALMGALMPAI
-        OUTER APPLY (SELECT QESTQFIL, COALESCE(SUM(QESTQESTOQUE),0) QUANTESTOQUE
-                    FROM QUANTESTOQUE
-                    WHERE QESTQESTQ = EQ.ESTQCOD AND QESTQEMP = EE.EMPCOD GROUP BY QESTQFIL) QESTQ
-        OUTER APPLY (SELECT COALESCE(SUM(MESTQQUANT),0) QUANTMOV 
-                    FROM MOVESTOQUE 
-                    WHERE MESTQESTQ = EQ.ESTQCOD 
-                    AND MESTQEMP = EE.EMPCOD AND MESTQFIL = QESTQ.QESTQFIL AND MESTQDATA > DADOS.DT) QUANTMOV
-        -- Novo JOIN com MOVESTOQUE para verificar o movimento
-        LEFT JOIN (
-            SELECT MESTQESTQ, MESTQEMP, MESTQFIL, COUNT(*) AS MOVCOUNT
-            FROM MOVESTOQUE
-            WHERE MESTQREFTIPO < 10
-            AND CAST(MESTQDATA AS DATE) = '{data}'
-            GROUP BY MESTQESTQ, MESTQEMP, MESTQFIL
-        ) MOV ON MOV.MESTQESTQ = EQ.ESTQCOD
-            AND MOV.MESTQEMP = EE.EMPCOD 
-            AND MOV.MESTQFIL = QESTQ.QESTQFIL
-
-        WHERE EE.EMPCOD = 1
-        AND COALESCE(QESTQFIL, 0) = 0 
-        AND ESTQGALM = 1587
-        AND ESTQCOD IN (1,2785)
-        AND MOV.MOVCOUNT > 0 -- Usa o resultado do JOIN ao invés da subquery
-        AND (SELECT COUNT(*) FROM GRUPOALMOXARIFADO WHERE GALMCOD = EQ.ESTQGALM AND GALMPRODVENDA = 'S') > 0  /*&PRODVENDA*/
-        ORDER BY ESTQNOME, DATA;
+        SELECT MESTQDATA DATA,
+            CASE
+                WHEN MESTQREFTIPO = 1 THEN 'Entrada Nf-e'
+                WHEN MESTQREFTIPO = 2 THEN 'Baixa de Estoque'
+                WHEN MESTQREFTIPO = 3 THEN 'Lanc. Produção'
+                WHEN MESTQREFTIPO = 6 THEN 'Saída Nf-e'
+                ELSE '???'
+            END TIPO, 
+            CASE
+                WHEN MESTQREFTIPO = 1 THEN (SELECT INFENFE FROM ITEMNOTAFISCALENTRADA
+                                            WHERE INFECOD = MESTQ.MESTQREFCOD)
+                WHEN MESTQREFTIPO = 2 THEN MESTQ.MESTQREFCOD
+                WHEN MESTQREFTIPO = 3 THEN (SELECT IBPROBPRO FROM ITEMBAIXAPRODUCAO
+                                            WHERE IBPROCOD = MESTQ.MESTQREFCOD) 
+                WHEN MESTQREFTIPO = 6 THEN (SELECT INFNF FROM ITEMNOTAFISCAL
+                                            WHERE INFNUM = MESTQ.MESTQREFCOD)
+            END REFERENCIA,
+            CASE
+                WHEN MESTQREFTIPO = 1 THEN ''
+                WHEN MESTQREFTIPO = 2 THEN (SELECT LOCNOME FROM BAIXAESTOQUE
+                                            JOIN ITEMBAIXAPRODUCAO ON IBPROBPRO = BESTBPRO AND IBPROREF = BESTESTQ
+                                            JOIN LOCAL ON LOCCOD = IBPROLOC
+                                            WHERE BESTCOD = MESTQ.MESTQREFCOD)
+                WHEN MESTQREFTIPO = 3 THEN (SELECT LOCNOME FROM ITEMBAIXAPRODUCAO
+                                            JOIN LOCAL ON LOCCOD = IBPROLOC
+                                            WHERE IBPROCOD = MESTQ.MESTQREFCOD
+                                            AND IBPROREF = MESTQ.MESTQESTQ) 
+                WHEN MESTQREFTIPO = 6 THEN (SELECT LOCNOME FROM ITEMNOTAFISCAL
+                                            JOIN LOCAL ON LOCCOD = INFLOC
+                                            WHERE INFNUM = MESTQ.MESTQREFCOD)
+            END FABRICA,
+            CASE
+                WHEN MESTQREFTIPO = 2 THEN (SELECT EQPAUTOMTAG FROM BAIXAESTOQUE 
+                                            JOIN BAIXAPRODUCAO ON BPROCOD = BESTBPRO
+                                            JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+                                            WHERE BESTCOD = MESTQ.MESTQREFCOD)
+                WHEN MESTQREFTIPO = 3 THEN (SELECT EQPAUTOMTAG FROM ITEMBAIXAPRODUCAO 
+                                            JOIN BAIXAPRODUCAO ON BPROCOD = IBPROBPRO
+                                            JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+                                            WHERE IBPROCOD = MESTQ.MESTQREFCOD
+                                            AND IBPROREF = MESTQ.MESTQESTQ)
+            END EQUIPAMENTO,
+            CASE
+                WHEN MESTQREFTIPO = 2 THEN (SELECT BPROEQP FROM BAIXAESTOQUE 
+                                            JOIN BAIXAPRODUCAO ON BPROCOD = BESTBPRO
+                                            WHERE BESTCOD = MESTQ.MESTQREFCOD)
+                WHEN MESTQREFTIPO = 3 THEN (SELECT BPROEQP FROM ITEMBAIXAPRODUCAO 
+                                            JOIN BAIXAPRODUCAO ON BPROCOD = IBPROBPRO
+                                            WHERE IBPROCOD = MESTQ.MESTQREFCOD
+                                            AND IBPROREF = MESTQ.MESTQESTQ)
+            END EQPCOD,
+            CASE
+                WHEN ESTQESP = 12 THEN 'Producao Ensacado'
+                ELSE 'Producao Granel'
+            END ETAPA, 
+            ESTQNOME, ESTQCOD, ESPSIGLA, MESTQQUANT, (MESTQQUANT * ESTQPESO) / 1000 TN,
+            (SELECT SUM(MESTQQUANT) FROM MOVESTOQUE
+            WHERE MESTQESTQ = MESTQ.MESTQESTQ
+            AND MESTQEMP = MESTQ.MESTQEMP
+            AND MESTQFIL = MESTQ.MESTQFIL
+            AND MESTQDATA <= MESTQ.MESTQDATA) ESTOQUE
+            FROM MOVESTOQUE MESTQ
+            JOIN ESTOQUE ON ESTQCOD = MESTQESTQ
+            JOIN ESPECIE ON ESPCOD = ESTQESP
+            JOIN GRUPOALMOXARIFADO G1 ON G1.GALMCOD = ESTQGALM
+            LEFT JOIN GRUPOALMOXARIFADO G2 ON G2.GALMCOD = G1.GALMGALMPAI
+            LEFT JOIN GRUPOALMOXARIFADO G3 ON G3.GALMCOD = G2.GALMGALMPAI
+            LEFT JOIN GRUPOALMOXARIFADO G4 ON G4.GALMCOD = G3.GALMGALMPAI
+            LEFT JOIN GRUPOALMOXARIFADO G5 ON G5.GALMCOD = G4.GALMGALMPAI
+            LEFT JOIN GRUPOALMOXARIFADO G6 ON G6.GALMCOD = G5.GALMGALMPAI
+            WHERE MESTQEMP =1
+            AND MESTQFIL = 0
+            AND CAST(MESTQDATA AS DATE) BETWEEN '2025-01-01' AND '{data}'
+            AND ESTQCOD = 1
+            ORDER BY ESTQNOME, ESTQCOD, MESTQDATA
                 """,engine)
     
-    estoque_total = 0
-    estoque_total = consulta_estoque['SALDO'].sum()
-    estoque_total = locale.format_string("%.0f",estoque_total,grouping=True)
+    estoque_inicial = 16929
+    
+    filtro_fcmiii = consulta_estoque[(consulta_estoque['FABRICA'].str.contains('FCM 03', na=False)) | 
+                              (consulta_estoque['EQUIPAMENTO'].str.contains('FCM3', na=False))]
+
+    
+
+    # Filtro
+    soma_tn = filtro_fcmiii['TN'].sum()
+
+    estoque_fcmiii_val = estoque_inicial + soma_tn
+    estoque_fcmiii = locale.format_string("%.0f",estoque_fcmiii_val, grouping=True)
+
+    # Pega o último valor da coluna 'ESTOQUE'
+    estoque_atual_val = consulta_estoque['ESTOQUE'].iloc[-1] if not consulta_estoque.empty else 0
+    estoque_atual = locale.format_string("%.0f",estoque_atual_val, grouping=True)   
+
+    estoque_fcms = estoque_atual_val - estoque_fcmiii_val
+    estoque_fcms = locale.format_string("%.0f",estoque_fcms, grouping=True)
+   
 
 
     response_data = {
@@ -748,20 +802,24 @@ def calculos_equipamentos_detalhes(request):
          'fcmii_mg01_hora_prod': fcmii_mg01_hora_prod,
          'fcmii_mg01_hora_parado':fcmii_mg01_hora_parado,
          'fcmii_mg01_producao':fcmii_mg01_producao,
+         'fcmii_produtividade':fcmii_produtividade_geral,
         ##------------FCMII--GERAL---------------
         'fcmii_produtividade_geral':fcmii_produtividade_geral,
         ##-----------FCMIII--MG01------------------------
         'fcmiii_mg01_hora_prod': fcmiii_mg01_hora_prod,
         'fcmiii_mg01_hora_parado':fcmiii_mg01_hora_parado,
         'fcmiii_mg01_producao': fcmiii_mg01_producao,
+        'fcmiii_mg01_produtividade':fcmiii_mg01_produtividade,
         ##-----------FCMIII--MG02------------------------
         'fcmiii_mg02_hora_prod': fcmiii_mg02_hora_prod,
         'fcmiii_mg02_hora_parado':fcmiii_mg02_hora_parado,
         'fcmiii_mg02_producao': fcmiii_mg02_producao,
+        'fcmiii_mg02_produtividade':fcmiii_mg02_produtividade,
         ##-----------FCMIII--MG03------------------------
         'fcmiii_mg03_hora_prod': fcmiii_mg03_hora_prod,
         'fcmiii_mg03_hora_parado':fcmiii_mg03_hora_parado,
         'fcmiii_mg03_producao': fcmiii_mg03_producao,
+        'fcmiii_mg03_produtividade':fcmiii_mg03_produtividade,
         ##-----------FCMIII--Totais------------------------
         'fcmiii_produtividade_geral': fcmiii_produtividade_geral,
         'fcmiii_producao_geral': fcmiii_producao_geral,
@@ -771,7 +829,9 @@ def calculos_equipamentos_detalhes(request):
         ##-----------TOTAIS DO CARREGAMENTO--------------------------------
         'total_carregamento': total_carregamento,
         ##------------ESTOQUE--TOTAL--------------------------------
-        'estoque_total': estoque_total
+        'estoque_atual': estoque_atual,
+        'estoque_fcms': estoque_fcms,
+        'estoque_fcmiii': estoque_fcmiii,
     }
 
     return JsonResponse(response_data,safe=False)
@@ -1084,3 +1144,7 @@ def calculos_calcario_graficos_carregamento(request):
 
 
     return JsonResponse(response_data, safe=False)   
+
+
+
+
