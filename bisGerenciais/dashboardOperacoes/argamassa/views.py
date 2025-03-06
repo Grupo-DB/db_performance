@@ -10,6 +10,8 @@ import locale
 
 locale.setlocale(locale.LC_ALL,'pt_BR.UTF-8')
 
+pd.set_option('future.no_silent_downcasting', True)
+
 connection_string = 'mssql+pyodbc://DBCONSULTA:DB%40%402023**@172.50.10.5/DB?driver=ODBC+Driver+17+for+SQL+Server'
 engine = create_engine(connection_string)
 
@@ -34,6 +36,7 @@ def calculos_argamassa(request):
     consulta_movimentacao = pd.read_sql(f"""
         SELECT CLINOME, CLICOD, TRANNOME, TRANCOD, NFPLACA, ESTUF, NFPED, NFNUM, SDSSERIE, NFDATA,
             ESTQCOD, ESTQNOME, ESPSIGLA,
+            INFQUANT, INFPESO,
             ((INFQUANT * INFPESO) /1000) QUANT,
             (INFTOTAL / (NFTOTPRO + NFTOTSERV) * (NFTOTPRO + NFTOTSERV)) TOTAL_PRODUTO,
             (INFTOTAL / (NFTOTPRO + NFTOTSERV) * NFTOTAL) TOTAL,
@@ -61,11 +64,16 @@ def calculos_argamassa(request):
         ORDER BY NFDATA, NFNUM
                     """,engine)
        #KPI´S
+    #Movimentação em Sacos   
     total_movimentacao = consulta_movimentacao['QUANT'].sum()
     total_movimentacao = locale.format_string("%.0f",total_movimentacao, grouping=True)
 
+    total_movimentacao_sc = consulta_movimentacao['INFQUANT'].sum()
+    total_movimentacao_sc = locale.format_string("%.0f",total_movimentacao_sc, grouping=True)
+
     response_data = {
             'total_movimentacao': total_movimentacao,
+            'total_movimentacao_sc': total_movimentacao_sc,
         }
     return JsonResponse(response_data, safe=False)
 #---------------------------------CONSULTA ARGAMASSA ---------------------------#########
@@ -89,7 +97,7 @@ def calculos_argamassa_produtos(request):
     produto = request.data.get('produto')
     consulta_argamassa = pd.read_sql(f"""
             SELECT BPROCOD, BPRODATA, ESTQCOD,EQPLOC, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
-                IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
+                IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO,ESTQPESO
 
                 FROM BAIXAPRODUCAO
                 JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
@@ -104,8 +112,9 @@ def calculos_argamassa_produtos(request):
                 AND IBPROTIPO = 'D'
                 AND BPROEP = 1
                 AND ESTQCOD IN (
-                    2728, 22089, 2708, 2709, 2710, 2730, 23987, 23988, 23989, 24021, 24022, 24023, 24019, 
-                    24020, 24024, 2715, 2716, 2711, 2714, 24222, 2717, 2718, 25878, 25877, 2719, 2729
+                    2708,2709,2710,2711,2714,2715,2716,2717,2719,2728,
+                    2729,2730,22089,23987,23988,23989,24019,24020,24021,
+                    24022,24023,24024,24222,25877,25878
                 )
                 ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
             """,engine)
@@ -118,137 +127,385 @@ def calculos_argamassa_produtos(request):
     ensacado_total = int(ensacado_total)
     ensacado_total = locale.format_string("%.0f",ensacado_total, grouping=True)
 
+    ####################################################################################
+    #Ensacado
     concrecal_cimento_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2728].groupby('ESTQCOD')['IBPROQUANT'].sum()
     concrecal_cimento_val = concrecal_cimento_int.item() if not concrecal_cimento_int.empty else 0
     concrecal_cimento_quant = locale.format_string("%.0f",concrecal_cimento_val,grouping=True) if concrecal_cimento_val > 0 else 0
 
+    #Tonelada
+    tn_concrecal_cimento_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2728].groupby('ESTQCOD')['PESO'].sum()
+    tn_concrecal_cimento_val = tn_concrecal_cimento_int.item() if not tn_concrecal_cimento_int.empty else 0
+    tn_concrecal_cimento_quant = locale.format_string("%.0f",tn_concrecal_cimento_val,grouping=True) if tn_concrecal_cimento_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_assent_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 22089].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_assent_val = arg_assent_int.item() if not arg_assent_int.empty else 0
     arg_assent_quant = locale.format_string("%.0f",arg_assent_val,grouping=True) if arg_assent_val > 0 else 0
 
+    #Tonelada
+    tn_arg_assent_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 22089].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_assent_val = tn_arg_assent_int.item() if not tn_arg_assent_int.empty else 0
+    tn_arg_assent_quant = locale.format_string("%.0f",tn_arg_assent_val,grouping=True) if tn_arg_assent_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_colante_ac1_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2708].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_colante_ac1_val = arg_colante_ac1_int.item() if not arg_colante_ac1_int.empty else 0
     arg_colante_ac1_quant = locale.format_string("%.0f",arg_colante_ac1_val,grouping=True) if arg_colante_ac1_val > 0 else 0
 
+    #Tonelada
+    tn_arg_colante_ac1_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2708].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_colante_ac1_val = tn_arg_colante_ac1_int.item() if not tn_arg_colante_ac1_int.empty else 0
+    tn_arg_colante_ac1_quant = locale.format_string("%.0f",tn_arg_colante_ac1_val,grouping=True) if tn_arg_colante_ac1_val > 0 else 0
+
+    ####################################################################################
+
+
+    #Ensacado
     arg_colante_ac2_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2709].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_colante_ac2_val = arg_colante_ac2_int.item() if not arg_colante_ac2_int.empty else 0
     arg_colante_ac2_quant = locale.format_string("%.0f",arg_colante_ac2_val,grouping=True) if arg_colante_ac2_val > 0 else 0
 
+    #Tonelada
+    tn_arg_colante_ac2_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2709].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_colante_ac2_val = tn_arg_colante_ac2_int.item() if not tn_arg_colante_ac2_int.empty else 0
+    tn_arg_colante_ac2_quant = locale.format_string("%.0f",tn_arg_colante_ac2_val,grouping=True) if tn_arg_colante_ac2_val > 0 else 0
+
+    ####################################################################################       
+
+    #Ensacado
     arg_colante_ac3_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2710].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_colante_ac3_val = arg_colante_ac3_int.item() if not arg_colante_ac3_int.empty else 0
     arg_colante_ac3_quant = locale.format_string("%.0f",arg_colante_ac3_val,grouping=True) if arg_colante_ac3_val > 0 else 0
 
+    #Tonelada
+    tn_arg_colante_ac3_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2710].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_colante_ac3_val = tn_arg_colante_ac3_int.item() if not tn_arg_colante_ac3_int.empty else 0
+    tn_arg_colante_ac3_quant = locale.format_string("%.0f",tn_arg_colante_ac3_val,grouping=True) if tn_arg_colante_ac3_val > 0 else 0
+
+
+    ####################################################################################
+
+    #Ensacado
     arg_projecao_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2730].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_projecao_val = arg_projecao_int.item() if not arg_projecao_int.empty else 0
     arg_projecao_quant = locale.format_string("%.0f",arg_projecao_val,grouping=True) if arg_projecao_val > 0 else 0
 
+    #Tonelada
+    tn_arg_projecao_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2730].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_projecao_val = tn_arg_projecao_int.item() if not tn_arg_projecao_int.empty else 0
+    tn_arg_projecao_quant = locale.format_string("%.0f",tn_arg_projecao_val,grouping=True) if tn_arg_projecao_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_rev_arv1_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 23987].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_rev_arv1_val = arg_rev_arv1_int.item() if not arg_rev_arv1_int.empty else 0
     arg_rev_arv1_quant = locale.format_string("%.0f",arg_rev_arv1_val,grouping=True) if arg_rev_arv1_val > 0 else 0
 
+    #Tonelada
+    tn_arg_rev_arv1_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 23987].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_rev_arv1_val = tn_arg_rev_arv1_int.item() if not tn_arg_rev_arv1_int.empty else 0    
+    tn_arg_rev_arv1_quant = locale.format_string("%.0f",tn_arg_rev_arv1_val,grouping=True) if tn_arg_rev_arv1_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_rev_arv2_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 23988].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_rev_arv2_val = arg_rev_arv2_int.item() if not arg_rev_arv2_int.empty else 0
     arg_rev_arv2_quant = locale.format_string("%.0f",arg_rev_arv2_val,grouping=True) if arg_rev_arv2_val > 0 else 0
 
+    #Tonelada
+    tn_arg_rev_arv2_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 23988].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_rev_arv2_val = tn_arg_rev_arv2_int.item() if not tn_arg_rev_arv2_int.empty else 0
+    tn_arg_rev_arv2_quant = locale.format_string("%.0f",tn_arg_rev_arv2_val,grouping=True) if tn_arg_rev_arv2_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_rev_arv3_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 23989].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_rev_arv3_val = arg_rev_arv3_int.item() if not arg_rev_arv3_int.empty else 0
     arg_rev_arv3_quant = locale.format_string("%.0f",arg_rev_arv3_val,grouping=True) if arg_rev_arv3_val > 0 else 0
 
+    #Tonelada
+    tn_arg_rev_arv3_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 23989].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_rev_arv3_val = tn_arg_rev_arv3_int.item() if not tn_arg_rev_arv3_int.empty else 0
+    tn_arg_rev_arv3_quant = locale.format_string("%.0f",tn_arg_rev_arv3_val,grouping=True) if tn_arg_rev_arv3_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_est_aae12_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24021].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_est_aae12_val = arg_est_aae12_int.item() if not arg_est_aae12_int.empty else 0
     arg_est_aae12_quant = locale.format_string("%.0f",arg_est_aae12_val,grouping=True) if arg_est_aae12_val > 0 else 0
 
+    #Tonelada
+    tn_arg_est_aae12_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24021].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_est_aae12_val = tn_arg_est_aae12_int.item() if not tn_arg_est_aae12_int.empty else 0    
+    tn_arg_est_aae12_quant = locale.format_string("%.0f",tn_arg_est_aae12_val,grouping=True) if tn_arg_est_aae12_val > 0 else 0
+
+    #################################################################################### 
+
+    #Ensacado
     arg_est_aae16_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24022].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_est_aae16_val = arg_est_aae16_int.item() if not arg_est_aae16_int.empty else 0
     arg_est_aae16_quant = locale.format_string("%.0f",arg_est_aae16_val,grouping=True) if arg_est_aae16_val > 0 else 0
 
+    #Tonelada
+    tn_arg_est_aae16_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24022].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_est_aae16_val = tn_arg_est_aae16_int.item() if not tn_arg_est_aae16_int.empty else 0
+    tn_arg_est_aae16_quant = locale.format_string("%.0f",tn_arg_est_aae16_val,grouping=True) if tn_arg_est_aae16_val > 0 else 0
+
+    ####################################################################################    
+
+    #Ensacado
     arg_est_aae20_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24023].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_est_aae20_val = arg_est_aae20_int.item() if not arg_est_aae20_int.empty else 0
     arg_est_aae20_quant = locale.format_string("%.0f",arg_est_aae20_val,grouping=True) if arg_est_aae20_val > 0 else 0
 
+    #Tonelada
+    tn_arg_est_aae20_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24023].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_est_aae20_val = tn_arg_est_aae20_int.item() if not tn_arg_est_aae20_int.empty else 0
+    tn_arg_est_aae20_quant = locale.format_string("%.0f",tn_arg_est_aae20_val,grouping=True) if tn_arg_est_aae20_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_est_aae5_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24019].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_est_aae5_val = arg_est_aae5_int.item() if not arg_est_aae5_int.empty else 0
     arg_est_aae5_quant = locale.format_string("%.0f",arg_est_aae5_val,grouping=True) if arg_est_aae5_val > 0 else 0
 
+    #Tonelada
+    tn_arg_est_aae5_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24019].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_est_aae5_val = tn_arg_est_aae5_int.item() if not tn_arg_est_aae5_int.empty else 0
+    tn_arg_est_aae5_quant = locale.format_string("%.0f",tn_arg_est_aae5_val,grouping=True) if tn_arg_est_aae5_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_est_aae8_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24020].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_est_aae8_val = arg_est_aae8_int.item() if not arg_est_aae8_int.empty else 0
     arg_est_aae8_quant = locale.format_string("%.0f",arg_est_aae8_val,grouping=True) if arg_est_aae8_val > 0 else 0
 
+    #Tonelada
+    tn_arg_est_aae8_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24020].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_est_aae8_val = tn_arg_est_aae8_int.item() if not tn_arg_est_aae8_int.empty else 0
+    tn_arg_est_aae8_quant = locale.format_string("%.0f",tn_arg_est_aae8_val,grouping=True) if tn_arg_est_aae8_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_est_aae_esp_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24024].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_est_aae_esp_val = arg_est_aae_esp_int.item() if not arg_est_aae_esp_int.empty else 0
     arg_est_aae_esp_quant = locale.format_string("%.0f",arg_est_aae_esp_val,grouping=True) if arg_est_aae_esp_val > 0 else 0
 
+    #Tonelada
+    tn_arg_est_aae_esp_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24024].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_est_aae_esp_val = tn_arg_est_aae_esp_int.item() if not tn_arg_est_aae_esp_int.empty else 0
+    tn_arg_est_aae_esp_quant = locale.format_string("%.0f",tn_arg_est_aae_esp_val,grouping=True) if tn_arg_est_aae_esp_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_grossa_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2715].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_grossa_val = arg_grossa_int.item() if not arg_grossa_int.empty else 0
     arg_grossa_quant = locale.format_string("%.0f",arg_grossa_val,grouping=True) if arg_grossa_val > 0 else 0  
 
+    #Tonelada
+    tn_arg_grossa_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2715].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_grossa_val = tn_arg_grossa_int.item() if not tn_arg_grossa_int.empty else 0
+    tn_arg_grossa_quant = locale.format_string("%.0f",tn_arg_grossa_val,grouping=True) if tn_arg_grossa_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_grossa_fibra_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2716].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_grossa_fibra_val = arg_grossa_fibra_int.item() if not arg_grossa_fibra_int.empty else 0
     arg_grossa_fibra_quant = locale.format_string("%.0f",arg_grossa_fibra_val,grouping=True) if arg_grossa_fibra_val > 0 else 0 
 
+    #Tonelada
+    tn_arg_grossa_fibra_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2716].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_grossa_fibra_val = tn_arg_grossa_fibra_int.item() if not tn_arg_grossa_fibra_int.empty else 0
+    tn_arg_grossa_fibra_quant = locale.format_string("%.0f",tn_arg_grossa_fibra_val,grouping=True) if tn_arg_grossa_fibra_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_media_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2711].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_media_val = arg_media_int.item() if not arg_media_int.empty else 0
     arg_media_quant = locale.format_string("%.0f",arg_media_val,grouping=True) if arg_media_val > 0 else 0 
 
+    #Tonelada
+    tn_arg_media_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2711].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_media_val = tn_arg_media_int.item() if not tn_arg_media_int.empty else 0
+    tn_arg_media_quant = locale.format_string("%.0f",tn_arg_media_val,grouping=True) if tn_arg_media_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_media_fibra_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2714].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_media_fibra_val = arg_media_fibra_int.item() if not arg_media_fibra_int.empty else 0
     arg_media_fibra_quant = locale.format_string("%.0f",arg_media_fibra_val,grouping=True) if arg_media_fibra_val > 0 else 0 
 
+    #Tonelada
+    tn_arg_media_fibra_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2714].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_media_fibra_val = tn_arg_media_fibra_int.item() if not tn_arg_media_fibra_int.empty else 0
+    tn_arg_media_fibra_quant = locale.format_string("%.0f",tn_arg_media_fibra_val,grouping=True) if tn_arg_media_fibra_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_mult_uso_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24222].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_mult_uso_val = arg_mult_uso_int.item() if not arg_mult_uso_int.empty else 0
     arg_mult_uso_quant = locale.format_string("%.0f",arg_mult_uso_val,grouping=True) if arg_mult_uso_val > 0 else 0
 
+    #Tonelada
+    tn_arg_mult_uso_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 24222].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_mult_uso_val = tn_arg_mult_uso_int.item() if not tn_arg_mult_uso_int.empty else 0
+    tn_arg_mult_uso_quant = locale.format_string("%.0f",tn_arg_mult_uso_val,grouping=True) if tn_arg_mult_uso_val > 0 else 0
+
+    ####################################################################################    
+
+    #Ensacado
     arg_piso_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2717].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_piso_val = arg_piso_int.item() if not arg_piso_int.empty else 0
     arg_piso_quant = locale.format_string("%.0f",arg_piso_val,grouping=True) if arg_piso_val > 0 else 0   
 
-    arg_piso_eva_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2718].groupby('ESTQCOD')['IBPROQUANT'].sum()
-    arg_piso_eva_val = arg_piso_eva_int.item() if not arg_piso_eva_int.empty else 0
-    arg_piso_eva_quant = locale.format_string("%.0f",arg_piso_eva_val,grouping=True) if arg_piso_eva_val > 0 else 0
+    #Tonelada
+    tn_arg_piso_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2717].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_piso_val = tn_arg_piso_int.item() if not tn_arg_piso_int.empty else 0
+    tn_arg_piso_quant = locale.format_string("%.0f",tn_arg_piso_val,grouping=True) if tn_arg_piso_val > 0 else 0
 
+    ####################################################################################
+
+    #Ensacado
     arg_contrapiso_10mpa_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 25878].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_contrapiso_10mpa_val = arg_contrapiso_10mpa_int.item() if not arg_contrapiso_10mpa_int.empty else 0
     arg_contrapiso_10mpa_quant = locale.format_string("%.0f",arg_contrapiso_10mpa_val,grouping=True) if arg_contrapiso_10mpa_val > 0 else 0  
 
+    #Tonelada
+    tn_arg_contrapiso_10mpa_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 25878].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_contrapiso_10mpa_val = tn_arg_contrapiso_10mpa_int.item() if not tn_arg_contrapiso_10mpa_int.empty else 0
+    tn_arg_contrapiso_10mpa_quant = locale.format_string("%.0f",tn_arg_contrapiso_10mpa_val,grouping=True) if tn_arg_contrapiso_10mpa_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     arg_contrapiso_5mpa_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 25877].groupby('ESTQCOD')['IBPROQUANT'].sum()
     arg_contrapiso_5mpa_val = arg_contrapiso_5mpa_int.item() if not arg_contrapiso_5mpa_int.empty else 0
     arg_contrapiso_5mpa_quant = locale.format_string("%.0f",arg_contrapiso_5mpa_val,grouping=True) if arg_contrapiso_5mpa_val > 0 else 0
 
+    #Tonelada
+    tn_arg_contrapiso_5mpa_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 25877].groupby('ESTQCOD')['PESO'].sum()
+    tn_arg_contrapiso_5mpa_val = tn_arg_contrapiso_5mpa_int.item() if not tn_arg_contrapiso_5mpa_int.empty else 0
+    tn_arg_contrapiso_5mpa_quant = locale.format_string("%.0f",tn_arg_contrapiso_5mpa_val,grouping=True) if tn_arg_contrapiso_5mpa_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     massa_fina_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2719].groupby('ESTQCOD')['IBPROQUANT'].sum()
     massa_fina_val = massa_fina_int.item() if not massa_fina_int.empty else 0
     massa_fina_quant = locale.format_string("%.0f",massa_fina_val,grouping=True) if massa_fina_val > 0 else 0  
 
+    #Tonelada
+    tn_massa_fina_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2719].groupby('ESTQCOD')['PESO'].sum()
+    tn_massa_fina_val = tn_massa_fina_int.item() if not tn_massa_fina_int.empty else 0
+    tn_massa_fina_quant = locale.format_string("%.0f",tn_massa_fina_val,grouping=True) if tn_massa_fina_val > 0 else 0
+
+    ####################################################################################
+
+    #Ensacado
     multichapisco_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2729].groupby('ESTQCOD')['IBPROQUANT'].sum()
     multichapisco_val = multichapisco_int.item() if not multichapisco_int.empty else 0
     multichapisco_quant = locale.format_string("%.0f",multichapisco_val,grouping=True) if multichapisco_val > 0 else 0 
 
+    #Tonelada
+    tn_multichapisco_int = consulta_argamassa[consulta_argamassa['ESTQCOD'] == 2729].groupby('ESTQCOD')['PESO'].sum()
+    tn_multichapisco_val = tn_multichapisco_int.item() if not tn_multichapisco_int.empty else 0
+    tn_multichapisco_quant = locale.format_string("%.0f",tn_multichapisco_val,grouping=True) if tn_multichapisco_val > 0 else 0
+
+    ####################################################################################
+
     response_data = {
         'CONCRECAL CAL + CIMENTO - SC 20 KG':concrecal_cimento_quant,
+        'CONCRECAL CAL + CIMENTO - TN':tn_concrecal_cimento_quant,
+        ###-----------------------CONCRECAL 20KG---------------------------#########
         'PRIMEX ARGAMASSA ASSENTAMENTO DE ALVENARIA - AAV - SC 20 KG':arg_assent_quant,
+        'PRIMEX ARGAMASSA ASSENTAMENTO DE ALVENARIA - AAV - TN':tn_arg_assent_quant,
+        ###-----------------------Primex20KG---------------------------#########
         'PRIMEX ARGAMASSA COLANTE AC-I - SC 20 KG':arg_colante_ac1_quant,
+        'PRIMEX ARGAMASSA COLANTE AC-I - TN':tn_arg_colante_ac1_quant,
+        ###-----------------------Primex ACI 20KG---------------------------#########
         'PRIMEX ARGAMASSA COLANTE AC-II - SC 20 KG':arg_colante_ac2_quant,
+        'PRIMEX ARGAMASSA COLANTE AC-II - TN':tn_arg_colante_ac2_quant,
+        ###-----------------------Primex ACII 20KG---------------------------#########
         'PRIMEX ARGAMASSA COLANTE AC-III - SC 20 KG':arg_colante_ac3_quant,
+        'PRIMEX ARGAMASSA COLANTE AC-III - TN':tn_arg_colante_ac3_quant,
+        ###-----------------------Primex ACIII 20KG---------------------------#########
         'PRIMEX ARGAMASSA DE PROJECAO - SC 25 KG':arg_projecao_quant,
+        'PRIMEX ARGAMASSA DE PROJECAO - TN':tn_arg_projecao_quant,
+        ###-----------------------Primex PROJECAO 25KG---------------------------#########
         'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-I SC 20 KG':arg_rev_arv1_quant,
+        'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-I - TN':tn_arg_rev_arv1_quant,
+        ###-----------------------Primex ARV1 20KG---------------------------#########
         'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-II SC 20 KG':arg_rev_arv2_quant,
+        'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-II - TN':tn_arg_rev_arv2_quant,
+        ###-----------------------Primex ARV2 20KG---------------------------#########
         'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-III SC 20 KG':arg_rev_arv3_quant,
+        'PRIMEX ARGAMASSA DE REVESTIMENTO ARV-III - TN':tn_arg_rev_arv3_quant,
+        ###-----------------------Primex ARV3 20KG---------------------------#########
         'PRIMEX ARGAMASSA ESTRUTURAL AAE-12 - SC 20 KG':arg_est_aae12_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-12 - TN':tn_arg_est_aae12_quant,
+        ###-----------------------Primex AAE12 20KG---------------------------#########
         'PRIMEX ARGAMASSA ESTRUTURAL AAE-16 - SC 20 KG':arg_est_aae16_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-16 - TN':tn_arg_est_aae16_quant,
+        ###-----------------------Primex AAE16 20KG---------------------------#########
         'PRIMEX ARGAMASSA ESTRUTURAL AAE-20 - SC 20 KG':arg_est_aae20_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-20 - TN':tn_arg_est_aae20_quant,
+        ###-----------------------Primex AAE20 20KG---------------------------#########
         'PRIMEX ARGAMASSA ESTRUTURAL AAE-5 - SC 20 KG':arg_est_aae5_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-5 - TN':tn_arg_est_aae5_quant,
+        ###-----------------------Primex AAE5 20KG---------------------------#########
         'PRIMEX ARGAMASSA ESTRUTURAL AAE-8 - SC 20 KG':arg_est_aae8_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-8 - TN':tn_arg_est_aae8_quant,
+        ###-----------------------Primex AAE8 20KG---------------------------#########
         'PRIMEX ARGAMASSA ESTRUTURAL AAE-ESPECIAL - SC 20 KG':arg_est_aae_esp_quant,
+        'PRIMEX ARGAMASSA ESTRUTURAL AAE-ESPECIAL - TN':tn_arg_est_aae_esp_quant,
+        ###-----------------------Primex AAE-ESP 20KG---------------------------#########
         'PRIMEX ARGAMASSA GROSSA - SC- 25 KG':arg_grossa_quant,
+        'PRIMEX ARGAMASSA GROSSA - TN':tn_arg_grossa_quant,
+        ###-----------------------Primex GROSSA 25KG---------------------------#########
         'PRIMEX ARGAMASSA GROSSA C/ FIBRA - SC 25 KG':arg_grossa_fibra_quant,
+        'PRIMEX ARGAMASSA GROSSA C/ FIBRA - TN':tn_arg_grossa_fibra_quant,
+        ###-----------------------Primex GROSSA FIBRA 25KG---------------------------#########
         'PRIMEX ARGAMASSA MEDIA - SC 25 KG':arg_media_quant,
+        'PRIMEX ARGAMASSA MEDIA - TN':tn_arg_media_quant,
+        ###-----------------------Primex MEDIA 25KG---------------------------#########
         'PRIMEX ARGAMASSA MEDIA C/ FIBRA - SC 25 KG':arg_media_fibra_quant,
+        'PRIMEX ARGAMASSA MEDIA C/ FIBRA - TN':tn_arg_media_fibra_quant,
+        ###-----------------------Primex MEDIA FIBRA 25KG---------------------------#########
         'PRIMEX ARGAMASSA MULTIPLO USO - SC 20 KG': arg_mult_uso_quant,
+        'PRIMEX ARGAMASSA MULTIPLO USO - TN':tn_arg_mult_uso_quant,
+        ###-----------------------Primex MULT USO 20KG---------------------------#########
         'PRIMEX ARGAMASSA P/ PISO - SC 25 KG':arg_piso_quant,
-        'PRIMEX ARGAMASSA P/ PISO C/ E.V.A. - SC 25 KG':arg_piso_eva_quant,
+        'PRIMEX ARGAMASSA P/ PISO - TN':tn_arg_piso_quant,
+        ###-----------------------Primex PISO 25KG---------------------------#########
         'PRIMEX ARGAMASSA PARA CONTRAPISO 10 MPA - SC 20 KG': arg_contrapiso_10mpa_quant,
+        'PRIMEX ARGAMASSA PARA CONTRAPISO 10 MPA - TN':tn_arg_contrapiso_10mpa_quant,
+        ###-----------------------Primex CONTRAPISO 10MPA 20KG---------------------------#########
         'PRIMEX ARGAMASSA PARA CONTRAPISO 5  MPA - SC 20 KG':arg_contrapiso_5mpa_quant,
+        'PRIMEX ARGAMASSA PARA CONTRAPISO 5  MPA - TN':tn_arg_contrapiso_5mpa_quant,
+        ###-----------------------Primex CONTRAPISO 5MPA 20KG---------------------------#########
         'PRIMEX MASSA FINA - SC 20 KG':massa_fina_quant,
+        'PRIMEX MASSA FINA - TN':tn_massa_fina_quant,
+        ###-----------------------Primex MASSA FINA 20KG---------------------------#########
         'PRIMEX MULTICHAPISCO - SC 20 KG':multichapisco_quant,
+        'PRIMEX MULTICHAPISCO - TN':tn_multichapisco_quant,
+        ###-----------------------Primex MULTICHAPISCO 20KG---------------------------#########
         #-----------TOTAIS--------------------------------####
         'producao_total':producao_total,
         'ensacado_total': ensacado_total,
@@ -312,7 +569,7 @@ def calculos_argamassa_produto_individual(request):
 @api_view(['POST'])
 def calculos_argamassa_equipamentos(request):
     data = request.data.get('data')
-
+    data_fim = request.data.get('data_fim')
     consulta_equipamentos = pd.read_sql(f"""
         SELECT 
         CASE
@@ -358,7 +615,7 @@ def calculos_argamassa_equipamentos(request):
             ELSE BPROHROPER
         END HROPER,
         (SELECT SUM(EDPRHRTOT) FROM EVENTODIARIAPROD WHERE EDPRBPRO = BPRO.BPROCOD) HREVENTO,
-        IBPROQUANT QUANT, 
+        IBPROQUANT UNIDADES, ESTQPESO,((ESTQPESO*IBPROQUANT) /1000) QUANT, 
         ESPSIGLA SIGLA,
         (SELECT PPDADOCHAR FROM PESPARAMETRO WHERE PPTPP = 7 AND PPREF = BPRO.BPROCOD) CONDICAO,
         (SELECT PPDADOCHAR FROM PESPARAMETRO WHERE PPTPP = 8 AND PPREF = BPRO.BPROCOD) MATERIAL,
@@ -373,7 +630,7 @@ def calculos_argamassa_equipamentos(request):
         WHERE BPROSIT = 1
         AND BPROEMP = 1
         AND BPROFIL = 0
-        AND CAST(BPRODATA1 as date) = '{data}'
+        AND CAST(BPRODATA1 as date) BETWEEN '{data}' AND '{data_fim}'
         AND BPROEP = 1
         AND BPROEQP IN (264,265)
         ORDER BY BPRO.BPROCOD
@@ -419,7 +676,7 @@ def calculos_argamassa_equipamentos(request):
     else:
         mh02_produtividade = 0
 
-    argamassa_produtividade =  mh01_produtividade_val + mh02_produtividade_val / 2
+    argamassa_produtividade =  (mh01_produtividade_val + mh02_produtividade_val) / 2
     argamassa_produtividade = locale.format_string("%.0f",argamassa_produtividade,grouping=True) if argamassa_produtividade > 0 else 0   
 
     argamassa_producao = mh01_producao_val + mh02_producao_val
@@ -541,17 +798,17 @@ def calculos_argamassa_graficos(request):
 
 
         #calculo do volume acumulado dos ensacados
-        volume_diario_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('DIA')['IBPROQUANT'].sum().reset_index()
+        volume_diario_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('DIA')['PESO'].sum().reset_index()
         
         #Preencher dias Faltantes
         volume_diario_df = preencher_dias_faltantes(volume_diario_df)
 
         #MediasDiarias
-        media_diaria = volume_diario_df['IBPROQUANT'].mean()
+        media_diaria = volume_diario_df['PESO'].mean()
         media_diaria = locale.format_string("%.0f",media_diaria,grouping=True)
 
         #volume Total
-        volume_diario_total = int(volume_diario_df['IBPROQUANT'].sum())
+        volume_diario_total = int(volume_diario_df['PESO'].sum())
         #data Atual 
         hoje = datetime.now().day -1
 
@@ -570,11 +827,11 @@ def calculos_argamassa_graficos(request):
             volume_ultimo_dia = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto & (consulta_argamassa['DIA'] == dias_corridos )]
 
             #Volume total
-            volume_ultimo_dia_total = int(volume_ultimo_dia['IBPROQUANT'].sum())
+            volume_ultimo_dia_total = int(volume_ultimo_dia['PESO'].sum())
             volume_ultimo_dia_total = locale.format_string("%.0f",volume_ultimo_dia_total,grouping=True)
 
             #PROJEÇÂO
-            producao_acumulada = volume_diario_df['IBPROQUANT'].sum()
+            producao_acumulada = volume_diario_df['PESO'].sum()
             projecao_val = (producao_acumulada / dias_corridos) * dias_no_mes
             projecao = locale.format_string("%.0f",projecao_val,grouping=True) if projecao_val > 0 else 0
 
@@ -613,7 +870,7 @@ def calculos_argamassa_graficos(request):
             return meses_completos.merge(volume_df, on='MES', how='left').fillna(0).infer_objects(copy=False)
         
         #calculo do volume acumulado dos ensacados
-        volume_mensal_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('MES')['IBPROQUANT'].sum().reset_index()
+        volume_mensal_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('MES')['PESO'].sum().reset_index()
        
         #Preencher dias Faltantes
         volume_mensal_df = preencher_meses_faltantes(volume_mensal_df)
@@ -625,7 +882,7 @@ def calculos_argamassa_graficos(request):
         volume_mensal_df_filtrado = volume_mensal_df[volume_mensal_df['MES'] <= mes_corrente]
         
         # Médias mensais baseadas nos meses já passados
-        media_mensal = volume_mensal_df_filtrado['IBPROQUANT'].sum() / mes_corrente
+        media_mensal = volume_mensal_df_filtrado['PESO'].sum() / mes_corrente
         media_mensal = locale.format_string("%.0f", media_mensal, grouping=True)
 
         # Calculando o número total de entradas (dias de produção)
@@ -641,11 +898,11 @@ def calculos_argamassa_graficos(request):
             volume_ultimo_mes = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto & (consulta_argamassa['MES'] == meses_corridos )]
             
             #Volume total
-            volume_ultimo_mes_total = volume_ultimo_mes['IBPROQUANT'].sum()
+            volume_ultimo_mes_total = volume_ultimo_mes['PESO'].sum()
             volume_ultimo_mes_total = locale.format_string("%.0f",volume_ultimo_mes_total, grouping=True)
 
             #PROJEÇÂO
-            producao_mensal_acumulada = volume_mensal_df['IBPROQUANT'].sum()
+            producao_mensal_acumulada = volume_mensal_df['PESO'].sum()
             projecao_anual = (producao_mensal_acumulada / meses_corridos) * meses_no_ano
             projecao_anual = locale.format_string("%.0f", projecao_anual, grouping=True)
 
@@ -756,17 +1013,17 @@ def calculos_argamassa_graficos_carregamento(request):
             return dias_completos.merge(volume_df, on='DIA', how='left').fillna(0).infer_objects(copy=False)   
 
         #calculo do volume acumulado dos ensacados
-        volume_diario_df = consulta_carregamento[consulta_carregamento['ESTQCOD'] == produto].groupby('DIA')['INFQUANT'].sum().reset_index()
+        volume_diario_df = consulta_carregamento[consulta_carregamento['ESTQCOD'] == produto].groupby('DIA')['QUANT'].sum().reset_index()
         
         #Preencher dias Faltantes
         volume_diario = preencher_dias_faltantes(volume_diario_df)
         
         #MediasDiarias
-        media_diaria_val = volume_diario_df['INFQUANT'].mean()
+        media_diaria_val = volume_diario_df['QUANT'].mean()
         media_diaria = locale.format_string("%.0f",media_diaria_val,grouping=True) if media_diaria_val > 0 else 0
 
         #volume Total
-        volume_diario_total = volume_diario_df['INFQUANT'].sum()
+        volume_diario_total = volume_diario_df['QUANT'].sum()
         #data Atual 
         hoje = datetime.now().day -1
 
@@ -785,11 +1042,11 @@ def calculos_argamassa_graficos_carregamento(request):
             volume_ultimo_dia = consulta_carregamento[consulta_carregamento['ESTQCOD'] == produto & (consulta_carregamento['DIA'] == dias_corridos )]
             
             #Volume total
-            volume_ultimo_dia_total = int(volume_ultimo_dia['INFQUANT'].sum())
+            volume_ultimo_dia_total = int(volume_ultimo_dia['QUANT'].sum())
             volume_ultimo_dia_total = locale.format_string("%.0f",volume_ultimo_dia_total,grouping=True)
 
             #PROJEÇÂO
-            producao_acumulada =int (volume_diario_df['INFQUANT'].sum())
+            producao_acumulada =int (volume_diario_df['QUANT'].sum())
             projecao = (producao_acumulada / dias_corridos) * dias_no_mes
             projecao = locale.format_string("%.0f",projecao,grouping=True)
 
@@ -822,7 +1079,7 @@ def calculos_argamassa_graficos_carregamento(request):
             return meses_completos.merge(volume_df, on='MES', how='left').fillna(0).infer_objects(copy=False)
         
         #calculo do volume acumulado dos ensacados
-        volume_mensal_df = consulta_carregamento[consulta_carregamento['ESTQCOD'] == produto].groupby('MES')['INFQUANT'].sum().reset_index()
+        volume_mensal_df = consulta_carregamento[consulta_carregamento['ESTQCOD'] == produto].groupby('MES')['QUANT'].sum().reset_index()
        
         #Preencher dias Faltantes
         volume_mensal_df = preencher_meses_faltantes(volume_mensal_df)
@@ -834,11 +1091,11 @@ def calculos_argamassa_graficos_carregamento(request):
         volume_mensal_df_filtrado = volume_mensal_df[volume_mensal_df['MES'] <= mes_corrente]
         
         # Médias mensais baseadas nos meses já passados
-        media_mensal = volume_mensal_df_filtrado['INFQUANT'].sum() / mes_corrente
+        media_mensal = volume_mensal_df_filtrado['QUANT'].sum() / mes_corrente
         media_mensal = locale.format_string("%.0f", media_mensal, grouping=True)
 
         #SOma valores mensais 
-        volume_mensal_total = volume_mensal_df['INFQUANT'].sum()
+        volume_mensal_total = volume_mensal_df['QUANT'].sum()
         
         # Calculando o número total de entradas (dias de produção)
         mes = datetime.now().month
@@ -859,11 +1116,11 @@ def calculos_argamassa_graficos_carregamento(request):
             volume_ultimo_mes = consulta_carregamento[consulta_carregamento['ESTQCOD'] == produto & (consulta_carregamento['MES'] == meses_corridos )]
             
             #Volume total
-            volume_ultimo_mes_total = int(volume_ultimo_mes['INFQUANT'].sum())
+            volume_ultimo_mes_total = int(volume_ultimo_mes['QUANT'].sum())
             volume_ultimo_mes_total = locale.format_string("%.0f",volume_ultimo_mes_total, grouping=True)
 
             #PROJEÇÂO
-            producao_mensal_acumulada = volume_mensal_df['INFQUANT'].sum()
+            producao_mensal_acumulada = volume_mensal_df['QUANT'].sum()
             projecao_anual = (producao_mensal_acumulada / meses_corridos) * meses_no_ano
             projecao_anual = locale.format_string("%.0f", projecao_anual, grouping=True)
 
@@ -953,107 +1210,107 @@ def calculos_argamassa_produtos_carregamento(request):
 
     ORDER BY NFDATA, NFNUM
                  """,engine)
-    concrecal_cimento_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2728].groupby('ESTQCOD')['INFQUANT'].sum()
+    concrecal_cimento_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2728].groupby('ESTQCOD')['QUANT'].sum()
     concrecal_cimento_val = concrecal_cimento_int.item() if not concrecal_cimento_int.empty else 0
     concrecal_cimento_quant = locale.format_string("%.0f",concrecal_cimento_val,grouping=True) if concrecal_cimento_val > 0 else 0
 
-    arg_assent_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 22089].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_assent_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 22089].groupby('ESTQCOD')['QUANT'].sum()
     arg_assent_val = arg_assent_int.item() if not arg_assent_int.empty else 0
     arg_assent_quant = locale.format_string("%.0f",arg_assent_val,grouping=True) if arg_assent_val > 0 else 0
 
-    arg_colante_ac1_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2708].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_colante_ac1_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2708].groupby('ESTQCOD')['QUANT'].sum()
     arg_colante_ac1_val = arg_colante_ac1_int.item() if not arg_colante_ac1_int.empty else 0
     arg_colante_ac1_quant = locale.format_string("%.0f",arg_colante_ac1_val,grouping=True) if arg_colante_ac1_val > 0 else 0
 
-    arg_colante_ac2_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2709].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_colante_ac2_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2709].groupby('ESTQCOD')['QUANT'].sum()
     arg_colante_ac2_val = arg_colante_ac2_int.item() if not arg_colante_ac2_int.empty else 0
     arg_colante_ac2_quant = locale.format_string("%.0f",arg_colante_ac2_val,grouping=True) if arg_colante_ac2_val > 0 else 0
 
-    arg_colante_ac3_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2710].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_colante_ac3_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2710].groupby('ESTQCOD')['QUANT'].sum()
     arg_colante_ac3_val = arg_colante_ac3_int.item() if not arg_colante_ac3_int.empty else 0
     arg_colante_ac3_quant = locale.format_string("%.0f",arg_colante_ac3_val,grouping=True) if arg_colante_ac3_val > 0 else 0
 
-    arg_projecao_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2730].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_projecao_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2730].groupby('ESTQCOD')['QUANT'].sum()
     arg_projecao_val = arg_projecao_int.item() if not arg_projecao_int.empty else 0
     arg_projecao_quant = locale.format_string("%.0f",arg_projecao_val,grouping=True) if arg_projecao_val > 0 else 0
 
-    arg_rev_arv1_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 23987].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_rev_arv1_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 23987].groupby('ESTQCOD')['QUANT'].sum()
     arg_rev_arv1_val = arg_rev_arv1_int.item() if not arg_rev_arv1_int.empty else 0
     arg_rev_arv1_quant = locale.format_string("%.0f",arg_rev_arv1_val,grouping=True) if arg_rev_arv1_val > 0 else 0
 
-    arg_rev_arv2_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 23988].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_rev_arv2_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 23988].groupby('ESTQCOD')['QUANT'].sum()
     arg_rev_arv2_val = arg_rev_arv2_int.item() if not arg_rev_arv2_int.empty else 0
     arg_rev_arv2_quant = locale.format_string("%.0f",arg_rev_arv2_val,grouping=True) if arg_rev_arv2_val > 0 else 0
 
-    arg_rev_arv3_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 23989].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_rev_arv3_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 23989].groupby('ESTQCOD')['QUANT'].sum()
     arg_rev_arv3_val = arg_rev_arv3_int.item() if not arg_rev_arv3_int.empty else 0
     arg_rev_arv3_quant = locale.format_string("%.0f",arg_rev_arv3_val,grouping=True) if arg_rev_arv3_val > 0 else 0
 
-    arg_est_aae12_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24021].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae12_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24021].groupby('ESTQCOD')['QUANT'].sum()
     arg_est_aae12_val = arg_est_aae12_int.item() if not arg_est_aae12_int.empty else 0
     arg_est_aae12_quant = locale.format_string("%.0f",arg_est_aae12_val,grouping=True) if arg_est_aae12_val > 0 else 0
 
-    arg_est_aae16_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24022].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae16_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24022].groupby('ESTQCOD')['QUANT'].sum()
     arg_est_aae16_val = arg_est_aae16_int.item() if not arg_est_aae16_int.empty else 0
     arg_est_aae16_quant = locale.format_string("%.0f",arg_est_aae16_val,grouping=True) if arg_est_aae16_val > 0 else 0
 
-    arg_est_aae20_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24023].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae20_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24023].groupby('ESTQCOD')['QUANT'].sum()
     arg_est_aae20_val = arg_est_aae20_int.item() if not arg_est_aae20_int.empty else 0
     arg_est_aae20_quant = locale.format_string("%.0f",arg_est_aae20_val,grouping=True) if arg_est_aae20_val > 0 else 0
 
-    arg_est_aae5_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24019].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae5_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24019].groupby('ESTQCOD')['QUANT'].sum()
     arg_est_aae5_val = arg_est_aae5_int.item() if not arg_est_aae5_int.empty else 0
     arg_est_aae5_quant = locale.format_string("%.0f",arg_est_aae5_val,grouping=True) if arg_est_aae5_val > 0 else 0
 
-    arg_est_aae8_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24020].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae8_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24020].groupby('ESTQCOD')['QUANT'].sum()
     arg_est_aae8_val = arg_est_aae8_int.item() if not arg_est_aae8_int.empty else 0
     arg_est_aae8_quant = locale.format_string("%.0f",arg_est_aae8_val,grouping=True) if arg_est_aae8_val > 0 else 0
 
-    arg_est_aae_esp_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24024].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_est_aae_esp_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24024].groupby('ESTQCOD')['QUANT'].sum()
     arg_est_aae_esp_val = arg_est_aae_esp_int.item() if not arg_est_aae_esp_int.empty else 0
     arg_est_aae_esp_quant = locale.format_string("%.0f",arg_est_aae_esp_val,grouping=True) if arg_est_aae_esp_val > 0 else 0
 
-    arg_grossa_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2715].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_grossa_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2715].groupby('ESTQCOD')['QUANT'].sum()
     arg_grossa_val = arg_grossa_int.item() if not arg_grossa_int.empty else 0
     arg_grossa_quant = locale.format_string("%.0f",arg_grossa_val,grouping=True) if arg_grossa_val > 0 else 0  
 
-    arg_grossa_fibra_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2716].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_grossa_fibra_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2716].groupby('ESTQCOD')['QUANT'].sum()
     arg_grossa_fibra_val = arg_grossa_fibra_int.item() if not arg_grossa_fibra_int.empty else 0
     arg_grossa_fibra_quant = locale.format_string("%.0f",arg_grossa_fibra_val,grouping=True) if arg_grossa_fibra_val > 0 else 0 
 
-    arg_media_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2711].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_media_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2711].groupby('ESTQCOD')['QUANT'].sum()
     arg_media_val = arg_media_int.item() if not arg_media_int.empty else 0
     arg_media_quant = locale.format_string("%.0f",arg_media_val,grouping=True) if arg_media_val > 0 else 0 
 
-    arg_media_fibra_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2714].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_media_fibra_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2714].groupby('ESTQCOD')['QUANT'].sum()
     arg_media_fibra_val = arg_media_fibra_int.item() if not arg_media_fibra_int.empty else 0
     arg_media_fibra_quant = locale.format_string("%.0f",arg_media_fibra_val,grouping=True) if arg_media_fibra_val > 0 else 0 
 
-    arg_mult_uso_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24222].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_mult_uso_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 24222].groupby('ESTQCOD')['QUANT'].sum()
     arg_mult_uso_val = arg_mult_uso_int.item() if not arg_mult_uso_int.empty else 0
     arg_mult_uso_quant = locale.format_string("%.0f",arg_mult_uso_val,grouping=True) if arg_mult_uso_val > 0 else 0
 
-    arg_piso_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2717].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_piso_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2717].groupby('ESTQCOD')['QUANT'].sum()
     arg_piso_val = arg_piso_int.item() if not arg_piso_int.empty else 0
     arg_piso_quant = locale.format_string("%.0f",arg_piso_val,grouping=True) if arg_piso_val > 0 else 0   
 
-    arg_piso_eva_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2718].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_piso_eva_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2718].groupby('ESTQCOD')['QUANT'].sum()
     arg_piso_eva_val = arg_piso_eva_int.item() if not arg_piso_eva_int.empty else 0
     arg_piso_eva_quant = locale.format_string("%.0f",arg_piso_eva_val,grouping=True) if arg_piso_eva_val > 0 else 0
 
-    arg_contrapiso_10mpa_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 25878].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_contrapiso_10mpa_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 25878].groupby('ESTQCOD')['QUANT'].sum()
     arg_contrapiso_10mpa_val = arg_contrapiso_10mpa_int.item() if not arg_contrapiso_10mpa_int.empty else 0
     arg_contrapiso_10mpa_quant = locale.format_string("%.0f",arg_contrapiso_10mpa_val,grouping=True) if arg_contrapiso_10mpa_val > 0 else 0  
 
-    arg_contrapiso_5mpa_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 25877].groupby('ESTQCOD')['INFQUANT'].sum()
+    arg_contrapiso_5mpa_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 25877].groupby('ESTQCOD')['QUANT'].sum()
     arg_contrapiso_5mpa_val = arg_contrapiso_5mpa_int.item() if not arg_contrapiso_5mpa_int.empty else 0
     arg_contrapiso_5mpa_quant = locale.format_string("%.0f",arg_contrapiso_5mpa_val,grouping=True) if arg_contrapiso_5mpa_val > 0 else 0
 
-    massa_fina_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2719].groupby('ESTQCOD')['INFQUANT'].sum()
+    massa_fina_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2719].groupby('ESTQCOD')['QUANT'].sum()
     massa_fina_val = massa_fina_int.item() if not massa_fina_int.empty else 0
     massa_fina_quant = locale.format_string("%.0f",massa_fina_val,grouping=True) if massa_fina_val > 0 else 0  
 
-    multichapisco_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2729].groupby('ESTQCOD')['INFQUANT'].sum()
+    multichapisco_int = consulta_carregamento[consulta_carregamento['ESTQCOD'] == 2729].groupby('ESTQCOD')['QUANT'].sum()
     multichapisco_val = multichapisco_int.item() if not multichapisco_int.empty else 0
     multichapisco_quant = locale.format_string("%.0f",multichapisco_val,grouping=True) if multichapisco_val > 0 else 0 
 

@@ -107,32 +107,32 @@ def calculos_cal_produtos(request):
     
     #KPI's ensacados
     #Calcinação
-    cal_calcinacao_int = consulta_cal[consulta_cal['ESTQCOD'] == 2621 ].groupby('ESTQCOD')['IBPROQUANT'].sum()
+    cal_calcinacao_int = consulta_cal[consulta_cal['ESTQCOD'] == 2621 ].groupby('ESTQCOD')['PESO'].sum()
     cal_calcinacao_val = cal_calcinacao_int.item() if not cal_calcinacao_int.empty else 0
     cal_calcinacao_quant = locale.format_string("%.0f",cal_calcinacao_val,grouping=True) if cal_calcinacao_val > 0 else 0
     #Beneficiamento
-    cal_hidraulica_int = consulta_cal[consulta_cal['ESTQCOD']==2738].groupby('ESTQCOD')['IBPROQUANT'].sum()
+    cal_hidraulica_int = consulta_cal[consulta_cal['ESTQCOD']==2738].groupby('ESTQCOD')['PESO'].sum()
     cal_hidraulica_val = cal_hidraulica_int.item() if not cal_hidraulica_int.empty else 0
     cal_hidraulica_quant = locale.format_string("%.0f",cal_hidraulica_val,grouping=True) if cal_hidraulica_val > 0 else 0        
     #Beneficiamento
-    cal_cvc_int = consulta_cal[consulta_cal['ESTQCOD']==2736].groupby('ESTQCOD')['IBPROQUANT'].sum()
+    cal_cvc_int = consulta_cal[consulta_cal['ESTQCOD']==2736].groupby('ESTQCOD')['PESO'].sum()
     cal_cvc_val = cal_cvc_int.item() if not cal_cvc_int.empty else 0
     cal_cvc_quant = locale.format_string("%.0f",cal_cvc_val,grouping=True) if cal_cvc_val > 0 else 0
     #Beneficiamento
-    cal_ch2_int = consulta_cal[consulta_cal['ESTQCOD']==2737].groupby('ESTQCOD')['IBPROQUANT'].sum()
+    cal_ch2_int = consulta_cal[consulta_cal['ESTQCOD']==2737].groupby('ESTQCOD')['PESO'].sum()
     cal_ch2_val = cal_ch2_int.item() if not cal_ch2_int.empty else 0
     cal_ch2_quant = locale.format_string("%.0f",cal_ch2_val,grouping=True) if cal_ch2_val > 0 else 0
 
     #ENSACADOS
-    cvc_ensacado_int = consulta_cal[consulta_cal['ESTQCOD'].isin([2740,2741])]['IBPROQUANT'].sum()
+    cvc_ensacado_int = consulta_cal[consulta_cal['ESTQCOD'].isin([2740,2741])]['PESO'].sum()
     cvc_ensacado_val = cvc_ensacado_int if cvc_ensacado_int > 0 else 0
     cvc_ensacado_quant = locale.format_string("%.0f", cvc_ensacado_val, grouping=True) if cvc_ensacado_val > 0 else 0
 
-    ch2_ensacado_int = consulta_cal[consulta_cal['ESTQCOD'].isin([2744,2833])]['IBPROQUANT'].sum()
+    ch2_ensacado_int = consulta_cal[consulta_cal['ESTQCOD'].isin([2744,2833])]['PESO'].sum()
     ch2_ensacado_val = ch2_ensacado_int if ch2_ensacado_int > 0 else 0
     ch2_ensacado_quant = locale.format_string("%.0f", ch2_ensacado_val, grouping=True) if ch2_ensacado_val > 0 else 0
 
-    hidraulica_ensacado_int = consulta_cal[consulta_cal['ESTQCOD'].isin([2742,2743])]['IBPROQUANT'].sum()
+    hidraulica_ensacado_int = consulta_cal[consulta_cal['ESTQCOD'].isin([2742,2743])]['PESO'].sum()
     hidraulica_ensacado_val = hidraulica_ensacado_int if hidraulica_ensacado_int > 0 else 0
     hidraulica_ensacado_quant = locale.format_string("%.0f", hidraulica_ensacado_val, grouping=True) if hidraulica_ensacado_val > 0 else 0
 
@@ -213,7 +213,7 @@ def calculos_cal_equipamentos(request):
             ELSE BPROHROPER
         END HROPER,
         (SELECT SUM(EDPRHRTOT) FROM EVENTODIARIAPROD WHERE EDPRBPRO = BPRO.BPROCOD) HREVENTO,
-        IBPROQUANT QUANT, 
+        IBPROQUANT UNIDADES, ESTQPESO,((ESTQPESO*IBPROQUANT) /1000) QUANT,                                  
         ESPSIGLA SIGLA,
         (SELECT PPDADOCHAR FROM PESPARAMETRO WHERE PPTPP = 7 AND PPREF = BPRO.BPROCOD) CONDICAO,
         (SELECT PPDADOCHAR FROM PESPARAMETRO WHERE PPTPP = 8 AND PPREF = BPRO.BPROCOD) MATERIAL,
@@ -542,7 +542,7 @@ def calculos_cal_graficos(request):
 @api_view(['POST'])
 def calculos_equipamentos_detalhes(request):
     data = request.data.get('data')
-
+    data_fim = request.data.get('dataFim')
     consulta_equipamentos = pd.read_sql(f"""
     SELECT 
     CASE
@@ -603,7 +603,7 @@ def calculos_equipamentos_detalhes(request):
     WHERE BPROSIT = 1
     AND BPROEMP = 1
     AND BPROFIL = 0
-    AND CAST(BPRODATA1 as date) = '{data}'
+    AND CAST(BPRODATA1 as date) BETWEEN '{data}' AND '{data_fim}'
     AND BPROEP = 3
     AND BPROEQP IN (440,441,442,612)
     ORDER BY BPRO.BPROCOD
@@ -618,6 +618,7 @@ def calculos_equipamentos_detalhes(request):
 
     mb01_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 440 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
     mb01_hora_parado_val = mb01_hora_parado_int.item() if not mb01_hora_parado_int.empty else 0
+    mb01_hora_parado_val = 24 - mb01_hora_producao_val
     mb01_hora_parado_quant = locale.format_string("%.0f",mb01_hora_parado_val,grouping=True) if mb01_hora_parado_val > 0 else 0
 
     mb01_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 440 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
@@ -638,6 +639,7 @@ def calculos_equipamentos_detalhes(request):
 
     mb02_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 441 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
     mb02_hora_parado_val = mb02_hora_parado_int.item() if not mb02_hora_parado_int.empty else 0
+    mb02_hora_parado_val = 24 - mb02_hora_producao_val
     mb02_hora_parado_quant = locale.format_string("%.0f",mb02_hora_parado_val,grouping=True) if mb02_hora_parado_val > 0 else 0
 
     mb02_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 441 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
@@ -659,6 +661,7 @@ def calculos_equipamentos_detalhes(request):
 
     mb03_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 612 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
     mb03_hora_parado_val = mb03_hora_parado_int.item() if not mb03_hora_parado_int.empty else 0
+    mb03_hora_parado_val = 24 - mb03_hora_producao_val
     mb03_hora_parado_quant = locale.format_string("%.0f",mb03_hora_parado_val,grouping=True) if mb03_hora_parado_val > 0 else 0
 
     mb03_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 612 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
@@ -680,6 +683,7 @@ def calculos_equipamentos_detalhes(request):
 
     mg01_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 442 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
     mg01_hora_parado_val = mg01_hora_parado_int.item() if not mg01_hora_parado_int.empty else 0
+    mg01_hora_parado_val = 24 - mg01_hora_producao_val
     mg01_hora_parado_quant = locale.format_string("%.0f",mg01_hora_parado_val,grouping=True) if mg01_hora_parado_val > 0 else 0
 
     mg01_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 442 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
