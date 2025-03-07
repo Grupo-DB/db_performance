@@ -609,6 +609,8 @@ def calculos_equipamentos_detalhes(request):
     ORDER BY BPRO.BPROCOD
 
     """,engine)
+    # Calcular o total de horas do período consultado
+    total_horas_periodo = (pd.to_datetime(data_fim) - pd.to_datetime(data)).total_seconds() / 3600
 
     ####################---------ENSACADOS -- MB01---------------############################################### 
     #MB01
@@ -616,10 +618,9 @@ def calculos_equipamentos_detalhes(request):
     mb01_hora_producao_val = mb01_hora_producao_int.item() if not mb01_hora_producao_int.empty else 0
     mb01_hora_producao_quant = locale.format_string("%.0f",mb01_hora_producao_val,grouping=True) if mb01_hora_producao_val > 0 else 0
 
-    mb01_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 440 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    mb01_hora_parado_val = mb01_hora_parado_int.item() if not mb01_hora_parado_int.empty else 0
-    mb01_hora_parado_val = 24 - mb01_hora_producao_val
-    mb01_hora_parado_quant = locale.format_string("%.0f",mb01_hora_parado_val,grouping=True) if mb01_hora_parado_val > 0 else 0
+    # Calcular a hora parada
+    mb01_hora_parado_val = total_horas_periodo - mb01_hora_producao_val
+    mb01_hora_parado = locale.format_string("%.1f",mb01_hora_parado_val, grouping=True) if mb01_hora_parado_val > 0 else 0
 
     mb01_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 440 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     mb01_producao_val = mb01_producao_int.item() if not mb01_producao_int.empty else 0
@@ -637,10 +638,9 @@ def calculos_equipamentos_detalhes(request):
     mb02_hora_producao_val = mb02_hora_producao_int.item() if not mb02_hora_producao_int.empty else 0
     mb02_hora_producao_quant = locale.format_string("%.0f",mb02_hora_producao_val,grouping=True) if mb02_hora_producao_val > 0 else 0
 
-    mb02_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 441 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    mb02_hora_parado_val = mb02_hora_parado_int.item() if not mb02_hora_parado_int.empty else 0
-    mb02_hora_parado_val = 24 - mb02_hora_producao_val
-    mb02_hora_parado_quant = locale.format_string("%.0f",mb02_hora_parado_val,grouping=True) if mb02_hora_parado_val > 0 else 0
+    # Calcular a hora parada
+    mb02_hora_parado_val = total_horas_periodo - mb02_hora_producao_val
+    mb02_hora_parado = locale.format_string("%.1f",mb02_hora_parado_val, grouping=True) if mb02_hora_parado_val > 0 else 0
 
     mb02_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 441 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     mb02_producao_val = mb02_producao_int.item() if not mb02_producao_int.empty else 0
@@ -659,10 +659,9 @@ def calculos_equipamentos_detalhes(request):
     mb03_hora_producao_val = mb03_hora_producao_int.item() if not mb03_hora_producao_int.empty else 0
     mb03_hora_producao_quant = locale.format_string("%.0f",mb03_hora_producao_val,grouping=True) if mb03_hora_producao_val > 0 else 0
 
-    mb03_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 612 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    mb03_hora_parado_val = mb03_hora_parado_int.item() if not mb03_hora_parado_int.empty else 0
-    mb03_hora_parado_val = 24 - mb03_hora_producao_val
-    mb03_hora_parado_quant = locale.format_string("%.0f",mb03_hora_parado_val,grouping=True) if mb03_hora_parado_val > 0 else 0
+    # Calcular a hora parada
+    mb03_hora_parado_val = total_horas_periodo - mb03_hora_producao_val
+    mb03_hora_parado = locale.format_string("%.1f",mb03_hora_parado_val, grouping=True) if mb03_hora_parado_val > 0 else 0
 
     mb03_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 612 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     mb03_producao_val = mb03_producao_int.item() if not mb03_producao_int.empty else 0
@@ -681,10 +680,9 @@ def calculos_equipamentos_detalhes(request):
     mg01_hora_producao_val = mg01_hora_producao_int.item() if not mg01_hora_producao_int.empty else 0
     mg01_hora_producao_quant = locale.format_string("%.0f",mg01_hora_producao_val,grouping=True) if mg01_hora_producao_val > 0 else 0
 
-    mg01_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 442 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    mg01_hora_parado_val = mg01_hora_parado_int.item() if not mg01_hora_parado_int.empty else 0
-    mg01_hora_parado_val = 24 - mg01_hora_producao_val
-    mg01_hora_parado_quant = locale.format_string("%.0f",mg01_hora_parado_val,grouping=True) if mg01_hora_parado_val > 0 else 0
+    # Calcular a hora parada
+    mg01_hora_parado_val = total_horas_periodo - mg01_hora_producao_val
+    mg01_hora_parado = locale.format_string("%.1f",mg01_hora_parado_val, grouping=True) if mg01_hora_parado_val > 0 else 0
 
     mg01_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 442 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     mg01_producao_val = mg01_producao_int.item() if not mg01_producao_int.empty else 0
@@ -715,6 +713,7 @@ def calculos_equipamentos_detalhes(request):
 
     ##---------------------------------MOVIMENTAÇÃO DE CARGAS---------------------------------------------######        
     data = request.data.get('data')
+    data_fim = request.data.get('dataFim')
     consulta_carregamento= pd.read_sql(f"""
     SELECT CLINOME, CLICOD, TRANNOME, TRANCOD, NFPLACA, ESTUF, NFPED, NFNUM, SDSSERIE, NFDATA,
 
@@ -741,7 +740,7 @@ def calculos_equipamentos_detalhes(request):
         AND NFEMP = 1
         AND NFFIL = 0
         AND NOPFLAGNF LIKE '_S%'
-        AND CAST (NFDATA as date) = '{data}' 
+        AND CAST (NFDATA as date) BETWEEN '{data}' AND '{data_fim}'
         AND ESTQCOD IN (2740,2741,2742,2743,2744,2833)
 
     ORDER BY NFDATA, NFNUM
@@ -753,6 +752,7 @@ def calculos_equipamentos_detalhes(request):
 
 
     data = request.data.get('data')
+    data_fim = request.data.get('dataFim')
     consulta_estoque = pd.read_sql (f"""
         SELECT DISTINCT ESTQNOME, ESTQCOD, DADOS.DT DATA, EMPCOD EMPRESA, QESTQFIL FILIAL,
         QUANTESTOQUE, QUANTMOV, (QUANTESTOQUE - QUANTMOV) SALDO,
@@ -761,7 +761,7 @@ def calculos_equipamentos_detalhes(request):
         ((QUANTESTOQUE * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END) / 1000) -
         ((QUANTMOV * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END) / 1000) SALDOTN
         FROM (
-            SELECT CAST('{data}' AS DATE) AS DT
+            SELECT CAST('{data_fim}' AS DATE) AS DT
             FROM master..spt_values
             WHERE type = 'P'
         ) DADOS
@@ -785,7 +785,7 @@ def calculos_equipamentos_detalhes(request):
             SELECT MESTQESTQ, MESTQEMP, MESTQFIL, COUNT(*) AS MOVCOUNT
             FROM MOVESTOQUE
             WHERE MESTQREFTIPO < 10
-            AND CAST(MESTQDATA AS DATE) = '{data}'
+            AND CAST(MESTQDATA AS DATE) = '{data_fim}'
             GROUP BY MESTQESTQ, MESTQEMP, MESTQFIL
         ) MOV ON MOV.MESTQESTQ = EQ.ESTQCOD
             AND MOV.MESTQEMP = EE.EMPCOD 
@@ -808,22 +808,22 @@ def calculos_equipamentos_detalhes(request):
         #-------------MB01---------------------## 
         'mb01_producao_quant':mb01_producao_quant,
         'mb01_produtividade':mb01_produtividade,
-        'mb01_hora_parado_quant':mb01_hora_parado_quant,
+        'mb01_hora_parado_quant':mb01_hora_parado,
         'mb01_hora_producao_quant' : mb01_hora_producao_quant,
         #-------------MB02---------------------## 
         'mb02_producao_quant':mb02_producao_quant,
         'mb02_produtividade':mb02_produtividade,
-        'mb02_hora_parado_quant':mb02_hora_parado_quant,
+        'mb02_hora_parado_quant':mb02_hora_parado,
         'mb02_hora_producao_quant': mb02_hora_producao_quant,
         #-------------MB03---------------------##
         'mb03_producao_quant':mb03_producao_quant,
         'mb03_produtividade':mb03_produtividade, 
-        'mb03_hora_parado_quant':mb03_hora_parado_quant,
+        'mb03_hora_parado_quant':mb03_hora_parado,
         'mb03_hora_producao_quant' : mb03_hora_producao_quant,
         #-------------MG01---------------------##
         'mg01_producao_quant':mg01_producao_quant,
         'mg01_produtividade':mg01_produtividade,
-        'mg01_hora_parado_quant':mg01_hora_parado_quant,
+        'mg01_hora_parado_quant':mg01_hora_parado,
         'mg01_hora_producao_quant': mg01_hora_producao_quant,
         #------------GERAL------------------##
         'produtividade_geral': produtividade_geral,

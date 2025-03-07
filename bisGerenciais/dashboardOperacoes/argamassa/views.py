@@ -569,7 +569,7 @@ def calculos_argamassa_produto_individual(request):
 @api_view(['POST'])
 def calculos_argamassa_equipamentos(request):
     data = request.data.get('data')
-    data_fim = request.data.get('data_fim')
+    dataFim = request.data.get('data_fim')
     consulta_equipamentos = pd.read_sql(f"""
         SELECT 
         CASE
@@ -630,20 +630,24 @@ def calculos_argamassa_equipamentos(request):
         WHERE BPROSIT = 1
         AND BPROEMP = 1
         AND BPROFIL = 0
-        AND CAST(BPRODATA1 as date) BETWEEN '{data}' AND '{data_fim}'
+        AND CAST(BPRODATA1 as date) BETWEEN '{data}' AND '{dataFim}'
         AND BPROEP = 1
         AND BPROEQP IN (264,265)
         ORDER BY BPRO.BPROCOD
 
         """,engine)
+    
+    # Calcular o total de horas do período consultado
+    total_horas_periodo = (pd.to_datetime(dataFim) - pd.to_datetime(data)).total_seconds() / 3600
+
     #ARG MH-01
     mh01_hora_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 264 ].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum()
     mh01_hora_producao_val = mh01_hora_producao_int.item() if not mh01_hora_producao_int.empty else 0
     mh01_hora_producao_quant = locale.format_string("%.0f",mh01_hora_producao_val,grouping=True) if mh01_hora_producao_val > 0 else 0
 
-    mh01_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 264 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    mh01_hora_parado_val = mh01_hora_parado_int.item() if not mh01_hora_parado_int.empty else 0
-    mh01_hora_parado_quant = locale.format_string("%.0f",mh01_hora_parado_val,grouping=True) if mh01_hora_parado_val > 0 else 0
+    # Calcular a hora parada
+    mh01_hora_parado_val = total_horas_periodo - mh01_hora_producao_val
+    mh01_hora_parado_quant = locale.format_string("%.1f", mh01_hora_parado_val, grouping=True) if mh01_hora_parado_val > 0 else 0
 
     mh01_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 264 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     mh01_producao_val = mh01_producao_int.item() if not mh01_producao_int.empty else 0
@@ -661,9 +665,9 @@ def calculos_argamassa_equipamentos(request):
     mh02_hora_producao_val = mh02_hora_producao_int.item() if not mh02_hora_producao_int.empty else 0
     mh02_hora_producao_quant = locale.format_string("%.0f",mh02_hora_producao_val,grouping=True) if mh02_hora_producao_val > 0 else 0
 
-    mh02_hora_parado_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 265 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    mh02_hora_parado_val = mh01_hora_parado_int.item() if not mh02_hora_parado_int.empty else 0
-    mh02_hora_parado_quant = locale.format_string("%.0f",mh02_hora_parado_val,grouping=True) if mh02_hora_parado_val > 0 else 0
+     # Calcular a hora parada
+    mh02_hora_parado_val = total_horas_periodo - mh02_hora_producao_val
+    mh02_hora_parado_quant = locale.format_string("%.1f", mh02_hora_parado_val, grouping=True) if mh02_hora_parado_val > 0 else 0
 
     mh02_producao_int =  consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 265 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     mh02_producao_val = mh02_producao_int.item() if not mh02_producao_int.empty else 0
@@ -684,6 +688,7 @@ def calculos_argamassa_equipamentos(request):
 
 ####------------------------------------------------CARREGAMENTO DO DIA---------------####
     data = request.data.get('data')
+    dataFim = request.data.get('data_fim')
     consulta_movimentacao = pd.read_sql(f"""
         SELECT CLINOME, CLICOD, TRANNOME, TRANCOD, NFPLACA, ESTUF, NFPED, NFNUM, SDSSERIE, NFDATA,
             ESTQCOD, ESTQNOME, ESPSIGLA,
@@ -706,7 +711,7 @@ def calculos_argamassa_equipamentos(request):
             AND NFEMP = 1
             AND NFFIL = 0
             AND NOPFLAGNF LIKE '_S%'
-            AND CAST (NFDATA as date) = '{data}'
+            AND CAST (NFDATA as date) = '{dataFim}'
             AND ESTQCOD IN (
                 2728, 22089, 2708, 2709, 2710, 2730, 23987, 23988, 23989, 24021, 24022, 24023, 24019, 
                 24020, 24024, 2715, 2716, 2711, 2714, 24222, 2717, 2718, 25878, 25877, 2719, 2729

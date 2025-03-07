@@ -414,6 +414,7 @@ def calculos_graficos_calcario(request):
 @api_view(['POST'])
 def calculos_equipamentos_detalhes(request):
     data = request.data.get('data')
+    dataFim = request.data.get('dataFim')
     consulta_equipamentos = pd.read_sql(f"""
 
         SELECT 
@@ -475,12 +476,16 @@ def calculos_equipamentos_detalhes(request):
         WHERE BPROSIT = 1
         AND BPROEMP = 1
         AND BPROFIL = 0
-        AND CAST(BPRODATA1 as date) = '{data}'
+        AND CAST(BPRODATA1 as date) BETWEEN '{data}' AND '{dataFim}'
         AND BPROEP = 6
         AND BPROEQP IN (110,111,169,18,19,20)
         ORDER BY BPRO.BPROCOD
 
     """,engine)
+
+     # Calcular o total de horas do período consultado
+    total_horas_periodo = (pd.to_datetime(dataFim) - pd.to_datetime(data)).total_seconds() / 3600
+
 
     ####################---------FCMI --- MG01---------------###############################################
     fcmi_mg01_hora_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110].groupby('EQUIPAMENTO_CODIGO')['HRPRO'].sum() #soma
@@ -488,10 +493,9 @@ def calculos_equipamentos_detalhes(request):
     fcmi_mg01_hora_producao = locale.format_string("%.1f",fcmi_mg01_hora_producao_val, grouping=True) if fcmi_mg01_hora_producao_val > 0 else 0 #formata o valor
     
 
-    fcmi_mg01_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    fcmi_mg01_hora_parado_val = fcmi_mg01_hora_parado_int.item() if not fcmi_mg01_hora_parado_int.empty  else 0
-    fcmi_mg01_hora_parado_val = 24 - fcmi_mg01_hora_producao_val
-    fcmi_mg01_hora_parado = locale.format_string("%.1f",fcmi_mg01_hora_parado_val, grouping=True) if fcmi_mg01_hora_parado_val > 0 else 0
+    # Calcular a hora parada
+    fcmi_mg01_hora_parado_val = total_horas_periodo - fcmi_mg01_hora_producao_val
+    fcmi_mg01_hora_parado = locale.format_string("%.1f", fcmi_mg01_hora_parado_val, grouping=True) if fcmi_mg01_hora_parado_val > 0 else 0
 
 
     fcmi_mg01_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 110 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
@@ -510,10 +514,9 @@ def calculos_equipamentos_detalhes(request):
     fcmi_mg02_hora_producao_val = fcmi_mg02_hora_producao_int.item() if not fcmi_mg02_hora_producao_int.empty else 0 #converte o series para um valor
     fcmi_mg02_hora_producao = locale.format_string("%.1f",fcmi_mg02_hora_producao_val, grouping=True) if fcmi_mg02_hora_producao_val > 0 else 0
    
-    fcmi_mg02_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    fcmi_mg02_hora_parado_val = fcmi_mg02_hora_parado_int.item() if not fcmi_mg02_hora_parado_int.empty else 0
-    fcmi_mg02_hora_parado_val = 24 - fcmi_mg02_hora_producao_val
-    fcmi_mg02_hora_parado = locale.format_string("%.1f",fcmi_mg02_hora_parado_val, grouping=True) if fcmi_mg02_hora_parado_val > 0 else 0
+     # Calcular a hora parada
+    fcmi_mg02_hora_parado_val = total_horas_periodo - fcmi_mg02_hora_producao_val
+    fcmi_mg02_hora_parado = locale.format_string("%.1f", fcmi_mg02_hora_parado_val, grouping=True) if fcmi_mg02_hora_parado_val > 0 else 0
 
     fcmi_mg02_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 111 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     fcmi_mg02_producao_val = fcmi_mg02_producao_int.item() if not fcmi_mg02_producao_int.empty else 0
@@ -541,10 +544,9 @@ def calculos_equipamentos_detalhes(request):
     fcmii_mg01_hora_prod_val = fcmii_mg01_hora_prod_int.item() if not fcmii_mg01_hora_prod_int.empty else 0 #converte o serires do pandas em valor
     fcmii_mg01_hora_prod = locale.format_string("%.1f",fcmii_mg01_hora_prod_val,grouping=True) if fcmii_mg01_hora_prod_val > 0 else 0
 
-    fcmii_mg01_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 169].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    fcmii_mg01_hora_parado_val = fcmii_mg01_hora_parado_int.item() if not fcmii_mg01_hora_parado_int.empty else 0
-    fcmii_mg01_hora_parado_val = 24 - fcmii_mg01_hora_prod_val
-    fcmii_mg01_hora_parado = locale.format_string("%.1f",fcmii_mg01_hora_parado_val,grouping=True) if fcmii_mg01_hora_parado_val > 0 else 0
+    # Calcular a hora parada
+    fcmii_mg01_hora_parado_val = total_horas_periodo - fcmii_mg01_hora_prod_val
+    fcmii_mg01_hora_parado = locale.format_string("%.1f", fcmii_mg01_hora_parado_val, grouping=True) if fcmii_mg01_hora_parado_val > 0 else 0
 
     fcmii_mg01_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 169].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     fcmii_mg01_producao_val = fcmii_mg01_producao_int.item() if not fcmii_mg01_producao_int.empty else 0
@@ -562,10 +564,9 @@ def calculos_equipamentos_detalhes(request):
     fcmiii_mg01_hora_prod_val = fcmiii_mg01_hora_prod_int.item() if not fcmiii_mg01_hora_prod_int.empty else 0   #conversão do series do panda para valor
     fcmiii_mg01_hora_prod = locale.format_string("%.1f",fcmiii_mg01_hora_prod_val,grouping=True) if fcmiii_mg01_hora_prod_val > 0 else 0
 
-    fcmiii_mg01_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 18 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    fcmiii_mg01_hora_parado_val = fcmiii_mg01_hora_parado_int.item() if not fcmiii_mg01_hora_parado_int.empty else 0
-    fcmiii_mg01_hora_parado_val = 24 - fcmiii_mg01_hora_prod_val
-    fcmiii_mg01_hora_parado = locale.format_string("%.1f",fcmiii_mg01_hora_parado_val,grouping=True) if fcmiii_mg01_hora_parado_val > 0 else 0
+    # Calcular a hora parada
+    fcmiii_mg01_hora_parado_val = total_horas_periodo - fcmiii_mg01_hora_prod_val
+    fcmiii_mg01_hora_parado = locale.format_string("%.1f", fcmiii_mg01_hora_parado_val, grouping=True) if fcmiii_mg01_hora_parado_val > 0 else 0
 
     fcmiii_mg01_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 18].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     fcmiii_mg01_producao_val = fcmiii_mg01_producao_int.item() if not fcmiii_mg01_producao_int.empty else 0
@@ -583,10 +584,9 @@ def calculos_equipamentos_detalhes(request):
     fcmiii_mg02_hora_prod_val = fcmiii_mg02_hora_prod_int.item() if not fcmiii_mg02_hora_prod_int.empty else 0   #conversão do series do panda para valor
     fcmiii_mg02_hora_prod = locale.format_string("%.1f",fcmiii_mg02_hora_prod_val,grouping=True) if fcmiii_mg02_hora_prod_val > 0 else 0
 
-    fcmiii_mg02_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 19 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    fcmiii_mg02_hora_parado_val = fcmiii_mg02_hora_parado_int.item() if not fcmiii_mg02_hora_parado_int.empty else 0
-    fcmiii_mg02_hora_parado_val = 24 - fcmiii_mg02_hora_prod_val
-    fcmiii_mg02_hora_parado = locale.format_string("%.1f",fcmiii_mg02_hora_parado_val,grouping=True) if fcmiii_mg02_hora_parado_val > 0 else 0
+    # Calcular a hora parada
+    fcmiii_mg02_hora_parado_val = total_horas_periodo - fcmiii_mg02_hora_prod_val
+    fcmiii_mg02_hora_parado = locale.format_string("%.1f", fcmiii_mg02_hora_parado_val, grouping=True) if fcmiii_mg02_hora_parado_val > 0 else 0
 
     fcmiii_mg02_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 19].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     fcmiii_mg02_producao_val = fcmiii_mg02_producao_int.item() if not fcmiii_mg02_producao_int.empty else 0
@@ -604,10 +604,9 @@ def calculos_equipamentos_detalhes(request):
     fcmiii_mg03_hora_prod_val = fcmiii_mg03_hora_prod_int.item() if not fcmiii_mg03_hora_prod_int.empty else 0   #conversão do series do panda para valor
     fcmiii_mg03_hora_prod = locale.format_string("%.1f",fcmiii_mg03_hora_prod_val,grouping=True) if fcmiii_mg03_hora_prod_val > 0 else 0
 
-    fcmiii_mg03_hora_parado_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 20 ].groupby('EQUIPAMENTO_CODIGO')['HREVENTO'].sum()
-    fcmiii_mg03_hora_parado_val = fcmiii_mg03_hora_parado_int.item() if not fcmiii_mg03_hora_parado_int.empty else 0
-    fcmiii_mg03_hora_parado_val = 24 - fcmiii_mg03_hora_prod_val
-    fcmiii_mg03_hora_parado = locale.format_string("%.1f",fcmiii_mg03_hora_parado_val,grouping=True) if fcmiii_mg03_hora_parado_val > 0 else 0
+    # Calcular a hora parada
+    fcmiii_mg03_hora_parado_val = total_horas_periodo - fcmiii_mg03_hora_prod_val
+    fcmiii_mg03_hora_parado = locale.format_string("%.1f", fcmiii_mg03_hora_parado_val, grouping=True) if fcmiii_mg03_hora_parado_val > 0 else 0
 
     fcmiii_mg03_producao_int = consulta_equipamentos[consulta_equipamentos['EQUIPAMENTO_CODIGO'] == 20 ].groupby('EQUIPAMENTO_CODIGO')['QUANT'].sum()
     fcmiii_mg03_producao_val = fcmiii_mg03_producao_int.item() if not fcmiii_mg03_producao_int.empty else 0
@@ -646,6 +645,7 @@ def calculos_equipamentos_detalhes(request):
 
 ##---------------------------------MOVIMENTAÇÃO DE CARGAS---------------------------------------------######        
     data = request.data.get('data')
+    dataFim = request.data.get('dataFim')
     consulta_carregamento= pd.read_sql(f"""
     SELECT CLINOME, CLICOD, TRANNOME, TRANCOD, NFPLACA, ESTUF, NFPED, NFNUM, SDSSERIE, NFDATA,
 
@@ -672,7 +672,7 @@ def calculos_equipamentos_detalhes(request):
         AND NFEMP = 1
         AND NFFIL = 0
         AND NOPFLAGNF LIKE '_S%'
-        AND CAST (NFDATA as date) = '{data}' 
+        AND CAST (NFDATA as date) BETWEEN '{data}' AND '{dataFim}' 
         AND ESTQCOD IN (1,4,5,104,37,2785)
 
     ORDER BY NFDATA, NFNUM
@@ -684,6 +684,7 @@ def calculos_equipamentos_detalhes(request):
 
 ##-------------------------------CONSULTA ESTOQUE CALCARIO--------------------------------------############
     data = request.data.get('data')
+    dataFim = request.data.get('dataFim')
     consulta_estoque = pd.read_sql (f"""
         SELECT MESTQDATA DATA,
             CASE
@@ -757,7 +758,7 @@ def calculos_equipamentos_detalhes(request):
             LEFT JOIN GRUPOALMOXARIFADO G6 ON G6.GALMCOD = G5.GALMGALMPAI
             WHERE MESTQEMP =1
             AND MESTQFIL = 0
-            AND CAST(MESTQDATA AS DATE) BETWEEN '2025-01-01' AND '{data}'
+            AND CAST(MESTQDATA AS DATE) BETWEEN '2025-01-01' AND '{dataFim}'
             AND ESTQCOD = 1
             ORDER BY ESTQNOME, ESTQCOD, MESTQDATA
                 """,engine)
