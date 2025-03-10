@@ -73,7 +73,7 @@ class ContaContabil(models.Model):
 
 class GrupoItens(models.Model):
     id = models.AutoField(primary_key=True)
-    codigo = models.IntegerField(blank=False, null=False)
+    codigo = models.CharField(max_length=13, blank=False, null=False)
     nome_completo = models.CharField(max_length=555, null=False, blank=False)
     gestor = models.ForeignKey(Gestor, on_delete=models.RESTRICT, null=True, related_name='gestores_grupos_de_itens')
     class Meta:
