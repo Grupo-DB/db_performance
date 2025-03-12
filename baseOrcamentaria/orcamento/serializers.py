@@ -133,6 +133,8 @@ class RaizSinteticaSerializer(serializers.ModelSerializer):
         return instance
 
 class GrupoItensSerializer(serializers.ModelSerializer):
+    gestor = serializers.PrimaryKeyRelatedField(queryset=Gestor.objects.all(), write_only=True)  # Entrada
+    gestor_detalhes = GestorSerializer(source='gestor', read_only=True)  # Exibição
     class Meta:
         model = GrupoItens
         fields = '__all__'

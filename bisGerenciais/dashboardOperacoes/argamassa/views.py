@@ -632,6 +632,7 @@ def calculos_argamassa_equipamentos(request):
         AND BPROFIL = 0
         AND CAST(BPRODATA1 as date) BETWEEN '{data}' AND '{dataFim}'
         AND BPROEP = 1
+        AND ESPSIGLA = 'SC'
         AND BPROEQP IN (264,265)
         ORDER BY BPRO.BPROCOD
 
@@ -711,7 +712,7 @@ def calculos_argamassa_equipamentos(request):
             AND NFEMP = 1
             AND NFFIL = 0
             AND NOPFLAGNF LIKE '_S%'
-            AND CAST (NFDATA as date) = '{dataFim}'
+            AND CAST (NFDATA as date) BETWEEN '{data}' AND '{dataFim}'
             AND ESTQCOD IN (
                 2728, 22089, 2708, 2709, 2710, 2730, 23987, 23988, 23989, 24021, 24022, 24023, 24019, 
                 24020, 24024, 2715, 2716, 2711, 2714, 24222, 2717, 2718, 25878, 25877, 2719, 2729

@@ -53,7 +53,7 @@ def calculos_cal(request):
         AND NFEMP = 1
         AND NFFIL = 0
         AND NOPFLAGNF LIKE '_S%'
-        AND CAST (NFDATA as datetime2) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND CAST (NFDATA as date) BETWEEN '{data_inicio}' AND '{data_fim}'
         AND ESTQCOD IN (2833,2744,2738,2742,2743,2741,2740,2736,2737)
 
     ORDER BY NFDATA, NFNUM
@@ -157,14 +157,14 @@ def calculos_cal_equipamentos(request):
     tipo_calculo = request.data.get('tipo_calculo')
     # Definindo as datas com base no tipo de cálculo
     if tipo_calculo == 'atual':
-        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
-        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
+        data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 05:30:00')
+        data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 05:30:00')
     elif tipo_calculo == 'mensal':
-        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
-        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-%m-01 05:30:00')  # Início do mês
+        data_fim = datetime.now().strftime('%Y-%m-%d 05:30:00')  # Data atual
     elif tipo_calculo == 'anual':
-        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
-        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-01-01 05:30:00')  # Início do ano
+        data_fim = datetime.now().strftime('%Y-%m-%d 05:30:00')  # Data atual
     else:
         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
     
@@ -741,7 +741,7 @@ def calculos_equipamentos_detalhes(request):
         AND NFFIL = 0
         AND NOPFLAGNF LIKE '_S%'
         AND CAST (NFDATA as date) BETWEEN '{data}' AND '{data_fim}'
-        AND ESTQCOD IN (2740,2741,2742,2743,2744,2833)
+        AND ESTQCOD IN (2740,2741,2742,2743,2744,2833,2737)
 
     ORDER BY NFDATA, NFNUM
                  """,engine)
