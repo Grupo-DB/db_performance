@@ -476,7 +476,7 @@ def calculos_equipamentos_detalhes(request):
         WHERE BPROSIT = 1
         AND BPROEMP = 1
         AND BPROFIL = 0
-        AND CAST(BPRODATA1 as date) BETWEEN '{data}' AND '{dataFim}'
+        AND CAST(BPRODATA1 as datetime2) BETWEEN '{data}' AND '{dataFim}'
         AND BPROEP = 6
         AND BPROEQP IN (110,111,169,18,19,20)
         ORDER BY BPRO.BPROCOD
