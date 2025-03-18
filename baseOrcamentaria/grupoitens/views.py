@@ -196,6 +196,8 @@ def calculos_realizados_grupo_itens(request):
         FROM LANCAMENTOS_BASE
                 
     """, engine)
+
+    df = pd.DataFrame(consulta_realizado)
     
     # Regra para obtenção dos valores usados
     consulta_realizado['SALDO'] = consulta_realizado.apply(
@@ -294,7 +296,6 @@ def calculos_realizados_grupo_itens(request):
     # Agrupar por código e somar os valores
     df_agrupado = df_filtrado.groupby('CODIGOS_SEPARADOS')['SALDO'].sum().to_dict()
 
-    codigos = list(df_agrupado.keys())
     
     df_agrupado_nomes = {}
     df_agrupado_nomes_detalhes = {}
@@ -330,12 +331,105 @@ def calculos_realizados_grupo_itens(request):
         nome: format_locale(valor) for nome, valor in df_agrupado_nomes.items()
     }
 
+   
+    # Obter os códigos agrupados
+    codigos_agrupados = list(df_agrupado.keys())
+
+    # Certifique-se de que os códigos estão no formato correto (string)
+    codigos_agrupados = [str(codigo) for codigo in codigos_agrupados]
+
+    # Verifique os valores de codigos_agrupados
+    print("Códigos Agrupados:", codigos_agrupados)
+
+    # Consulta os centros de custo e seus pais com base nos códigos agrupados
+    consulta_ccs_pais = CentroCusto.objects.filter(
+        codigo__in=codigos_agrupados  # Substituí 'id' por 'codigo'
+    ).values('codigo', 'nome', 'cc_pai__id', 'cc_pai__nome')
+
+    # Verifique os resultados da consulta
+    print("Consulta CCS Pais:", list(consulta_ccs_pais))
+
+    # Cria um dicionário para mapear os códigos dos centros de custo para seus pais
+    mapa_codigos_pais = {
+        str(item['codigo']): {
+            'cc_pai_id': str(item['cc_pai__id']) if item['cc_pai__id'] else None,
+            'cc_pai_nome': item['cc_pai__nome'] or 'Sem Pai'
+        }
+        for item in consulta_ccs_pais
+    }
+
+    # Verifique o mapeamento
+    print("Mapa de Códigos Pais:", mapa_codigos_pais)
+
+    # Agrupar os valores por centro de custo pai
+    df_agrupado_por_pai = {}
+    for codigo, saldo in df_agrupado.items():
+        pai_info = mapa_codigos_pais.get(str(codigo), {'cc_pai_nome': 'Sem Pai'})
+        pai_nome = pai_info['cc_pai_nome']
+        if pai_nome not in df_agrupado_por_pai:
+            df_agrupado_por_pai[pai_nome] = 0
+        df_agrupado_por_pai[pai_nome] += saldo
+
+
+    df_agrupado_pais_detalhes = {}
+
+    # Agrupar os valores por centro de custo pai e criar o detalhamento
+    for codigo, saldo in df_agrupado.items():
+        # Obter informações do pai a partir do mapeamento
+        pai_info = mapa_codigos_pais.get(str(codigo), {'cc_pai_nome': 'Sem Pai'})
+        pai_nome = pai_info['cc_pai_nome']
+
+        # Inicializar o agrupamento e os detalhes para o pai, se necessário
+        if pai_nome not in df_agrupado_pais_detalhes:
+            df_agrupado_pais_detalhes[pai_nome] = {
+                'saldo': 0,
+                'detalhes': []
+            }
+
+        # Somar o saldo ao pai
+        df_agrupado_pais_detalhes[pai_nome]['saldo'] += saldo
+
+        # Adicionar os detalhes relacionados ao centro de custo ao pai
+        detalhes = consulta_filtrada[consulta_filtrada['CCSTCOD'].str.contains(codigo)]
+        for _, row in detalhes.iterrows():
+            if row['SALDO'] != 0:
+                df_agrupado_pais_detalhes[pai_nome]['detalhes'].append({
+                    'conta': row['CONTA'],
+                    'LANCCOD': row['LANCCOD'],
+                    'LANCDATA': row['LANCDATA'],
+                    'HISTORICO': row['HISTORICO'],
+                    'SALDO': row['SALDO'],
+                    'LANCREF': row['LANCREF'],
+                    'SITUACAO': row['SITUACAO'],
+                    'ITEM': row['ITEM'],
+                    'QTD': row['QTD'],
+                    'COD': row['CCSTCOD'],
+                    'DESCRICAO': row['DESCRICAO']
+                })
+
+    # Formatar os valores finais (opcional)
+    df_agrupado_pais_formatado = {
+        pai: {
+            'saldo': format_locale(info['saldo']),
+            'detalhes': info['detalhes']
+        }
+        for pai, info in df_agrupado_pais_detalhes.items()
+    }
+
+    # Formatar os valores finais (opcional)
+    df_agrupado_por_pai_formatado = {
+        pai: format_locale(valor) for pai, valor in df_agrupado_por_pai.items()
+    }
+
+
     response_data = {
         'total': total_formatado,
         'dados': consulta_agrupada.to_dict(orient='records'),
         'df_agrupado': df_agrupado_nomes_formatado,
+         'agrupado_por_pai': df_agrupado_por_pai_formatado,
         'teste': df_agrupado_nomes,
-        'df_agrupado_nomes_detalhes': df_agrupado_nomes_detalhes
+        'df_agrupado_nomes_detalhes': df_agrupado_nomes_detalhes,
+        'df_agrupado_pais_detalhes': df_agrupado_pais_detalhes
     }
 
     return JsonResponse(response_data, safe=False)

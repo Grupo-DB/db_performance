@@ -568,8 +568,10 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
 
         # Função para formatar valores com locale
         def format_locale(value):
-            return locale.format_string("%.0f",value, grouping=True) 
+            return locale.format_string("%.0f",value, grouping=True)
 
+
+    
         # Garante que as colunas sejam numéricas
         df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce')
         df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
@@ -577,14 +579,22 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         # Usa 'valor_real' se não for nulo, caso contrário usa 'valor'
         df['valor_usado'] = np.where(df['valor_real'].notnull(), df['valor_real'], df['valor'])
 
-       
-        centros_custo = CentroCustoPai.objects.all().values('id', 'nome')
+        #agrupa por centro de custo
+        centros_custo = CentroCusto.objects.all().values('id', 'nome')
         mapa_centros_custo = {cc['id']: cc['nome'] for cc in centros_custo}
-        df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo)
+        df['centro_custo_nome'] = df['centro_custo_nome'].map(mapa_centros_custo)
+
+        centro_custo_total = df.groupby('centro_custo_nome')['valor_usado'].sum().to_dict()
+        centro_custo_total_formatted = {cc: format_locale(valor) for cc, valor in centro_custo_total.items()}
+
+        #agrupa por centro de custo pai
+        centros_custo_pai = CentroCustoPai.objects.all().values('id', 'nome')
+        mapa_centros_custo_pai = {cc_pai['id']: cc_pai['nome'] for cc_pai in centros_custo_pai}
+        df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo_pai)
 
          # Calcula a soma corretamente
-        total_por_cc = df.groupby('centro_de_custo_pai')['valor_usado'].sum().to_dict()
-        total_por_cc_formatted = {cc: format_locale(valor) for cc, valor in total_por_cc.items()}    
+        total_por_cc_pai = df.groupby('centro_de_custo_pai')['valor_usado'].sum().to_dict()
+        total_por_cc_pai_formatted = {cc: format_locale(valor) for cc, valor in total_por_cc_pai.items()}   
 
         # Variáveis para totais e distribuições
         total = 0
@@ -694,7 +704,8 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             'detalhamento_mensal': detalhamento_mensal,
             'detalhamento_anual': detalhamento_anual,
             'total_bases': total_bases_formatted,
-            'total_por_cc': total_por_cc_formatted
+            'total_por_cc': centro_custo_total_formatted,
+            'total_por_cc_pai': total_por_cc_pai_formatted
         }      
 
 

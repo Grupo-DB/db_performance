@@ -672,7 +672,7 @@ def calculos_equipamentos_detalhes(request):
         AND NFEMP = 1
         AND NFFIL = 0
         AND NOPFLAGNF LIKE '_S%'
-        AND CAST (NFDATA as date) BETWEEN '{data}' AND '{dataFim}' 
+        AND CAST (NFDATA as date) = '{dataFim}' 
         AND ESTQCOD IN (1,4,5,104,37,2785)
 
     ORDER BY NFDATA, NFNUM
@@ -758,7 +758,7 @@ def calculos_equipamentos_detalhes(request):
             LEFT JOIN GRUPOALMOXARIFADO G6 ON G6.GALMCOD = G5.GALMGALMPAI
             WHERE MESTQEMP =1
             AND MESTQFIL = 0
-            AND CAST(MESTQDATA AS DATE) BETWEEN '2025-01-01' AND '{dataFim}'
+            AND CAST(MESTQDATA AS DATETIME2) BETWEEN '2025-01-01 00:00:00' AND '{dataFim}'
             AND ESTQCOD = 1
             ORDER BY ESTQNOME, ESTQCOD, MESTQDATA
                 """,engine)
