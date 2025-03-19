@@ -80,18 +80,7 @@ class AvaliadoSerializer(serializers.ModelSerializer):
         avaliado = Avaliado.objects.create(**validated_data)
         return avaliado
 
-# class AvaliadorSerializer(serializers.ModelSerializer):
-#     colaborador_id = serializers.IntegerField(write_only=True)
-#     usuario_id = serializers.IntegerField(write_only=True)
-#     class Meta:
-#         model = Avaliador
-#         fields = '__all__'  # Ou liste os campos que deseja incluir no serializer
-#     def create(self, validated_data):
-#         colaborador_data = validated_data.pop('colaborador_ptr', None)
-#         usuario = validated_data.pop('usuario', None)
-#         avaliador = Avaliador.objects.create(colaborador_ptr=colaborador_data, usuario=usuario, **validated_data)
-#         return avaliador
-        
+
 class AvaliadorSerializer(serializers.ModelSerializer):
     colaborador_id = serializers.IntegerField(write_only=True)
     avaliados = AvaliadoSerializer(many=True, read_only=True)
