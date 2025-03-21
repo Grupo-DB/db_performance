@@ -155,6 +155,19 @@ class GrupoItensViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], url_path='meusGrupos')
+    def meusGrupos(self, request):
+        try:
+            user = request.user
+            gestor = Gestor.objects.get(user=user)
+            grupos = GrupoItens.objects.filter(gestor=gestor)
+            serializer = GrupoItensSerializer(grupos, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Gestor.DoesNotExist:
+            return Response({"error": "Gestor nao encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ContaContabilViewSet(viewsets.ModelViewSet):
     queryset = ContaContabil.objects.all()
@@ -534,19 +547,8 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         ano = request.query_params.get('ano')
         mes = request.query_params.get('mes')
 
-         # Filtro inicial obrigatório
         filters = Q()
 
-        # Adiciona o filtro por grupo_itens, se fornecido
-        if grupo_itens:
-            gps_cods = grupo_itens.split(",")  # Divide os códigos em uma lista
-            q_filter = Q()
-            for cod in gps_cods:
-                q_filter |= Q(conta_contabil__endswith=cod)  # Usa OR para qualquer código que corresponda
-                
-            filters &= q_filter  # Aplica ao filtro geral
-            print('filtros',filters)
-        # Adiciona filtros opcionais
         if ano:
             filters &= Q(ano=ano)
         if mes:
@@ -562,16 +564,15 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         orcamentos_base = OrcamentoBase.objects.filter(filters)
         serializer = self.get_serializer(orcamentos_base, many=True)
         serialized_data = serializer.data
-
+        
         # Converte dados para DataFrame
         df = pd.DataFrame(serialized_data)
-
+        
         # Função para formatar valores com locale
         def format_locale(value):
             return locale.format_string("%.0f",value, grouping=True)
 
 
-    
         # Garante que as colunas sejam numéricas
         df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce')
         df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
@@ -579,135 +580,352 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         # Usa 'valor_real' se não for nulo, caso contrário usa 'valor'
         df['valor_usado'] = np.where(df['valor_real'].notnull(), df['valor_real'], df['valor'])
 
-        #agrupa por centro de custo
-        centros_custo = CentroCusto.objects.all().values('id', 'nome')
-        mapa_centros_custo = {cc['id']: cc['nome'] for cc in centros_custo}
-        df['centro_custo_nome'] = df['centro_custo_nome'].map(mapa_centros_custo)
+        prefixos_para_agrupamento = ['011', '012', '014', '022', '023', '082', '101']
 
-        centro_custo_total = df.groupby('centro_custo_nome')['valor_usado'].sum().to_dict()
-        centro_custo_total_formatted = {cc: format_locale(valor) for cc, valor in centro_custo_total.items()}
+        df['CONTA_ULTIMOS_9'] = df['conta_contabil'].str[-9:]
+        df['CONTA_PRIMEIROS_3'] = df['CONTA_ULTIMOS_9'].str[:3]
+        gps_cods = grupo_itens.split(",")
+        prefixos = [item[:3] for item in gps_cods]
+        print('sfdghsdfg',prefixos)
 
-        #agrupa por centro de custo pai
-        centros_custo_pai = CentroCustoPai.objects.all().values('id', 'nome')
-        mapa_centros_custo_pai = {cc_pai['id']: cc_pai['nome'] for cc_pai in centros_custo_pai}
-        df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo_pai)
+        # Lista de prefixos que precisam ser agrupados
+        prefixos_para_agrupamento = ['011', '012', '014', '022', '023', '082', '101']
+        
+        grupo_itens_map = {
+            item['codigo']: item['nome_completo']
+            for item in GrupoItens.objects.values('codigo', 'nome_completo')
+        }
 
-         # Calcula a soma corretamente
-        total_por_cc_pai = df.groupby('centro_de_custo_pai')['valor_usado'].sum().to_dict()
-        total_por_cc_pai_formatted = {cc: format_locale(valor) for cc, valor in total_por_cc_pai.items()}   
+        if any(p in prefixos_para_agrupamento for p in prefixos):
+            print('ORÇADOOOOOSSSOSOSOSOS entrou no if')       
 
-        # Variáveis para totais e distribuições
-        total = 0
-        total_mensal = 0
-        total_anual = 0
+            # Caso especial: agrupar 011 e 012 juntos
+            if '011' in prefixos or '012' in prefixos:
+                prefixos = ['011', '012'] 
 
-        # Dicionários para armazenar totais e detalhamento das linhas
-        mensal_por_mes = defaultdict(float)
-        anual_por_mes = defaultdict(float)
-        conta_por_mes = defaultdict(float)
-        conta_por_ano = defaultdict(float)
-        raiz_por_mes = defaultdict(float)
-        raiz_por_ano = defaultdict(float)
-        tipo_por_mes = defaultdict(float)
-        tipo_por_ano = defaultdict(float)
-        base_por_mes = defaultdict(float)
-        base_por_ano = defaultdict(float)
-        total_bases = defaultdict(float) #inicializa dict vazio 
+            # Caso especial: agrupar 022 e 023 juntos
+            if '022' in prefixos or '023' in prefixos:
+                prefixos = ['022', '023']
 
+        
+            df_filtrado = df[df['CONTA_PRIMEIROS_3'].isin(prefixos)]
+            df_filtrado['GRUPO_ITENS'] = df_filtrado['CONTA_ULTIMOS_9'].map(grupo_itens_map)
+            #df_agrupado = df_filtrado.groupby('GRUPO_ITENS')['valor_usado'].sum().reset_index()
 
-        # Dicionários para armazenar totais e detalhamento das linhas
-        detalhamento_mensal = defaultdict(list)
-        detalhamento_anual = defaultdict(list)
+          
 
+            #agrupa por centro de custo
+            centros_custo = CentroCusto.objects.all().values('id', 'nome')
+            mapa_centros_custo = {cc['id']: cc['nome'] for cc in centros_custo}
+            df_filtrado['centro_custo_nome'] = df['centro_custo_nome'].map(mapa_centros_custo)
 
-        # Verifica se as colunas necessárias existem no DataFrame
-        if 'valor' in df.columns and 'valor_real' in df.columns:
-            df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
-            df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce').fillna(0)
+            centro_custo_total = df_filtrado.groupby('centro_custo_nome')['valor_usado'].sum().to_dict()
+            centro_custo_total_formatted = {cc: format_locale(valor) for cc, valor in centro_custo_total.items()}
 
-            for _, row in df.iterrows():
-                mes = row.get('mes_especifico')
-                conta = row.get('raiz_contabil_grupo_desc')
-                raiz = row.get('raiz_analitica_desc')
-                tipo = row.get('tipo_custo')
-                periodicidade = row.get('periodicidade')
-                base = row.get('base_orcamento')
-                valor_real = row['valor_real']
-                valor = row['valor']
+            #agrupa por centro de custo pai
+            centros_custo_pai = CentroCustoPai.objects.all().values('id', 'nome')
+            mapa_centros_custo_pai = {cc_pai['id']: cc_pai['nome'] for cc_pai in centros_custo_pai}
+            df_filtrado['centro_de_custo_pai'] = df_filtrado['centro_de_custo_pai'].map(mapa_centros_custo_pai)
 
-                valor_utilizado = valor_real if valor_real > 0 else valor
-
-                total += valor_utilizado
-                if periodicidade == 'mensal':
-                    total_mensal += valor_utilizado
-                    mensal_por_mes[mes] += valor_utilizado
-                    conta_por_mes[conta] += valor_utilizado
-                    raiz_por_mes[raiz] += valor_utilizado
-                    tipo_por_mes[tipo] += valor_utilizado
-                    base_por_mes[base] += valor_utilizado
-                    detalhamento_mensal[mes].append(row.to_dict())
-                elif periodicidade == 'anual':
-                    total_anual += valor_utilizado
-                    anual_por_mes[mes] += valor_utilizado
-                    conta_por_ano[conta] += valor_utilizado
-                    raiz_por_ano[raiz] += valor_utilizado
-                    tipo_por_ano[tipo] += valor_utilizado
-                    base_por_ano[base] += valor_utilizado
-                    detalhamento_anual[mes].append(row.to_dict())
+            # Calcula a soma corretamente
+            total_por_cc_pai = df_filtrado.groupby('centro_de_custo_pai')['valor_usado'].sum().to_dict()
+            total_por_cc_pai_formatted = {cc: format_locale(valor) for cc, valor in total_por_cc_pai.items()}   
 
 
-        # Soma bases
-        for chave, valor in base_por_mes.items():
-            total_bases[chave] += float(valor)
 
-            for chave, valor in base_por_ano.items():
+
+            # Variáveis para totais e distribuições
+            total = 0
+            total_mensal = 0
+            total_anual = 0
+
+            # Dicionários para armazenar totais e detalhamento das linhas
+            mensal_por_mes = defaultdict(float)
+            anual_por_mes = defaultdict(float)
+            conta_por_mes = defaultdict(float)
+            conta_por_ano = defaultdict(float)
+            raiz_por_mes = defaultdict(float)
+            raiz_por_ano = defaultdict(float)
+            tipo_por_mes = defaultdict(float)
+            tipo_por_ano = defaultdict(float)
+            base_por_mes = defaultdict(float)
+            base_por_ano = defaultdict(float)
+            total_bases = defaultdict(float) #inicializa dict vazio 
+
+
+            # Dicionários para armazenar totais e detalhamento das linhas
+            detalhamento_mensal = defaultdict(list)
+            detalhamento_anual = defaultdict(list)
+
+
+            # Verifica se as colunas necessárias existem no DataFrame
+            if 'valor' in df_filtrado.columns and 'valor_real' in df_filtrado.columns:
+                df_filtrado['valor'] = pd.to_numeric(df_filtrado['valor'], errors='coerce').fillna(0)
+                df_filtrado['valor_real'] = pd.to_numeric(df_filtrado['valor_real'], errors='coerce').fillna(0)
+
+                for _, row in df_filtrado.iterrows():
+                    mes = row.get('mes_especifico')
+                    conta = row.get('raiz_contabil_grupo_desc')
+                    raiz = row.get('raiz_analitica_desc')
+                    tipo = row.get('tipo_custo')
+                    periodicidade = row.get('periodicidade')
+                    base = row.get('base_orcamento')
+                    valor_real = row['valor_real']
+                    valor = row['valor']
+
+                    valor_utilizado = valor_real if valor_real > 0 else valor
+
+                    total += valor_utilizado
+                    if periodicidade == 'mensal':
+                        total_mensal += valor_utilizado
+                        mensal_por_mes[mes] += valor_utilizado
+                        conta_por_mes[conta] += valor_utilizado
+                        raiz_por_mes[raiz] += valor_utilizado
+                        tipo_por_mes[tipo] += valor_utilizado
+                        base_por_mes[base] += valor_utilizado
+                        detalhamento_mensal[mes].append(row.to_dict())
+                    elif periodicidade == 'anual':
+                        total_anual += valor_utilizado
+                        anual_por_mes[mes] += valor_utilizado
+                        conta_por_ano[conta] += valor_utilizado
+                        raiz_por_ano[raiz] += valor_utilizado
+                        tipo_por_ano[tipo] += valor_utilizado
+                        base_por_ano[base] += valor_utilizado
+                        detalhamento_anual[mes].append(row.to_dict())
+
+
+            # Soma bases
+            for chave, valor in base_por_mes.items():
                 total_bases[chave] += float(valor)
-  
-       
-        total_formatado = locale.format_string("%.0f",total,grouping=True) if total > 0 else 0
-        total_mensal = locale.format_string("%.0f",total_mensal,grouping=True) if total_mensal > 0 else 0
-        total_anual = locale.format_string("%.0f",total_anual,grouping=True) if total_anual > 0 else 0
+
+                for chave, valor in base_por_ano.items():
+                    total_bases[chave] += float(valor)
+    
+        
+            total_formatado = locale.format_string("%.0f",total,grouping=True) if total > 0 else 0
+            total_mensal = locale.format_string("%.0f",total_mensal,grouping=True) if total_mensal > 0 else 0
+            total_anual = locale.format_string("%.0f",total_anual,grouping=True) if total_anual > 0 else 0
+
+            
+        
+            mensal_por_mes_formatted = {mes: format_locale(valor) for mes, valor in mensal_por_mes.items()}
+            anual_por_mes_formatted = {mes: format_locale(valor) for mes, valor in anual_por_mes.items()}
+
+            conta_por_mes_formatted = {conta: format_locale(valor) for conta, valor in conta_por_mes.items()}
+            conta_por_ano_formatted = {conta: format_locale(valor) for conta, valor in conta_por_ano.items()}
+
+            raiz_por_mes_formatted = {raiz: format_locale(valor) for raiz, valor in raiz_por_mes.items()}
+            raiz_por_ano_formatted = {raiz: format_locale(valor) for raiz, valor in raiz_por_ano.items()}
+            
+            tipo_por_mes_formatted = {tipo: format_locale(valor) for tipo, valor in tipo_por_mes.items()}
+            tipo_por_ano_formatted = {tipo: format_locale(valor) for tipo, valor in tipo_por_ano.items()}
+
+            total_bases_formatted = {chave: format_locale(valor) for chave, valor in total_bases.items()}
+        
+            total_int = int(total)
+
+            response_data = {
+                'total_int':total_int,
+                "orcamentosBase": serialized_data,
+                "total": total_formatado,
+                'total_real':total, 
+                'total_mensal': total_mensal,
+                'total_anual': total_anual,
+                "mensal_por_mes": mensal_por_mes_formatted,
+                "anual_por_mes": anual_por_mes_formatted,
+                "conta_por_mes": conta_por_mes_formatted,
+                'conta_por_ano': conta_por_ano_formatted,
+                "raiz_por_mes": raiz_por_mes_formatted,
+                "raiz_por_ano": raiz_por_ano_formatted,
+                "tipo_por_grupo_mes": tipo_por_mes_formatted,
+                "tipo_por_ano": tipo_por_ano_formatted,
+                'detalhamento_mensal': detalhamento_mensal,
+                'detalhamento_anual': detalhamento_anual,
+                'total_bases': total_bases_formatted,
+                'total_por_cc': centro_custo_total_formatted,
+                'total_por_cc_pai': total_por_cc_pai_formatted,
+                #'df_agrupado':df_agrupado
+            }      
+        else:
+            grupo_itens = request.query_params.get('grupo_itens')
+            centro_de_custo_pai_ids = request.query_params.get('centro_de_custo_pai_id')
+            filial = request.query_params.get('filial')
+            ano = request.query_params.get('ano')
+            mes = request.query_params.get('mes')
 
         
-       
-        mensal_por_mes_formatted = {mes: format_locale(valor) for mes, valor in mensal_por_mes.items()}
-        anual_por_mes_formatted = {mes: format_locale(valor) for mes, valor in anual_por_mes.items()}
+            filters = Q()
+            print('entrou no elseeeeeeeeeeeeeeeeeeeeeeee')
+            if grupo_itens:
+                gps_cods = grupo_itens.split(",")  # Divide os códigos em uma lista
+                q_filter = Q()
+                for cod in gps_cods:
+                    q_filter |= Q(conta_contabil__endswith=cod)  # Usa OR para qualquer código que corresponda
+                
+                filters &= q_filter  # Aplica ao filtro geral
+                print('filtrossssssssssssssssssssssssss',filters)
+            if ano:
+                filters &= Q(ano=ano)
+            if mes:
+                filters &= Q(mes_especifico=mes)
+            if centro_de_custo_pai_ids:
+                ids_list = centro_de_custo_pai_ids.split(",")
+                filters &= Q(centro_de_custo_pai_id__in=ids_list)
+            if filial:
+                filiais = filial.split(",")  # Divide a string em uma lista de filiais
+                filters &= Q(filial__in=filiais)
 
-        conta_por_mes_formatted = {conta: format_locale(valor) for conta, valor in conta_por_mes.items()}
-        conta_por_ano_formatted = {conta: format_locale(valor) for conta, valor in conta_por_ano.items()}
+            # Consulta no banco
+            orcamentos_base = OrcamentoBase.objects.filter(filters)
+            serializer = self.get_serializer(orcamentos_base, many=True)
+            serialized_data = serializer.data    
+            df = pd.DataFrame(serialized_data)
 
-        raiz_por_mes_formatted = {raiz: format_locale(valor) for raiz, valor in raiz_por_mes.items()}
-        raiz_por_ano_formatted = {raiz: format_locale(valor) for raiz, valor in raiz_por_ano.items()}
+                # Função para formatar valores com locale
+            def format_locale(value):
+                return locale.format_string("%.0f",value, grouping=True)
+
+
+            # Garante que as colunas sejam numéricas
+            df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce')
+            df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
+
+            # Usa 'valor_real' se não for nulo, caso contrário usa 'valor'
+            df['valor_usado'] = np.where(df['valor_real'].notnull(), df['valor_real'], df['valor'])
+
+
+            #agrupa por centro de custo
+            centros_custo = CentroCusto.objects.all().values('id', 'nome')
+            mapa_centros_custo = {cc['id']: cc['nome'] for cc in centros_custo}
+            df['centro_custo_nome'] = df['centro_custo_nome'].map(mapa_centros_custo)
+
+            centro_custo_total = df.groupby('centro_custo_nome')['valor_usado'].sum().to_dict()
+            centro_custo_total_formatted = {cc: format_locale(valor) for cc, valor in centro_custo_total.items()}
+
+            #agrupa por centro de custo pai
+            centros_custo_pai = CentroCustoPai.objects.all().values('id', 'nome')
+            mapa_centros_custo_pai = {cc_pai['id']: cc_pai['nome'] for cc_pai in centros_custo_pai}
+            df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo_pai)
+
+            # Calcula a soma corretamente
+            total_por_cc_pai = df.groupby('centro_de_custo_pai')['valor_usado'].sum().to_dict()
+            total_por_cc_pai_formatted = {cc: format_locale(valor) for cc, valor in total_por_cc_pai.items()}   
+
+
+
+
+            # Variáveis para totais e distribuições
+            total = 0
+            total_mensal = 0
+            total_anual = 0
+
+            # Dicionários para armazenar totais e detalhamento das linhas
+            mensal_por_mes = defaultdict(float)
+            anual_por_mes = defaultdict(float)
+            conta_por_mes = defaultdict(float)
+            conta_por_ano = defaultdict(float)
+            raiz_por_mes = defaultdict(float)
+            raiz_por_ano = defaultdict(float)
+            tipo_por_mes = defaultdict(float)
+            tipo_por_ano = defaultdict(float)
+            base_por_mes = defaultdict(float)
+            base_por_ano = defaultdict(float)
+            total_bases = defaultdict(float) #inicializa dict vazio 
+
+
+            # Dicionários para armazenar totais e detalhamento das linhas
+            detalhamento_mensal = defaultdict(list)
+            detalhamento_anual = defaultdict(list)
+
+
+            # Verifica se as colunas necessárias existem no DataFrame
+            if 'valor' in df.columns and 'valor_real' in df.columns:
+                df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
+                df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce').fillna(0)
+
+                for _, row in df.iterrows():
+                    mes = row.get('mes_especifico')
+                    conta = row.get('raiz_contabil_grupo_desc')
+                    raiz = row.get('raiz_analitica_desc')
+                    tipo = row.get('tipo_custo')
+                    periodicidade = row.get('periodicidade')
+                    base = row.get('base_orcamento')
+                    valor_real = row['valor_real']
+                    valor = row['valor']
+
+                    valor_utilizado = valor_real if valor_real > 0 else valor
+
+                    total += valor_utilizado
+                    if periodicidade == 'mensal':
+                        total_mensal += valor_utilizado
+                        mensal_por_mes[mes] += valor_utilizado
+                        conta_por_mes[conta] += valor_utilizado
+                        raiz_por_mes[raiz] += valor_utilizado
+                        tipo_por_mes[tipo] += valor_utilizado
+                        base_por_mes[base] += valor_utilizado
+                        detalhamento_mensal[mes].append(row.to_dict())
+                    elif periodicidade == 'anual':
+                        total_anual += valor_utilizado
+                        anual_por_mes[mes] += valor_utilizado
+                        conta_por_ano[conta] += valor_utilizado
+                        raiz_por_ano[raiz] += valor_utilizado
+                        tipo_por_ano[tipo] += valor_utilizado
+                        base_por_ano[base] += valor_utilizado
+                        detalhamento_anual[mes].append(row.to_dict())
+
+
+            # Soma bases
+            for chave, valor in base_por_mes.items():
+                total_bases[chave] += float(valor)
+
+                for chave, valor in base_por_ano.items():
+                    total_bases[chave] += float(valor)
+    
         
-        tipo_por_mes_formatted = {tipo: format_locale(valor) for tipo, valor in tipo_por_mes.items()}
-        tipo_por_ano_formatted = {tipo: format_locale(valor) for tipo, valor in tipo_por_ano.items()}
+            total_formatado = locale.format_string("%.0f",total,grouping=True) if total > 0 else 0
+            total_mensal = locale.format_string("%.0f",total_mensal,grouping=True) if total_mensal > 0 else 0
+            total_anual = locale.format_string("%.0f",total_anual,grouping=True) if total_anual > 0 else 0
 
-        total_bases_formatted = {chave: format_locale(valor) for chave, valor in total_bases.items()}
-       
-        total_int = int(total)
+            
+        
+            mensal_por_mes_formatted = {mes: format_locale(valor) for mes, valor in mensal_por_mes.items()}
+            anual_por_mes_formatted = {mes: format_locale(valor) for mes, valor in anual_por_mes.items()}
 
-        response_data = {
-            'total_int':total_int,
-            "orcamentosBase": serialized_data,
-            "total": total_formatado,
-            'total_real':total, 
-            'total_mensal': total_mensal,
-            'total_anual': total_anual,
-            "mensal_por_mes": mensal_por_mes_formatted,
-            "anual_por_mes": anual_por_mes_formatted,
-            "conta_por_mes": conta_por_mes_formatted,
-            'conta_por_ano': conta_por_ano_formatted,
-            "raiz_por_mes": raiz_por_mes_formatted,
-            "raiz_por_ano": raiz_por_ano_formatted,
-            "tipo_por_grupo_mes": tipo_por_mes_formatted,
-            "tipo_por_ano": tipo_por_ano_formatted,
-            'detalhamento_mensal': detalhamento_mensal,
-            'detalhamento_anual': detalhamento_anual,
-            'total_bases': total_bases_formatted,
-            'total_por_cc': centro_custo_total_formatted,
-            'total_por_cc_pai': total_por_cc_pai_formatted
-        }      
+            conta_por_mes_formatted = {conta: format_locale(valor) for conta, valor in conta_por_mes.items()}
+            conta_por_ano_formatted = {conta: format_locale(valor) for conta, valor in conta_por_ano.items()}
 
+            raiz_por_mes_formatted = {raiz: format_locale(valor) for raiz, valor in raiz_por_mes.items()}
+            raiz_por_ano_formatted = {raiz: format_locale(valor) for raiz, valor in raiz_por_ano.items()}
+            
+            tipo_por_mes_formatted = {tipo: format_locale(valor) for tipo, valor in tipo_por_mes.items()}
+            tipo_por_ano_formatted = {tipo: format_locale(valor) for tipo, valor in tipo_por_ano.items()}
+
+            total_bases_formatted = {chave: format_locale(valor) for chave, valor in total_bases.items()}
+        
+            total_int = int(total)
+
+            response_data = {
+                'total_int':total_int,
+                "orcamentosBase": serialized_data,
+                "total": total_formatado,
+                'total_real':total, 
+                'total_mensal': total_mensal,
+                'total_anual': total_anual,
+                "mensal_por_mes": mensal_por_mes_formatted,
+                "anual_por_mes": anual_por_mes_formatted,
+                "conta_por_mes": conta_por_mes_formatted,
+                'conta_por_ano': conta_por_ano_formatted,
+                "raiz_por_mes": raiz_por_mes_formatted,
+                "raiz_por_ano": raiz_por_ano_formatted,
+                "tipo_por_grupo_mes": tipo_por_mes_formatted,
+                "tipo_por_ano": tipo_por_ano_formatted,
+                'detalhamento_mensal': detalhamento_mensal,
+                'detalhamento_anual': detalhamento_anual,
+                'total_bases': total_bases_formatted,
+                'total_por_cc': centro_custo_total_formatted,
+                'total_por_cc_pai': total_por_cc_pai_formatted,
+                #'df_agrupado':df_agrupado
+            }      
 
         return Response(response_data, status=status.HTTP_200_OK) 
     

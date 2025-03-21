@@ -4,7 +4,7 @@ from django.http import JsonResponse
 from rest_framework.decorators import api_view
 from django.db import connections
 from sqlalchemy import create_engine
-from baseOrcamentaria.orcamento.models import CentroCusto,CentroCustoPai
+from baseOrcamentaria.orcamento.models import CentroCusto,CentroCustoPai, GrupoItens
 import pandas as pd
 import locale
 import datetime
@@ -234,34 +234,76 @@ def calculos_realizados_grupo_itens(request):
     # Converte a data
     consulta_realizado['LANCDATA'] = pd.to_datetime(consulta_realizado['LANCDATA']).dt.strftime('%d/%m/%Y')
 
-    # Extrai os últimos 9 dígitos da coluna CONTA
+
+    # Pegando os últimos 9 caracteres da conta
     consulta_realizado['CONTA_ULTIMOS_9'] = consulta_realizado['CONTA'].str[-9:]
 
-    # Verifica se os últimos 9 dígitos foram extraídos corretamente
-    print(consulta_realizado[['CONTA', 'CONTA_ULTIMOS_9']].head())
+    # Pegando os 3 primeiros caracteres da conta
+    consulta_realizado['CONTA_PRIMEIROS_3'] = consulta_realizado['CONTA_ULTIMOS_9'].str[:3]
 
-    # Filtra as linhas onde os últimos 9 dígitos estão em grupo_itens_list
-    consulta_filtrada = consulta_realizado[consulta_realizado['CONTA_ULTIMOS_9'].isin(grupo_itens_list)]
+    prefixos = [item[:3] for item in grupo_itens_list]
+    print(prefixos)
 
-    # Verifica se a filtragem foi feita corretamente
-    print(consulta_filtrada[['CONTA', 'CONTA_ULTIMOS_9']].head())
+    # Lista de prefixos que precisam ser agrupados
+    prefixos_para_agrupamento = ['011', '012', '014', '022', '023', '082', '101']
 
-    # Agrupa e soma os valores
-    consulta_agrupada = consulta_filtrada.groupby('CONTA_ULTIMOS_9').agg({
-        'SALDO': 'sum',
-        'DEB_VALOR': 'sum',
-        'CRED_VALOR': 'sum',
-        'CCSTCOD': 'last',
-        'QTD': 'sum'
-    }).reset_index()
+    # Mapeando os grupos de itens
+    grupo_itens_map = {
+        item['codigo']: item['nome_completo']
+        for item in GrupoItens.objects.values('codigo', 'nome_completo')
+    }
 
-    if consulta_agrupada['SALDO'].empty or consulta_agrupada['SALDO'].sum() == 0:
-        total = "0"  # Define como zero formatado
-        total_formatado = "0"
-        dados = consulta_agrupada.to_dict(orient='records')
+    # Se o prefixo consultado for '011' ou '012', agrupar ambos
+    if any(p in prefixos_para_agrupamento for p in prefixos):
+        print('Entrou no if')
+
+        # Caso especial: agrupar 011 e 012 juntos
+        if '011' in prefixos or '012' in prefixos:
+            prefixos = ['011', '012'] 
+
+        # Caso especial: agrupar 022 e 023 juntos
+        if '022' in prefixos or '023' in prefixos:
+            prefixos = ['022', '023']
+
+        # Filtrando os dados considerando os prefixos selecionados
+        consulta_filtrada = consulta_realizado[consulta_realizado['CONTA_PRIMEIROS_3'].isin(prefixos)]
+
+        # Mapeando o grupo de itens
+        consulta_filtrada['GRUPO_ITENS'] = consulta_filtrada['CONTA_ULTIMOS_9'].map(grupo_itens_map)
+
+        # Agrupando os valores somando os saldos
+        consulta_agrupada = consulta_filtrada.groupby('GRUPO_ITENS')['SALDO'].sum().reset_index()
+
+        # Verifica se há saldo válido
+        if consulta_agrupada['SALDO'].empty or consulta_agrupada['SALDO'].sum() == 0:
+            total = "0"  
+            total_formatado = "0"
+            dados = consulta_agrupada.to_dict(orient='records')
+        else:
+            total = consulta_agrupada['SALDO'].sum()  
+            dados = consulta_agrupada.to_dict(orient='records')
+            total_formatado = locale.format_string("%.0f", total, grouping=True)
+
     else:
-        total = consulta_agrupada['SALDO'].sum()  # Soma os valores
-        total_formatado = locale.format_string("%.0f", total, grouping=True)
+        # Caso contrário, processa normalmente
+        consulta_filtrada = consulta_realizado[consulta_realizado['CONTA_ULTIMOS_9'].isin(grupo_itens_list)]
+        consulta_agrupada = consulta_filtrada.groupby('CONTA_ULTIMOS_9').agg({
+            'SALDO': 'sum',
+            'DEB_VALOR': 'sum',
+            'CRED_VALOR': 'sum',
+            'CCSTCOD': 'last',
+            'QTD': 'sum'
+        }).reset_index()
+
+        if consulta_agrupada['SALDO'].empty or consulta_agrupada['SALDO'].sum() == 0:
+            total = "0"  
+            total_formatado = "0"
+            dados = consulta_agrupada.to_dict(orient='records')
+        else:
+            total = consulta_agrupada['SALDO'].sum()  
+            total_formatado = locale.format_string("%.0f", total, grouping=True)
+            dados = consulta_agrupada.to_dict(orient='records')
+
 
 ###################################################################################################
 
@@ -292,7 +334,7 @@ def calculos_realizados_grupo_itens(request):
     
     # Filtrar as linhas que contêm os códigos recebidos na requisição
     df_filtrado = df_explodido[df_explodido['CODIGOS_SEPARADOS'].isin(codigos_requisicao)]
-
+    
     # Agrupar por código e somar os valores
     df_agrupado = df_filtrado.groupby('CODIGOS_SEPARADOS')['SALDO'].sum().to_dict()
 
@@ -339,7 +381,7 @@ def calculos_realizados_grupo_itens(request):
     codigos_agrupados = [str(codigo) for codigo in codigos_agrupados]
 
     # Verifique os valores de codigos_agrupados
-    print("Códigos Agrupados:", codigos_agrupados)
+   
 
     # Consulta os centros de custo e seus pais com base nos códigos agrupados
     consulta_ccs_pais = CentroCusto.objects.filter(
@@ -347,7 +389,7 @@ def calculos_realizados_grupo_itens(request):
     ).values('codigo', 'nome', 'cc_pai__id', 'cc_pai__nome')
 
     # Verifique os resultados da consulta
-    print("Consulta CCS Pais:", list(consulta_ccs_pais))
+    
 
     # Cria um dicionário para mapear os códigos dos centros de custo para seus pais
     mapa_codigos_pais = {
@@ -359,7 +401,6 @@ def calculos_realizados_grupo_itens(request):
     }
 
     # Verifique o mapeamento
-    print("Mapa de Códigos Pais:", mapa_codigos_pais)
 
     # Agrupar os valores por centro de custo pai
     df_agrupado_por_pai = {}
@@ -429,7 +470,8 @@ def calculos_realizados_grupo_itens(request):
          'agrupado_por_pai': df_agrupado_por_pai_formatado,
         'teste': df_agrupado_nomes,
         'df_agrupado_nomes_detalhes': df_agrupado_nomes_detalhes,
-        'df_agrupado_pais_detalhes': df_agrupado_pais_detalhes
+        'df_agrupado_pais_detalhes': df_agrupado_pais_detalhes,
+        'Dicicionario': dados
     }
 
     return JsonResponse(response_data, safe=False)
