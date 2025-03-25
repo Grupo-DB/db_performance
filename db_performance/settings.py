@@ -54,7 +54,9 @@ INSTALLED_APPS = [
     'bisGerenciais.dashboardOperacoes.argamassa',
     'baseOrcamentaria.orcamento',
     'baseOrcamentaria.realizado',
-    'baseOrcamentaria.dre'
+    'baseOrcamentaria.dre',
+    'baseOrcamentaria.grupoitens',
+    'baseOrcamentaria.custoproducao',
 ]
 
 MIDDLEWARE = [

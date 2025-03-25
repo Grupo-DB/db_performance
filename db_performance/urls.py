@@ -21,6 +21,7 @@ urlpatterns = [
     path('realizado/',include('baseOrcamentaria.realizado.urls')),
     path('dre/', include('baseOrcamentaria.dre.urls')),
     path('grupoitens/', include('baseOrcamentaria.grupoitens.urls')),
+    path('custoproducao/', include('baseOrcamentaria.custoproducao.urls')),
 
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
