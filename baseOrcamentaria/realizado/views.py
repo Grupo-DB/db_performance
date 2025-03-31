@@ -25,7 +25,7 @@ def calculos_realizado(request):
     conta1 = '3401%'
     conta2 = '3402%'
     conta = '4%'
-
+    meses = request.data.get('periodo', [])
     # Validação das filiais
     if isinstance(filiais_list, list):
         try:
@@ -47,10 +47,14 @@ def calculos_realizado(request):
     else:
         raise ValueError("O parâmetro 'ccs' deve ser uma lista.")
 
+    # Validação dos meses
+    if not isinstance(meses, list) or not all(isinstance(mes, int) and 1 <= mes <= 12 for mes in meses):
+        raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
     # Converte listas para strings no formato esperado pelo SQL
     filiais_string = ", ".join(map(str, filiais_list))
     cc_string = ", ".join(map(str, cc_list))
-
+    meses_string = ", ".join(map(str, meses))
+    
     # Constrói cláusula dinâmica para filtro 'CCSTCOD'
     if cc_list:
         cc_conditions = " OR ".join([f"CCSTCOD LIKE '%{cc}%'" for cc in cc_list])
@@ -65,6 +69,7 @@ def calculos_realizado(request):
     else:
         raise ValueError("O parâmetro 'ano' é obrigatório.")
 
+    meses_condition = f"MONTH(LC.LANCDATA) IN ({meses_string})" if meses else "1=1"
 
     consulta_realizado = pd.read_sql(f"""        
            
@@ -102,6 +107,7 @@ def calculos_realizado(request):
                         AND LC.LANCFIL IN ({filiais_string})
                         AND LANCSIT = 0
                         AND ({cc_conditions})
+                        AND ({meses_condition})
                         AND (
                             LC.LANCCRED LIKE '{conta}'
                             OR LC.LANCCRED LIKE '{conta1}'
@@ -351,7 +357,8 @@ def calculos_realizado(request):
 
     # Função para extrair códigos da string
     def extrair_codigos(codigos):
-        # Remove "+" e transforma em lista de códigos
+        if codigos is None:
+            return []  # Retorna uma lista vazia se codigos for None
         return codigos.strip('+').split('+')
 
     # Consulta os nomes correspondentes aos códigos requisitados

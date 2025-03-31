@@ -15,6 +15,101 @@ engine = create_engine(connection_string)
 
 @csrf_exempt
 @api_view(['POST'])
+def calculos_cal_realizado(request):
+    ano = request.data.get('ano', None)
+    meses = request.data.get('periodo', [])
+    
+    # Validação dos meses
+    if not isinstance(meses, list) or not all(isinstance(mes, int) and 1 <= mes <= 12 for mes in meses):
+        raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
+    # Converte listas para strings no formato esperado pelo SQL
+    meses_string = ", ".join(map(str, meses))
+
+     # Gera o intervalo de datas com base no ano
+    if ano:
+        data_inicio = f"{ano}-01-01"
+        #data_fim = f"{ano}-12-31"
+        data_fim = datetime.today().strftime("%Y-%m-%d")
+    else:
+        raise ValueError("O parâmetro 'ano' é obrigatório.")    
+
+
+    meses_condition = f"MONTH(BPRODATA1) IN ({meses_string})" if meses else "1=1"
+
+    consulta_cal = pd.read_sql(f"""
+            SELECT BPROCOD, BPRODATA, ESTQCOD,EQPLOC, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
+                IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
+
+                FROM BAIXAPRODUCAO
+                JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
+                JOIN ESTOQUE ON ESTQCOD = IBPROREF
+                LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+
+                WHERE CAST(BPRODATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+
+                AND BPROEMP = 1
+                AND BPROFIL =0
+                AND BPROSIT = 1
+                AND IBPROTIPO = 'D'
+                AND BPROEP = 3
+                AND ({meses_condition})
+                ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
+            """,engine)
+    
+    total = consulta_cal['PESO'].sum()
+    return JsonResponse({'total': total}, status=200)
+
+
+#Indicadores Calcinação
+@csrf_exempt
+@api_view(['POST'])
+def calculos_calcinacao_realizado(request):
+    ano = request.data.get('ano', None)
+    meses = request.data.get('periodo', [])
+    
+    # Validação dos meses
+    if not isinstance(meses, list) or not all(isinstance(mes, int) and 1 <= mes <= 12 for mes in meses):
+        raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
+    # Converte listas para strings no formato esperado pelo SQL
+    meses_string = ", ".join(map(str, meses))
+
+     # Gera o intervalo de datas com base no ano
+    if ano:
+        data_inicio = f"{ano}-01-01"
+        #data_fim = f"{ano}-12-31"
+        data_fim = datetime.today().strftime("%Y-%m-%d")
+    else:
+        raise ValueError("O parâmetro 'ano' é obrigatório.")    
+
+
+    meses_condition = f"MONTH(BPRODATA1) IN ({meses_string})" if meses else "1=1"
+
+    consulta_cal = pd.read_sql(f"""
+            SELECT BPROCOD, BPRODATA, ESTQCOD,EQPLOC, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
+                IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
+
+                FROM BAIXAPRODUCAO
+                JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
+                JOIN ESTOQUE ON ESTQCOD = IBPROREF
+                LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+
+                WHERE CAST(BPRODATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+
+                AND BPROEMP = 1
+                AND BPROFIL =0
+                AND BPROSIT = 1
+                AND IBPROTIPO = 'D'
+                AND BPROEP = 2
+                AND ({meses_condition})
+                ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
+            """,engine)
+    
+    total = consulta_cal['PESO'].sum()
+    return JsonResponse({'total': total}, status=200)
+
+
+@csrf_exempt
+@api_view(['POST'])
 def calculos_cal(request):
     tipo_calculo = request.data.get('tipo_calculo')
     # Definindo as datas com base no tipo de cálculo

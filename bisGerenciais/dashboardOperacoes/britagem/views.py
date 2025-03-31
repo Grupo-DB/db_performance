@@ -770,6 +770,125 @@ def calculos_graficos(request):
 
 
 
+@csrf_exempt
+@api_view(['POST'])
+def calculos_britagem_indicadores(request):
+    ano = request.data.get('ano', None)
+    meses = request.data.get('periodo', [])
+    
+    # Validação dos meses
+    if not isinstance(meses, list) or not all(isinstance(mes, int) and 1 <= mes <= 12 for mes in meses):
+        raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
+    # Converte listas para strings no formato esperado pelo SQL
+    meses_string = ", ".join(map(str, meses))
+
+     # Gera o intervalo de datas com base no ano
+    if ano:
+        data_inicio = f"{ano}-01-01"
+        #data_fim = f"{ano}-12-31"
+        data_fim = datetime.today().strftime("%Y-%m-%d")
+    else:
+        raise ValueError("O parâmetro 'ano' é obrigatório.")    
 
 
+    meses_condition = f"MONTH(DPRDATA1) IN ({meses_string})" if meses else "1=1"
 
+
+    consulta_indicadores = pd.read_sql(f"""
+        SELECT 0 TIPO, DPRCOD, DPRREF, EQPCOD, EQPNOME, LOCCOD, LOCNOME, SUM(ADPRPESOTOT) TOTAL, DPRHROPER, DPRDATA1
+        FROM ALIMDIARIAPROD
+        JOIN DIARIAPROD ON DPRCOD = ADPRDPR
+        JOIN LOCAL LD ON LD.LOCCOD = ADPRLOC
+        JOIN EQUIPAMENTO ON EQPCOD = DPREQP
+        WHERE DPRSIT = 1
+        AND DPREMP = 1
+        AND DPRFIL = 0
+        AND CAST(DPRDATA1 AS date) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND ADPRLOC <> 0
+        GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHROPER, DPRDATA1
+
+        UNION
+
+        SELECT 0 TIPO, DPRCOD, DPRREF, EQPCOD, EQPNOME, LOCCOD, LOCNOME, SUM(ADTRPESOTOT) TOTAL, DPRHRPROD, DTRDATA1
+        FROM ALIMDIARIATRANSP
+        JOIN ITEMDIARIATRANSP ON IDTRCOD = ADTRIDTR
+        JOIN DIARIATRANSP ON DTRCOD = IDTRDTR
+        JOIN LOCAL LD ON LD.LOCCOD = ADTRLOC
+        JOIN DIARIAPROD ON DPRCOD = IDTRDPR
+        JOIN EQUIPAMENTO ON EQPCOD = DPREQP
+        WHERE DTRSIT = 1
+        AND CAST(DTRDATA1 AS date) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND IDTRTIPODEST = 1
+        AND DTREMP = 1
+        AND DTRFIL = 0
+        AND LOCCOD IN (44,62)
+        AND ({meses_condition})
+        GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHRPROD, DTRDATA1
+
+        ORDER BY 5,7
+    """, engine)
+
+    total = consulta_indicadores['TOTAL'].sum()
+    return JsonResponse({'total': total}, safe=False)
+
+
+@csrf_exempt
+@api_view(['POST'])
+def calculos_minerecao_indicadores(request):
+    ano = request.data.get('ano', None)
+    meses = request.data.get('periodo', [])
+    
+    # Validação dos meses
+    if not isinstance(meses, list) or not all(isinstance(mes, int) and 1 <= mes <= 12 for mes in meses):
+        raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
+    # Converte listas para strings no formato esperado pelo SQL
+    meses_string = ", ".join(map(str, meses))
+
+     # Gera o intervalo de datas com base no ano
+    if ano:
+        data_inicio = f"{ano}-01-01"
+        #data_fim = f"{ano}-12-31"
+        data_fim = datetime.today().strftime("%Y-%m-%d")
+    else:
+        raise ValueError("O parâmetro 'ano' é obrigatório.")    
+
+
+    meses_condition = f"MONTH(DPRDATA1) IN ({meses_string})" if meses else "1=1"
+
+
+    consulta_indicadores = pd.read_sql(f"""
+        SELECT 0 TIPO, DPRCOD, DPRREF, EQPCOD, EQPNOME, LOCCOD, LOCNOME, SUM(ADPRPESOTOT) TOTAL, DPRHROPER, DPRDATA1
+        FROM ALIMDIARIAPROD
+        JOIN DIARIAPROD ON DPRCOD = ADPRDPR
+        JOIN LOCAL LD ON LD.LOCCOD = ADPRLOC
+        JOIN EQUIPAMENTO ON EQPCOD = DPREQP
+        WHERE DPRSIT = 1
+        AND DPREMP = 1
+        AND DPRFIL = 0
+        AND CAST(DPRDATA1 AS date) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND ADPRLOC <> 0
+        GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHROPER, DPRDATA1
+
+        UNION
+
+        SELECT 0 TIPO, DPRCOD, DPRREF, EQPCOD, EQPNOME, LOCCOD, LOCNOME, SUM(ADTRPESOTOT) TOTAL, DPRHRPROD, DTRDATA1
+        FROM ALIMDIARIATRANSP
+        JOIN ITEMDIARIATRANSP ON IDTRCOD = ADTRIDTR
+        JOIN DIARIATRANSP ON DTRCOD = IDTRDTR
+        JOIN LOCAL LD ON LD.LOCCOD = ADTRLOC
+        JOIN DIARIAPROD ON DPRCOD = IDTRDPR
+        JOIN EQUIPAMENTO ON EQPCOD = DPREQP
+        WHERE DTRSIT = 1
+        AND CAST(DTRDATA1 AS date) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND IDTRTIPODEST = 1
+        AND DTREMP = 1
+        AND DTRFIL = 0
+        AND LOCCOD IN (44,62,66)
+        AND ({meses_condition})
+        GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHRPROD, DTRDATA1
+
+        ORDER BY 5,7
+    """, engine)
+
+    total = consulta_indicadores['TOTAL'].sum()
+    return JsonResponse({'total': total}, safe=False)

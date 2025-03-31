@@ -17,6 +17,59 @@ engine = create_engine(connection_string)
 
 @csrf_exempt
 @api_view(['POST'])
+def calculos_calcario_realizado(request):
+    ano = request.data.get('ano', None)
+    meses = request.data.get('periodo', [])
+
+    # Validação dos meses
+    if not isinstance(meses, list) or not all(isinstance(mes, int) and 1 <= mes <= 12 for mes in meses):
+        raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
+    # Converte listas para strings no formato esperado pelo SQL
+    meses_string = ", ".join(map(str, meses))
+
+     # Gera o intervalo de datas com base no ano
+    if ano:
+        data_inicio = f"{ano}-01-01"
+        #data_fim = f"{ano}-12-31"
+        data_fim = datetime.today().strftime("%Y-%m-%d")
+    else:
+        raise ValueError("O parâmetro 'ano' é obrigatório.")
+    
+    meses_condition = f"MONTH(BPRODATA1) IN ({meses_string})" if meses else "1=1"
+
+    consulta_fcm = pd.read_sql(f"""
+
+            SELECT BPROCOD, BPRODATA1, ESTQCOD, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
+                IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
+
+                FROM BAIXAPRODUCAO
+                JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
+                JOIN ESTOQUE ON ESTQCOD = IBPROREF
+                LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+
+                WHERE CAST(BPRODATA1 as date) BETWEEN '{data_inicio}' AND '{data_fim}'
+
+                AND BPROEMP = 1
+                AND BPROFIL =0
+                AND BPROSIT = 1
+                AND IBPROTIPO = 'D'
+                AND BPROEP = 6
+                AND ({meses_condition})
+
+                ORDER BY BPRODATA1, BPROCOD, ESTQNOMECOMP, ESTQCOD
+            """,engine)
+    
+    total = consulta_fcm['PESO'].sum()
+    total_formatado = locale.format_string("%.0f",total,grouping=True)
+
+    response_data = {
+        'total': total
+    }
+
+    return JsonResponse(response_data, safe=False)
+
+@csrf_exempt
+@api_view(['POST'])
 def calculos_calcario(request):
     #connection_name = 'sga'
     fabrica = request.data.get('fabrica')
@@ -117,7 +170,6 @@ def calculos_calcario(request):
     }
 
     return JsonResponse(response_data)
-
 
 #################################-----------------CALCULOS PARA OS GRÁFICOS--------------############################
 
