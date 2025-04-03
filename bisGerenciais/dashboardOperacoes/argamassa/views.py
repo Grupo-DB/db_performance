@@ -57,6 +57,7 @@ def calculos_indicadores_realizado(request):
                 AND IBPROTIPO = 'D'
                 AND BPROEP = 1
                 AND ({meses_condition})
+                AND ESTQCOD != (5594)
                 ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
             """,engine)
     

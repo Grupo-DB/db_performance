@@ -129,6 +129,7 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
         df["quantidade"] = df["quantidade"].astype(float)
         df['projetado_cc_pai'] = df['centro_custo_pai'].map(total_orcado)
         df['projetado'] = df['projetado_cc_pai'] / df['quantidade']
+        
 
         quantidade = df.groupby("produto")["quantidade"].sum()
         quantidade_dict = df.groupby("produto")["quantidade"].sum().to_dict()
@@ -141,7 +142,7 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
         for cc_pai_id in df['centro_custo_pai'].unique():
             centros_custo = CentroCusto.objects.filter(cc_pai_id=cc_pai_id).values_list('codigo', flat=True)
             centros_custo_list = list(centros_custo)
-            print(centros_custo_list)
+            #print(centros_custo_list)
             # Chamar o método calculos_realizado com a lista de centros de custo
             factory = RequestFactory()
             data = request.data.copy()
@@ -186,7 +187,7 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
                 # Faz a requisição ao endpoint correspondente
                 url = f'http://172.50.10.79:8008{endpoint}'
                 response = requests.post(url, json=data)  # Usa requests para fazer a requisição
-                print(request.data)
+                #print(request.data)
                 #print(response.text)
                 if response.status_code == 200:
                     fabricado_data = response.json()  # Converte a resposta para um dicionário
@@ -203,13 +204,42 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
             lambda row: row['realizado_cc_pai'] / row['producao'] if row['producao'] and row['realizado_cc_pai'] else 0,
         axis=1
     )
-        df['percentual'] = 1 - (df['realizado'] / df['projetado'])
+       
         df['diferenca'] = df['projetado'] - df['realizado']
+        
+        df_grouped = df.groupby('centro_custo_pai')
 
+        # df_aggregated["produto"] = df_aggregated["produto_detalhes"].apply(lambda x: x["nome"])
+        # df_aggregated["centro_custo_pai"] = df_aggregated["centro_custo_pai_detalhes"].apply(lambda x: x["nome"])
+
+        df_aggregated = df_grouped.agg({
+            'id': 'first',
+            'produto_detalhes': 'first',
+            'centro_custo_pai_detalhes': 'first',
+            'fabrica': 'first',
+            'periodo': 'first',
+            'ano': 'first',
+            'quantidade': 'sum',
+            'produto': 'first',
+            'producao': 'first',
+            'projetado_cc_pai': 'first',
+            'realizado_cc_pai': 'first',
+        }).reset_index()
+
+        # Calcular a coluna 'projetado' no DataFrame agregado
+        df_aggregated['projetado'] = df_aggregated['projetado_cc_pai'] / df_aggregated['quantidade']
+        df_aggregated['realizado'] = df_aggregated.apply(
+            lambda row: row['realizado_cc_pai'] / row['producao'] if row['producao'] and row['realizado_cc_pai'] else 0,
+        axis=1
+    )
+        df_aggregated['diferenca'] = df_aggregated['projetado'] - df_aggregated['realizado']
+        df_aggregated['percentual'] = 1 - (df_aggregated['realizado'] / df_aggregated['projetado'])
+        # print('llll',df_aggregated)
+        # print('df',df)
         response_data = {
             "quantidade": quantidade_dict,
             "total_orcado": total_orcado,
-            'resultados': df.to_dict(orient='records'),
+            'resultados': df_aggregated.to_dict(orient='records'),
             'ccPai': ccPai
         }
 

@@ -822,13 +822,17 @@ def calculos_britagem_indicadores(request):
         AND DTREMP = 1
         AND DTRFIL = 0
         AND LOCCOD IN (44,62)
+       
         AND ({meses_condition})
         GROUP BY EQPNOME, EQPCOD, LOCCOD, LOCNOME, DPRCOD, DPRREF, DPRHRPROD, DTRDATA1
 
         ORDER BY 5,7
     """, engine)
 
-    total = consulta_indicadores['TOTAL'].sum()
+    #total = consulta_indicadores.groupby(['EQPCOD'] == 66)['TOTAL'].sum()
+    total = consulta_indicadores.loc[consulta_indicadores['EQPCOD'] == 66, 'TOTAL'].sum()
+
+    #total = consulta_indicadores['TOTAL'].sum()
     return JsonResponse({'total': total}, safe=False)
 
 
@@ -890,5 +894,7 @@ def calculos_minerecao_indicadores(request):
         ORDER BY 5,7
     """, engine)
 
-    total = consulta_indicadores['TOTAL'].sum()
+    total = consulta_indicadores.loc[consulta_indicadores['EQPCOD'] == 66, 'TOTAL'].sum()
+
+    #total = consulta_indicadores['TOTAL'].sum()
     return JsonResponse({'total': total}, safe=False)
