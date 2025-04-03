@@ -162,13 +162,13 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
                 centro_custo_realizado[cc_pai_id] = 0
 
         fabricas_metodos = {
-            'Fábrica de Calcário': '/calcario/indicadores/',
-            'Fábrica de Cal': '/cal/indicadores/',
-            'Fábrica de Argamassa': '/argamassa/indicadores/',
-            'Fábrica de Calcinação': '/cal/indicadores_calcinacao/',
-            'Fábrica de Fertilizantes': '/fertilizante/indicadores/',
-            'Britagem': '/britagem/indicadores_britagem/',
-            'Mineração': '/britagem/indicadores_mineracao/',
+            '05 - Fábrica de Calcário': '/calcario/indicadores/',
+            '04 - Fábrica de Cal': '/cal/indicadores/',
+            '06 - Fábrica de Argamassa': '/argamassa/indicadores/',
+            '03 - Fábrica de Calcinação': '/cal/indicadores_calcinacao/',
+            '07 - Fábrica de Fertilizantes': '/fertilizante/indicadores/',
+            '02 - Britagem': '/britagem/indicadores_britagem/',
+            '01 - Mineração': '/britagem/indicadores_mineracao/',
         }      
 
          # Adicionar os valores realizados ao DataFrame
