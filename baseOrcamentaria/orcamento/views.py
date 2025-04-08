@@ -927,8 +927,66 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
                 #'df_agrupado':df_agrupado
             }      
 
-        return Response(response_data, status=status.HTTP_200_OK) 
-    
+        return Response(response_data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='agrupamentosPorAno')
+    def agrupamentosPorAno(self, request):
+        ano = request.query_params.get('ano')
+
+        if not ano:
+            return Response({"error": "O parâmetro 'ano' é obrigatório."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Filtro para o ano
+        filters = Q(ano=ano)
+
+        # Consulta no banco
+        orcamentos_base = OrcamentoBase.objects.filter(filters)
+        serializer = self.get_serializer(orcamentos_base, many=True)
+        serialized_data = serializer.data
+
+        # Converte dados para DataFrame
+        df = pd.DataFrame(serialized_data)
+
+        if df.empty:
+            return Response({"error": "Nenhum dado encontrado para o ano especificado."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Função para formatar valores com locale
+        def format_locale(value):
+            return locale.format_string("%.0f", value, grouping=True)
+
+        # Garante que as colunas sejam numéricas
+        df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce')
+        df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
+
+        # Usa 'valor_real' se não for nulo, caso contrário usa 'valor'
+        df['valor_usado'] = np.where(df['valor_real'].notnull(), df['valor_real'], df['valor'])
+
+        # Agrupamento por centro de custo pai
+        centros_custo_pai = CentroCustoPai.objects.all().values('id', 'nome')
+        mapa_centros_custo_pai = {cc_pai['id']: cc_pai['nome'] for cc_pai in centros_custo_pai}
+        df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo_pai)
+
+        total_por_cc_pai = df.groupby('centro_de_custo_pai')['valor_usado'].sum().to_dict()
+        total_por_cc_pai_formatted = {cc: format_locale(valor) for cc, valor in total_por_cc_pai.items()}
+
+        # Agrupamento por grupo de itens
+        grupo_itens_map = {
+            item['codigo']: item['nome_completo']
+            for item in GrupoItens.objects.values('codigo', 'nome_completo')
+        }
+        df['GRUPO_ITENS'] = df['conta_contabil'].str[-9:].map(grupo_itens_map)
+
+        total_por_grupo_itens = df.groupby('GRUPO_ITENS')['valor_usado'].sum().to_dict()
+        total_por_grupo_itens_formatted = {grupo: format_locale(valor) for grupo, valor in total_por_grupo_itens.items()}
+
+        # Retorno da resposta
+        response_data = {
+            'total_por_cc_pai': total_por_cc_pai_formatted,
+            'total_por_grupo_itens': total_por_grupo_itens_formatted
+        }
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['POST'], url_path='calculosDespesa')
     def calculosDespesa(self, request):
         ano = request.data.get('ano')
@@ -1075,3 +1133,8 @@ def AplicarPorcentagem(request):
             {"error": f"Ocorreu um erro: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+    
+
+  
+  
+    

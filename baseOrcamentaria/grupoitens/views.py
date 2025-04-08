@@ -21,7 +21,9 @@ engine = create_engine(connection_string)
 @api_view(['POST'])
 def calculos_realizados_grupo_itens(request):
     cc_list = request.data.get('ccs', [])
+    print(cc_list)
     grupo_itens_list = request.data.get('grupo_itens', [])
+    print(grupo_itens_list)
     filiais_list = request.data.get('filiais', [])
     ano = request.data.get('ano', None)
     conta1 = '3401%'
@@ -308,7 +310,7 @@ def calculos_realizados_grupo_itens(request):
 ###################################################################################################
 
     codigos_requisicao = request.data.get('ccs',[])
-
+    print('aaaaaaaaaaaa',codigos_requisicao)
     # Função para extrair códigos da string
     def extrair_codigos(codigos):
         # Remove "+" e transforma em lista de códigos
@@ -337,7 +339,7 @@ def calculos_realizados_grupo_itens(request):
     
     # Agrupar por código e somar os valores
     df_agrupado = df_filtrado.groupby('CODIGOS_SEPARADOS')['SALDO'].sum().to_dict()
-
+    
     
     df_agrupado_nomes = {}
     df_agrupado_nomes_detalhes = {}
