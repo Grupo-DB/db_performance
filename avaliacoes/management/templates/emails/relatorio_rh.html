@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Avaliações Pendentes - RH</title>
+</head>
+<body style="font-family: Arial, sans-serif;">
+
+    <h2>Relatório de Avaliações Pendentes - {{ trimestre }}</h2>
+
+    <p>Prezados (as),</p>
+    <p>Segue abaixo a relação de avaliadores com avaliações pendentes neste trimestre:</p>
+
+    {% for item in dados_relatorio %}
+        <h3>Avaliador: {{ item.avaliador }}</h3>
+        <ul>
+            {% for avaliado in item.avaliados %}
+                <li>{{ avaliado }}</li>
+            {% endfor %}
+        </ul>
+    {% endfor %}
+
+    <p>Esse e-mail foi enviado automaticamente pelo sistema de avaliações.</p>
+
+    <br><br>
+    <img src="https://i.postimg.cc/rsWyKDH9/logotelalogin.png"  style="width:250px;">
+
+</body>
+</html>
