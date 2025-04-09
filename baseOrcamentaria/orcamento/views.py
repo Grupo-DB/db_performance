@@ -300,7 +300,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
     def byCcPai(self, request):
         centro_de_custo_pai_ids = request.query_params.get('centro_de_custo_pai_id')
         ano = request.query_params.get('ano')
-        mes = request.query_params.get('mes')
+        mes = request.query_params.get('periodo')
         filial = request.query_params.get('filial')
 
         # Filtro inicial obrigatório
@@ -315,7 +315,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         if ano:
             filters &= Q(ano=ano)
         if mes:
-            filters &= Q(mes_especifico=mes)
+            filters &= Q(mes_especifico__in=mes)
         if filial:
             filiais = filial.split(",")  # Divide a string em uma lista de filiais
             filters &= Q(filial__in=filiais)   
@@ -545,14 +545,14 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         centro_de_custo_pai_ids = request.query_params.get('centro_de_custo_pai_id')
         filial = request.query_params.get('filial')
         ano = request.query_params.get('ano')
-        mes = request.query_params.get('mes')
+        mes = request.query_params.get('periodo')
 
         filters = Q()
 
         if ano:
             filters &= Q(ano=ano)
         if mes:
-            filters &= Q(mes_especifico=mes)
+            filters &= Q(mes_especifico__in=mes)
         if centro_de_custo_pai_ids:
             ids_list = centro_de_custo_pai_ids.split(",")
             filters &= Q(centro_de_custo_pai_id__in=ids_list)
