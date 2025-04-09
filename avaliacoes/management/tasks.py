@@ -92,7 +92,7 @@ def notificar_rh_gestor():
 
     # Buscar e-mails do grupo RHGestor
     try:
-        grupo_rh = Group.objects.get(name="RHGestorTeste")
+        grupo_rh = Group.objects.get(name="RHGestor")
         usuarios_rh = grupo_rh.user_set.all()
         print(f"Usuários no grupo RHGestor: {[u.username for u in usuarios_rh]}")
 
