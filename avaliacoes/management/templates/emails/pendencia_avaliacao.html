@@ -1,15 +1,16 @@
 <html>
 <body>
-    <img src="https://i.postimg.cc/rsWyKDH9/logotelalogin.png"  style="width:250px;"><br>
+    <img src="https://iili.io/3aq4sON.png"  style="width:250px;"><br>
 
     <p>Olá {{ avaliador.nome }},</p>
     <p>Você possui avaliações pendentes neste trimestre. Seguem os colaboradores:</p>
-
+    <p>Período de Avaliação: de {{ data_inicio }} até {{ data_fim }}</p>
     <ul>
         {% for nome in nomes_avaliados %}
             <li>{{ nome }}</li>
         {% endfor %}
     </ul>
+
 
     <p>Por favor, acesse <a href="http://172.50.10.79">DBManager</a> para realizar as avaliações.</p>
 </body>

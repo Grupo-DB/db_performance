@@ -7,11 +7,14 @@ from django.db import IntegrityError
 from django.utils import timezone
 from django.contrib.auth.models import User
 from avaliacoes.management.models import Avaliado, Avaliador, Avaliacao, Colaborador
+from avaliacoes.datacalc.models import Periodo
 from avaliacoes.management.utils import obterTrimestre, send_custom_email
 from notifications.signals import notify
 from django.db.models import Q
 from . pdf_utils import gerar_pdf_avaliados
 from .gerar_pdf_rh import gerar_pdf_rh
+
+caminho_logo = "media/logotelalogin.png" 
 
 @shared_task
 def enviar_notificacoes(usuario_id):
@@ -55,6 +58,13 @@ def notificar_rh_gestor():
     now = timezone.now()
     trimestre_atual = obterTrimestre(now)
 
+    try:
+        periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).latest('dataFim')
+        #periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).first()
+    except Periodo.DoesNotExist:
+        print("Nenhum período de avaliação ativo encontrado para a data atual.")
+        return
+
     # Buscar avaliados sem avaliação neste trimestre
     avaliados_sem_avaliacao = Avaliado.objects.exclude(
         avaliacoes_avaliado__periodo=trimestre_atual
@@ -82,7 +92,7 @@ def notificar_rh_gestor():
 
     # Buscar e-mails do grupo RHGestor
     try:
-        grupo_rh = Group.objects.get(name="RHGestor")
+        grupo_rh = Group.objects.get(name="RHGestorTeste")
         usuarios_rh = grupo_rh.user_set.all()
         print(f"Usuários no grupo RHGestor: {[u.username for u in usuarios_rh]}")
 
@@ -104,10 +114,15 @@ def notificar_rh_gestor():
         print("Nenhum e-mail válido encontrado no grupo RHGestor.")
         return
 
+    data_inicio_formatada = periodo_atual.dataInicio.strftime('%d-%m-%Y')
+    data_fim_formatada = periodo_atual.dataFim.strftime('%d-%m-%Y')
+
     # Render HTML
     html_content = render_to_string('emails/relatorio_rh.html', {
         'dados_relatorio': dados_relatorio,
-        'trimestre': trimestre_atual,
+        #'trimestre': trimestre_atual,
+        'data_inicio': data_inicio_formatada,
+        'data_fim': data_fim_formatada,
     })
     text_content = strip_tags(html_content)
 
@@ -120,7 +135,7 @@ def notificar_rh_gestor():
     email.attach_alternative(html_content, "text/html")
 
     # Gera o PDF consolidado
-    pdf_buffer = gerar_pdf_rh(dados_relatorio, trimestre_atual)
+    pdf_buffer = gerar_pdf_rh(dados_relatorio,caminho_logo, trimestre_atual)
     email.attach(f"Avaliacoes_Pendentes_RH.pdf", pdf_buffer.read(), 'application/pdf')
 
     try:
@@ -212,6 +227,13 @@ def enviar_emails_completos_para_todos_avaliadores():
     now = timezone.now()
     trimestre_atual = obterTrimestre(now)
 
+    try:
+        periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).latest('dataFim')
+        #periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).first()
+    except Periodo.DoesNotExist:
+        print("Nenhum período de avaliação ativo encontrado para a data atual.")
+        return
+
     # Encontrar todos os avaliados sem avaliação no trimestre atual
     avaliados_sem_avaliacao = Avaliado.objects.exclude(
         avaliacoes_avaliado__periodo=trimestre_atual
@@ -236,10 +258,15 @@ def enviar_emails_completos_para_todos_avaliadores():
         if not nomes_avaliados:
             continue
 
+        data_inicio_formatada = periodo_atual.dataInicio.strftime('%d-%m-%Y')
+        data_fim_formatada = periodo_atual.dataFim.strftime('%d-%m-%Y')
+
         # Render HTML com base no template
         html_content = render_to_string('emails/pendencia_avaliacao.html', {
             'avaliador': avaliador,
             'nomes_avaliados': nomes_avaliados,
+            'data_inicio': data_inicio_formatada,
+            'data_fim': data_fim_formatada,
         })
         text_content = strip_tags(html_content)
 
@@ -253,7 +280,7 @@ def enviar_emails_completos_para_todos_avaliadores():
         email.attach_alternative(html_content, "text/html")
 
         # Gera o PDF para esse avaliador
-        pdf_buffer = gerar_pdf_avaliados(avaliador.nome, nomes_avaliados)
+        pdf_buffer = gerar_pdf_avaliados(avaliador.nome, nomes_avaliados, caminho_logo, trimestre_atual)
         email.attach(f"Avaliacoes_Pendentes_{avaliador.nome}.pdf", pdf_buffer.read(), 'application/pdf')
 
         try:
@@ -272,16 +299,25 @@ def enviar_email_para_avaliador(avaliador_id):
     now = timezone.now()
     trimestre_atual = obterTrimestre(now)
 
+     # Obter o período atual com base na data atual
+    try:
+        periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).latest('dataFim')
+        #periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).first()
+    except Periodo.DoesNotExist:
+        print("Nenhum período de avaliação ativo encontrado para a data atual.")
+        return
+
     try:
         avaliador = Avaliador.objects.get(id=avaliador_id)
     except Avaliador.DoesNotExist:
         print(f"Avaliador com ID {avaliador_id} não encontrado.")
         return
 
+    # Encontrar avaliados sem avaliação no período atual
     avaliados_sem_avaliacao = Avaliado.objects.filter(
         avaliadores=avaliador
     ).exclude(
-        avaliacoes_avaliado__periodo=trimestre_atual
+        avaliacoes_avaliado__periodo=periodo_atual
     ).distinct()
 
     if not avaliados_sem_avaliacao.exists():
@@ -290,23 +326,28 @@ def enviar_email_para_avaliador(avaliador_id):
 
     nomes_avaliados = [av.nome for av in avaliados_sem_avaliacao]
 
-    # Render HTML do e-mail
+    data_inicio_formatada = periodo_atual.dataInicio.strftime('%d-%m-%Y')
+    data_fim_formatada = periodo_atual.dataFim.strftime('%d-%m-%Y')
+
+    # Renderizar HTML do e-mail com as datas de início e fim do período
     html_content = render_to_string('emails/pendencia_avaliacao.html', {
         'avaliador': avaliador,
         'nomes_avaliados': nomes_avaliados,
+        'data_inicio': data_inicio_formatada,
+        'data_fim': data_fim_formatada,
     })
     text_content = strip_tags(html_content)
 
     email = EmailMultiAlternatives(
         subject,
         text_content,
-        from_email='rh@dagobertobarcellos.com.br',  # ou settings.DEFAULT_FROM_EMAIL
+        from_email='rh@dagobertobarcellos.com.br',
         to=[avaliador.email],
     )
     email.attach_alternative(html_content, "text/html")
 
-    # Gerar PDF dinâmico
-    pdf_buffer = gerar_pdf_avaliados(avaliador.nome, nomes_avaliados)
+    # Gerar PDF dinâmico (supondo que você tenha uma função para isso)
+    pdf_buffer = gerar_pdf_avaliados(avaliador.nome, nomes_avaliados,caminho_logo,trimestre_atual)
     email.attach(f"Avaliacoes_Pendentes_{avaliador.nome}.pdf", pdf_buffer.read(), 'application/pdf')
 
     try:

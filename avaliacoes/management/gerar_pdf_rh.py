@@ -3,13 +3,21 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import cm
 
-def gerar_pdf_rh(dados_relatorio, trimestre):
+def gerar_pdf_rh(dados_relatorio,caminho_logo, trimestre_atual):
     buffer = BytesIO()
     p = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
+    # Logotipo
+    largura_logo = 4 * cm
+    altura_logo = 4 * cm
+    x_logo = width - largura_logo - 2 * cm
+    y_logo = height - altura_logo - 2 * cm
+
+    p.drawImage(caminho_logo, x_logo, y_logo, width=largura_logo, height=altura_logo, preserveAspectRatio=True)
+
     p.setFont("Helvetica-Bold", 14)
-    p.drawString(2 * cm, height - 2 * cm, f"Relatório de Avaliações Pendentes - {trimestre}")
+    p.drawString(2 * cm, height - 2 * cm, f"Relatório de Avaliações Pendentes - {trimestre_atual}")
 
     y = height - 3.5 * cm
     p.setFont("Helvetica", 12)
@@ -40,3 +48,5 @@ def gerar_pdf_rh(dados_relatorio, trimestre):
     p.save()
     buffer.seek(0)
     return buffer
+
+
