@@ -932,12 +932,19 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='agrupamentosPorAno')
     def agrupamentosPorAno(self, request):
         ano = request.query_params.get('ano')
+        meses = request.query_params.get('periodo',[])
+        filial = request.query_params.get('filial',[])
+       
+        filters = Q()
 
-        if not ano:
-            return Response({"error": "O parâmetro 'ano' é obrigatório."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Filtro para o ano
-        filters = Q(ano=ano)
+        if ano:
+            filters &= Q(ano=ano)
+        if meses:
+            filters &= Q(mes_especifico__in=meses)
+        
+        if filial:
+            filiais = filial.split(",")  # Divide a string em uma lista de filiais
+            filters &= Q(filial__in=filiais)
 
         # Consulta no banco
         orcamentos_base = OrcamentoBase.objects.filter(filters)

@@ -22,11 +22,12 @@ def calculos_curva(request):
     cc_list_str = [str(codigo) for codigo in cc_list]
     grupo_itens_list = list(GrupoItens.objects.values_list('codigo', flat=True))
     grupo_itens_list = [str(codigo) for codigo in grupo_itens_list]
-    filiais_list = [0,1,3,5,7,9]
+    filiais_list = request.data.get('filial', [])
     ano = request.data.get('ano', None)
     conta1 = '3401%'
     conta2 = '3402%' 
     conta = '4%'
+    meses = request.data.get('periodo', [])
 
     # Validar filiais
     if isinstance(filiais_list, list):
@@ -58,10 +59,15 @@ def calculos_curva(request):
     else:
         raise ValueError("O parâmetro 'grupo_itens' deve ser uma lista.")
     
+    # Validação dos meses
+    if not isinstance(meses, list) or not all(isinstance(mes, int) and 1 <= mes <= 12 for mes in meses):
+        raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
+    
     # Conversão de listas para strings no formato esperado pelo SQL
     filiais_string = ', '.join(map(str, filiais_list))
     grupo_itens_string = ', '.join(map(str, grupo_itens_list))
     cc_string = ", ".join(map(str, cc_list))
+    meses_string = ", ".join(map(str, meses))
 
      # Constrói cláusula dinâmica para filtro 'CCSTCOD'
     if cc_list:
@@ -75,6 +81,8 @@ def calculos_curva(request):
         data_fim = datetime.date.today().strftime("%Y-%m-%d")
     else:
         raise ValueError("O parâmetro 'ano' é obrigatório.")
+    
+    meses_condition = f"MONTH(LC.LANCDATA) IN ({meses_string})" if meses else "1=1"
     
     consulta_realizado = pd.read_sql(f"""        
         WITH LANCAMENTOS_BASE AS (
@@ -111,6 +119,7 @@ def calculos_curva(request):
                 AND LC.LANCFIL IN ({filiais_string})
                 AND LANCSIT = 0
                 AND ({cc_conditions})
+                AND ({meses_condition})
                 AND (
                     LC.LANCCRED LIKE '{conta}'
                     OR LC.LANCCRED LIKE '{conta1}'
@@ -254,25 +263,14 @@ def calculos_curva(request):
     dicionario_soma_nomes = {}
     for _, row in consulta_agrupada.iterrows():
         grupo = row['GRUPO_ITENS']
-        conta = row['CONTA_ULTIMOS_9']
         saldo = row['SALDO']
         
         if grupo not in dicionario_soma_nomes:
-            dicionario_soma_nomes[grupo] = {
-                'contas': [],
-                'soma_total': 0
-            }
-        
-        # Adicionar a conta e o saldo ao grupo
-        dicionario_soma_nomes[grupo]['contas'].append({
-            'CONTA_ULTIMOS_9': conta,
-            'SALDO': saldo
-        })
-        
-        # Somar o saldo ao total do grupo
-        dicionario_soma_nomes[grupo]['soma_total'] += saldo
+            dicionario_soma_nomes[grupo] = 0
 
-        print(consulta_agrupada)
+        dicionario_soma_nomes[grupo] += saldo
+
+        #print(consulta_agrupada)
 
     df_grupos_nomes = {}
     
@@ -288,7 +286,7 @@ def calculos_curva(request):
         return codigos.strip('+').split('+')
     
     # Excluir os códigos 4700, 4701 e 4703
-    #codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in ['4700', '4701', '4703']]
+    codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in ['4700', '4701', '4703']]
 
     consulta_ccs = CentroCusto.objects.filter(
         codigo__in=codigos_requisicao
@@ -421,19 +419,16 @@ def calculos_curva(request):
                 })
 
     # Formatar os valores finais (opcional)
-    df_agrupado_pais_formatado = {
-        pai: {
-            'saldo': format_locale(info['saldo']),
-            'detalhes': info['detalhes']
-        }
-        for pai, info in df_agrupado_pais_detalhes.items()
-    }
+  
 
     # Formatar os valores finais (opcional)
     df_agrupado_por_pai_formatado = {
         pai: format_locale(valor) for pai, valor in df_agrupado_por_pai.items()
     }
 
+    dicionario_soma_nomes_formatado = {
+        nome: format_locale(saldo) for nome, saldo in dicionario_soma_nomes.items()
+    }
 
     response_data = {
         #'total': total_formatado,
@@ -443,7 +438,7 @@ def calculos_curva(request):
         #'teste': df_agrupado_nomes,
         #'df_agrupado_nomes_detalhes': df_agrupado_nomes_detalhes,
         #'df_agrupado_pais_detalhes': df_agrupado_pais_detalhes,
-        'dicionario_soma_nomes': dicionario_soma_nomes
+        'dicionario_soma_nomes': dicionario_soma_nomes_formatado
     }
 
     return JsonResponse(response_data, safe=False)

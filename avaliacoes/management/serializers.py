@@ -40,8 +40,6 @@ class FormularioCreateSerializer(serializers.ModelSerializer):
         fields = ['id', 'nome']
 
 
-
-
     def create(self, validated_data):
         perguntas_data = validated_data.pop('perguntas', [])
         formulario = Formulario.objects.create(**validated_data)
@@ -54,9 +52,6 @@ class FormularioCreateSerializer(serializers.ModelSerializer):
         instance.save()
         instance.perguntas.set(perguntas_data)
         return instance
-
- 
-
 
 
 class AvaliadoSerializer(serializers.ModelSerializer):
