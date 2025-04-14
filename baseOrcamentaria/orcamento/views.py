@@ -972,7 +972,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         centros_custo_pai = CentroCustoPai.objects.all().values('id', 'nome')
         mapa_centros_custo_pai = {cc_pai['id']: cc_pai['nome'] for cc_pai in centros_custo_pai}
         df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo_pai)
-
+        
         total_por_cc_pai = df.groupby('centro_de_custo_pai')['valor_usado'].sum().to_dict()
         total_por_cc_pai_formatted = {cc: format_locale(valor) for cc, valor in total_por_cc_pai.items()}
 

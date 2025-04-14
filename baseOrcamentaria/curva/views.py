@@ -248,27 +248,39 @@ def calculos_curva(request):
 
     # Mapeando os grupos de itens
     grupo_itens_map = {
-        item['codigo']: item['nome_completo']
-        for item in GrupoItens.objects.values('codigo', 'nome_completo')
+        item['codigo']: {
+            'nome_completo': item['nome_completo'],
+            'gestor_nome': item.get('gestor__nome', 'Sem Gestor')  # Use .get para evitar KeyError
+        }
+        for item in GrupoItens.objects.values('codigo', 'nome_completo', 'gestor__nome')
     }
 
-    
-    # Mapeando o grupo de itens
-    consulta_realizado['GRUPO_ITENS'] = consulta_realizado['CONTA_ULTIMOS_9'].map(grupo_itens_map)
+    # Mapeando o grupo de itens no DataFrame
+    consulta_realizado['GRUPO_ITENS'] = consulta_realizado['CONTA_ULTIMOS_9'].map(
+    lambda codigo: grupo_itens_map.get(codigo, {}).get('nome_completo', 'Sem Nome')
+)
 
+    # Agrupando os dados
     consulta_agrupada = consulta_realizado.groupby(['GRUPO_ITENS', 'CONTA_ULTIMOS_9']).agg({
     'SALDO': 'sum'
 }).reset_index()
         
+    # Criando o dicionário com saldo e nome do gestor
     dicionario_soma_nomes = {}
     for _, row in consulta_agrupada.iterrows():
         grupo = row['GRUPO_ITENS']
         saldo = row['SALDO']
         
+        # Obter o nome do gestor a partir do mapeamento
+        gestor_nome = grupo_itens_map.get(row['CONTA_ULTIMOS_9'], {}).get('gestor_nome', 'Sem Gestor')
+        
         if grupo not in dicionario_soma_nomes:
-            dicionario_soma_nomes[grupo] = 0
+            dicionario_soma_nomes[grupo] = {
+                'saldo': 0,
+                'gestor': gestor_nome
+            }
 
-        dicionario_soma_nomes[grupo] += saldo
+        dicionario_soma_nomes[grupo]['saldo'] += saldo
 
         #print(consulta_agrupada)
 
@@ -285,8 +297,14 @@ def calculos_curva(request):
         # Remove "+" e transforma em lista de códigos
         return codigos.strip('+').split('+')
     
-    # Excluir os códigos 4700, 4701 e 4703
-    codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in ['4700', '4701', '4703']]
+    # # Excluir os códigos 4700, 4701 e 4703
+    # codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in ['4700', '4701', '4703']]
+    codigos_excluir = ['4700', '4701', '4703']
+
+    # Verifica se '0' está presente em filiais_list
+    if '0' not in filiais_list:
+         # Exclui os códigos especificados de codigos_requisicao
+        codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in codigos_excluir]
 
     consulta_ccs = CentroCusto.objects.filter(
         codigo__in=codigos_requisicao
@@ -356,7 +374,7 @@ def calculos_curva(request):
     # Consulta os centros de custo e seus pais com base nos códigos agrupados
     consulta_ccs_pais = CentroCusto.objects.filter(
         codigo__in=codigos_agrupados  # Substituí 'id' por 'codigo'
-    ).values('codigo', 'nome', 'cc_pai__id', 'cc_pai__nome')
+    ).values('codigo', 'nome', 'cc_pai__id', 'cc_pai__nome', 'gestor__nome')
 
     # Verifique os resultados da consulta
     
@@ -365,22 +383,23 @@ def calculos_curva(request):
     mapa_codigos_pais = {
         str(item['codigo']): {
             'cc_pai_id': str(item['cc_pai__id']) if item['cc_pai__id'] else None,
-            'cc_pai_nome': item['cc_pai__nome'] or 'Sem Pai'
+            'cc_pai_nome': item['cc_pai__nome'] or 'Sem Pai',
+            'gestor_nome': item.get('gestor__nome', 'Sem Gestor')
         }
         for item in consulta_ccs_pais
     }
 
-    # Verifique o mapeamento
-
-    # Agrupar os valores por centro de custo pai
     df_agrupado_por_pai = {}
     for codigo, saldo in df_agrupado.items():
-        pai_info = mapa_codigos_pais.get(str(codigo), {'cc_pai_nome': 'Sem Pai'})
+        pai_info = mapa_codigos_pais.get(str(codigo), {'cc_pai_nome': 'Sem Pai', 'gestor_nome': 'Sem Gestor'})
         pai_nome = pai_info['cc_pai_nome']
+        pai_gestor = pai_info['gestor_nome']
         if pai_nome not in df_agrupado_por_pai:
-            df_agrupado_por_pai[pai_nome] = 0
-        df_agrupado_por_pai[pai_nome] += saldo
-
+            df_agrupado_por_pai[pai_nome] = {
+                'saldo': 0,
+                'gestor': pai_gestor
+            }
+        df_agrupado_por_pai[pai_nome]['saldo'] += saldo 
 
     df_agrupado_pais_detalhes = {}
 
