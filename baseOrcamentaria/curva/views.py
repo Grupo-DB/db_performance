@@ -257,7 +257,7 @@ def calculos_curva(request):
 
     # Mapeando o grupo de itens no DataFrame
     consulta_realizado['GRUPO_ITENS'] = consulta_realizado['CONTA_ULTIMOS_9'].map(
-    lambda codigo: grupo_itens_map.get(codigo, {}).get('nome_completo', 'Sem Nome')
+    lambda codigo: grupo_itens_map.get(codigo, {}).get('nome_completo', 'Gestor Indefinido')
 )
 
     # Agrupando os dados

@@ -971,25 +971,45 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         # Agrupamento por centro de custo pai
         centros_custo_pai = CentroCustoPai.objects.all().values('id', 'nome')
         mapa_centros_custo_pai = {cc_pai['id']: cc_pai['nome'] for cc_pai in centros_custo_pai}
-        df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo_pai)
         
-        total_por_cc_pai = df.groupby('centro_de_custo_pai')['valor_usado'].sum().to_dict()
-        total_por_cc_pai_formatted = {cc: format_locale(valor) for cc, valor in total_por_cc_pai.items()}
-
-        # Agrupamento por grupo de itens
+        # # Agrupamento por grupo de itens
         grupo_itens_map = {
             item['codigo']: item['nome_completo']
             for item in GrupoItens.objects.values('codigo', 'nome_completo')
         }
+
+        # Agrupamento por centro de custo pai e gestor
+        df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo_pai)
+
+        cc_pai_grouped = df.groupby(['gestor', 'centro_de_custo_pai'])['valor_usado'].sum()
+
+        total_por_cc_pai = {}
+        for cc_pai, group in df.groupby('centro_de_custo_pai'):
+            saldo = group['valor_usado'].sum()
+            gestor = group['gestor'].iloc[0]
+            total_por_cc_pai[cc_pai] = {
+                'saldo': format_locale(saldo),
+                'gestor': gestor
+            }
+
+        # Agrupamento por grupo de itens e gestor
         df['GRUPO_ITENS'] = df['conta_contabil'].str[-9:].map(grupo_itens_map)
 
-        total_por_grupo_itens = df.groupby('GRUPO_ITENS')['valor_usado'].sum().to_dict()
-        total_por_grupo_itens_formatted = {grupo: format_locale(valor) for grupo, valor in total_por_grupo_itens.items()}
+        grupo_itens_grouped = df.groupby(['gestor', 'GRUPO_ITENS'])['valor_usado'].sum()
+
+        total_por_grupo_itens = {}
+        for grupo, group in df.groupby('GRUPO_ITENS'):
+            saldo = group['valor_usado'].sum()
+            gestor = group['gestor'].iloc[0]
+            total_por_grupo_itens[grupo] = {
+                'saldo': format_locale(saldo),
+                'gestor': gestor
+            }
 
         # Retorno da resposta
         response_data = {
-            'total_por_cc_pai': total_por_cc_pai_formatted,
-            'total_por_grupo_itens': total_por_grupo_itens_formatted
+            'total_por_cc_pai': total_por_cc_pai,
+            'total_por_grupo_itens': total_por_grupo_itens
         }
 
         return Response(response_data, status=status.HTTP_200_OK)
