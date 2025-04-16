@@ -980,10 +980,12 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
 
         # Agrupamento por centro de custo pai e gestor
         df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo_pai)
+        
 
         cc_pai_grouped = df.groupby(['gestor', 'centro_de_custo_pai'])['valor_usado'].sum()
 
         total_por_cc_pai = {}
+        total_geral = 0
         for cc_pai, group in df.groupby('centro_de_custo_pai'):
             saldo = group['valor_usado'].sum()
             gestor = group['gestor'].iloc[0]
@@ -991,6 +993,9 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
                 'saldo': format_locale(saldo),
                 'gestor': gestor
             }
+            total_geral += saldo
+
+        total_cc = {'saldo': format_locale(total_geral)}
 
         # Agrupamento por grupo de itens e gestor
         df['GRUPO_ITENS'] = df['conta_contabil'].str[-9:].map(grupo_itens_map)
@@ -998,6 +1003,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         grupo_itens_grouped = df.groupby(['gestor', 'GRUPO_ITENS'])['valor_usado'].sum()
 
         total_por_grupo_itens = {}
+        total_geral_grupo_itens = 0
         for grupo, group in df.groupby('GRUPO_ITENS'):
             saldo = group['valor_usado'].sum()
             gestor = group['gestor'].iloc[0]
@@ -1005,11 +1011,16 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
                 'saldo': format_locale(saldo),
                 'gestor': gestor
             }
+            total_geral_grupo_itens += saldo
+
+        total_grupo_itens = {'saldo': format_locale(total_geral_grupo_itens)}
 
         # Retorno da resposta
         response_data = {
             'total_por_cc_pai': total_por_cc_pai,
-            'total_por_grupo_itens': total_por_grupo_itens
+            'total_cc': total_cc,
+            'total_por_grupo_itens': total_por_grupo_itens,
+            'total_grupo_itens': total_grupo_itens
         }
 
         return Response(response_data, status=status.HTTP_200_OK)

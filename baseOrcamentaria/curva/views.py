@@ -267,6 +267,7 @@ def calculos_curva(request):
         
     # Criando o dicionário com saldo e nome do gestor
     dicionario_soma_nomes = {}
+    total_soma_nomes = 0
     for _, row in consulta_agrupada.iterrows():
         grupo = row['GRUPO_ITENS']
         saldo = row['SALDO']
@@ -281,8 +282,8 @@ def calculos_curva(request):
             }
 
         dicionario_soma_nomes[grupo]['saldo'] += saldo
-
-        #print(consulta_agrupada)
+        total_soma_nomes += saldo
+    total_soma_nomes_formatado = format_locale(total_soma_nomes)
 
     df_grupos_nomes = {}
     
@@ -390,6 +391,7 @@ def calculos_curva(request):
     }
 
     df_agrupado_por_pai = {}
+    total_geral = 0
     for codigo, saldo in df_agrupado.items():
         pai_info = mapa_codigos_pais.get(str(codigo), {'cc_pai_nome': 'Sem Pai', 'gestor_nome': 'Sem Gestor'})
         pai_nome = pai_info['cc_pai_nome']
@@ -400,6 +402,8 @@ def calculos_curva(request):
                 'gestor': pai_gestor
             }
         df_agrupado_por_pai[pai_nome]['saldo'] += saldo 
+        total_geral += saldo
+    total_geral_formatado = format_locale(total_geral)
 
     df_agrupado_pais_detalhes = {}
 
@@ -457,7 +461,9 @@ def calculos_curva(request):
         #'teste': df_agrupado_nomes,
         #'df_agrupado_nomes_detalhes': df_agrupado_nomes_detalhes,
         #'df_agrupado_pais_detalhes': df_agrupado_pais_detalhes,
-        'dicionario_soma_nomes': dicionario_soma_nomes_formatado
+        'dicionario_soma_nomes': dicionario_soma_nomes_formatado,
+        'total_soma_gps': total_soma_nomes,
+        'total_soma_ccs': total_geral
     }
 
     return JsonResponse(response_data, safe=False)
