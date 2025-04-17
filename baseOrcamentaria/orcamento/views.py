@@ -315,6 +315,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         if ano:
             filters &= Q(ano=ano)
         if mes:
+            mes = mes.split(",")
             filters &= Q(mes_especifico__in=mes)
         if filial:
             filiais = filial.split(",")  # Divide a string em uma lista de filiais
@@ -458,6 +459,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         if ano:
             filters['ano'] = ano
         if meses:
+            meses = meses.split(",")
             filters['mes_especifico__in'] = meses
 
         if filters: 
@@ -552,6 +554,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         if ano:
             filters &= Q(ano=ano)
         if mes:
+            mes = mes.split(",")
             filters &= Q(mes_especifico__in=mes)
         if centro_de_custo_pai_ids:
             ids_list = centro_de_custo_pai_ids.split(",")
@@ -1043,6 +1046,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         if ano:
             filters['ano'] = ano
         if meses:
+            meses = meses.split(",")
             filters['mes_especifico__in'] = meses
 
         # Sereliza os dados dos orçamentos
