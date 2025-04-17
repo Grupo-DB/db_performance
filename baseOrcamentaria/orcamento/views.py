@@ -578,7 +578,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
 
         # Usa 'valor_real' se não for nulo, caso contrário usa 'valor'
-        df['valor_usado'] = np.where(df['valor_real'].notnull(), df['valor_real'], df['valor'])
+        df['valor_usado'] = np.where((df['valor_real'].notnull()) & (df['valor_real'] > 0), df['valor_real'], df['valor'])
 
         prefixos_para_agrupamento = ['011', '012', '014', '022', '023', '082', '101']
 
@@ -586,7 +586,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         df['CONTA_PRIMEIROS_3'] = df['CONTA_ULTIMOS_9'].str[:3]
         gps_cods = grupo_itens.split(",")
         prefixos = [item[:3] for item in gps_cods]
-        print('sfdghsdfg',prefixos)
+        
 
         # Lista de prefixos que precisam ser agrupados
         prefixos_para_agrupamento = ['011', '012', '014', '022', '023', '082', '101']
@@ -791,7 +791,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
 
             # Usa 'valor_real' se não for nulo, caso contrário usa 'valor'
-            df['valor_usado'] = np.where(df['valor_real'].notnull(), df['valor_real'], df['valor'])
+            df['valor_usado'] = np.where((df['valor_real'].notnull()) & (df['valor_real'] > 0), df['valor_real'], df['valor'])
 
 
             #agrupa por centro de custo
@@ -940,6 +940,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         if ano:
             filters &= Q(ano=ano)
         if meses:
+            meses = meses.split(",") #' Divide a string em uma lista de meses
             filters &= Q(mes_especifico__in=meses)
         
         if filial:
@@ -964,10 +965,10 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         # Garante que as colunas sejam numéricas
         df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce')
         df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
-
+        
         # Usa 'valor_real' se não for nulo, caso contrário usa 'valor'
-        df['valor_usado'] = np.where(df['valor_real'].notnull(), df['valor_real'], df['valor'])
-
+        df['valor_usado'] = np.where((df['valor_real'].notnull()) & (df['valor_real'] > 0), df['valor_real'], df['valor'])
+        
         # Agrupamento por centro de custo pai
         centros_custo_pai = CentroCustoPai.objects.all().values('id', 'nome')
         mapa_centros_custo_pai = {cc_pai['id']: cc_pai['nome'] for cc_pai in centros_custo_pai}
@@ -980,7 +981,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
 
         # Agrupamento por centro de custo pai e gestor
         df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo_pai)
-        
+       
 
         cc_pai_grouped = df.groupby(['gestor', 'centro_de_custo_pai'])['valor_usado'].sum()
 

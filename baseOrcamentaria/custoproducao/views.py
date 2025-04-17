@@ -112,24 +112,24 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
         df_orcamentos['valor'] = pd.to_numeric(df_orcamentos['valor'], errors='coerce')
 
         # Usa 'valor_real' se não for nulo, caso contrário usa 'valor'
-        df_orcamentos['valor_usado'] = np.where(df_orcamentos['valor_real'].notnull(), df_orcamentos['valor_real'], df_orcamentos['valor'])
+        #df_orcamentos['valor_usado'] = np.where(df_orcamentos['valor_real'].notnull(), df_orcamentos['valor_real'], df_orcamentos['valor'])
         #df_orcamentos['nome_cc_pai'] = df_orcamentos['cc_pai_detalhes'].apply(lambda x: x['nome'])
         
-        
+        df_orcamentos['valor_usado'] = np.where((df_orcamentos['valor_real'].notnull()) & (df_orcamentos['valor_real'] > 0), df_orcamentos['valor_real'], df_orcamentos['valor'])
+
         ccs_pai = CentroCustoPai.objects.all().values('id', 'nome')
         cc_pai_id_to_name = {cc_pai['id']: cc_pai['nome'] for cc_pai in ccs_pai}
 
         df_orcamentos['nome_cc_pai'] = df_orcamentos['centro_de_custo_pai'].apply(lambda x: cc_pai_id_to_name[x])
         df_orcamentos['nome_cc_pai'] = df_orcamentos['nome_cc_pai'].astype(str)
         total_orcado = df_orcamentos.groupby('nome_cc_pai')['valor_usado'].sum().to_dict()
- 
+        print
         # Extraindo o nome do produto de 'produto_detalhes'
         df["produto"] = df["produto_detalhes"].apply(lambda x: x["nome"])
         df["centro_custo_pai"] = df["centro_custo_pai_detalhes"].apply(lambda x: x["nome"])
         df["quantidade"] = df["quantidade"].astype(float)
         df['projetado_cc_pai'] = df['centro_custo_pai'].map(total_orcado)
         df['projetado'] = df['projetado_cc_pai'] / df['quantidade']
-        
 
         quantidade = df.groupby("produto")["quantidade"].sum()
         quantidade_dict = df.groupby("produto")["quantidade"].sum().to_dict()
