@@ -28,6 +28,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes
+from avaliacoes.management.models import Colaborador
 from baseOrcamentaria.orcamento.models import RaizAnalitica,CentroCustoPai,CentroCusto,RaizSintetica,ContaContabil,GrupoItens,OrcamentoBase
 from baseOrcamentaria.orcamento.serializers import RaizAnaliticaSerializer,CentroCustoPaiSerializer,CentroCustoSerializer,RaizSinteticaSerializer,ContaContabilSerializer,GrupoItensSerializer,OrcamentoBaseSerializer
 from baseOrcamentaria.orcamento.models import Gestor
@@ -445,7 +446,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
     def calculosOrcado(self, request):
         # Serializa os dados dos orçamentos
         ano = request.data.get('ano')
-        meses = request.data.get('periodo')
+        meses = request.data.get('periodo',[])
 
         # Verifica se 'meses' é uma lista, caso contrário, converte para lista
         if not isinstance(meses, list):
@@ -459,7 +460,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         if ano:
             filters['ano'] = ano
         if meses:
-            meses = meses.split(",")
+            
             filters['mes_especifico__in'] = meses
 
         if filters: 
@@ -556,9 +557,11 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         if mes:
             mes = mes.split(",")
             filters &= Q(mes_especifico__in=mes)
+
+       
         if centro_de_custo_pai_ids:
-            ids_list = centro_de_custo_pai_ids.split(",")
-            filters &= Q(centro_de_custo_pai_id__in=ids_list)
+            centro_de_custo_pai_ids = centro_de_custo_pai_ids.split(",")
+            filters &= Q(centro_de_custo_pai_id__in=centro_de_custo_pai_ids)
         if filial:
             filiais = filial.split(",")  # Divide a string em uma lista de filiais
             filters &= Q(filial__in=filiais)
@@ -931,6 +934,8 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             }      
 
         return Response(response_data, status=status.HTTP_200_OK)
+    
+    
 
     @action(detail=False, methods=['get'], url_path='agrupamentosPorAno')
     def agrupamentosPorAno(self, request):
@@ -1028,11 +1033,106 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         }
 
         return Response(response_data, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['get'], url_path='meusAgrupamentosPorAno')
+    def meusAgrupamentosPorAno(self, request):
+        ano = request.query_params.get('ano')
+        meses = request.query_params.get('periodo', [])
+        filial = request.query_params.get('filial', [])
+        grupos_itens = request.query_params.get('grupos_itens', [])
+        centros_custo_pai = request.query_params.get('centros_custo', [])
+
+        filters = Q()
+
+        # Filtros básicos
+        if ano:
+            filters &= Q(ano=ano)
+        if meses:
+            meses = meses.split(",")  # Divide a string em uma lista de meses
+            filters &= Q(mes_especifico__in=meses)
+        if filial:
+            filiais = filial.split(",")  # Divide a string em uma lista de filiais
+            filters &= Q(filial__in=filiais)
+
+        # Filtro por grupos de itens # Filtro por grupos de itens
+        if grupos_itens:
+            grupos_itens = grupos_itens.split(",")  # Divide a string em uma lista de grupos de itens
+            grupo_filter = Q()
+            for grupo in grupos_itens:
+                grupo_filter |= Q(conta_contabil__endswith=grupo)
+            filters &= grupo_filter
+
+        # Filtro por centros de custo pai
+        if centros_custo_pai:
+            centros_custo_pai = centros_custo_pai.split(",")  # Divide a string em uma lista de IDs de centros de custo pai
+            filters &= Q(centro_de_custo_pai__in=centros_custo_pai)
+
+        # Consulta no banco
+        orcamentos_base = OrcamentoBase.objects.filter(filters)
+        serializer = self.get_serializer(orcamentos_base, many=True)
+        serialized_data = serializer.data
+
+        # Converte dados para DataFrame
+        df = pd.DataFrame(serialized_data)
+
+        if df.empty:
+            return Response({"error": "Nenhum dado encontrado para os filtros especificados."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Função para formatar valores com locale
+        def format_locale(value):
+            return locale.format_string("%.0f", value, grouping=True)
+
+        # Garante que as colunas sejam numéricas
+        df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce')
+        df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
+
+        # Usa 'valor_real' se não for nulo, caso contrário usa 'valor'
+        df['valor_usado'] = np.where((df['valor_real'].notnull()) & (df['valor_real'] > 0), df['valor_real'], df['valor'])
+
+        # Agrupamento por centro de custo pai
+        centros_custo_pai_map = CentroCustoPai.objects.all().values('id', 'nome')
+        mapa_centros_custo_pai = {cc_pai['id']: cc_pai['nome'] for cc_pai in centros_custo_pai_map}
+        df['centro_de_custo_pai'] = df['centro_de_custo_pai'].map(mapa_centros_custo_pai)
+        
+        total_por_cc_pai = {}
+        total_geral = 0
+        for cc_pai, group in df.groupby('centro_de_custo_pai'):
+            saldo = group['valor_usado'].sum()
+            total_por_cc_pai[cc_pai] = format_locale(saldo)
+            total_geral += saldo
+
+        total_cc = {'saldo': format_locale(total_geral)}
+
+        # Agrupamento por grupo de itens
+        grupo_itens_map = {
+            item['codigo']: item['nome_completo']
+            for item in GrupoItens.objects.values('codigo', 'nome_completo')
+        }
+        df['GRUPO_ITENS'] = df['conta_contabil'].str[-9:].map(grupo_itens_map)
+
+        total_por_grupo_itens = {}
+        total_geral_grupo_itens = 0
+        for grupo, group in df.groupby('GRUPO_ITENS'):
+            saldo = group['valor_usado'].sum()
+            total_por_grupo_itens[grupo] = format_locale(saldo)
+            total_geral_grupo_itens += saldo
+
+        total_grupo_itens = {'saldo': format_locale(total_geral_grupo_itens)}
+
+        # Retorno da resposta
+        response_data = {
+            'total_por_cc_pai': total_por_cc_pai,
+            'total_cc': total_cc,
+            'total_por_grupo_itens': total_por_grupo_itens,
+            'total_grupo_itens': total_grupo_itens
+        }
+
+        return Response(response_data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['POST'], url_path='calculosDespesa')
     def calculosDespesa(self, request):
         ano = request.data.get('ano')
-        meses = request.data.get('periodo')
+        meses = request.data.get('periodo',[])
 
         # Verifica se 'meses' é uma lista, caso contrário, converte para lista
         if not isinstance(meses, list):
@@ -1046,7 +1146,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         if ano:
             filters['ano'] = ano
         if meses:
-            meses = meses.split(",")
+            
             filters['mes_especifico__in'] = meses
 
         # Sereliza os dados dos orçamentos
@@ -1180,4 +1280,4 @@ def AplicarPorcentagem(request):
 
   
   
-    
+
