@@ -602,19 +602,24 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             for item in GrupoItens.objects.values('codigo', 'nome_completo')
         }
 
-        if any(p in prefixos_para_agrupamento for p in prefixos):
-            print('ORÇADOOOOOSSSOSOSOSOS entrou no if')       
+        if any(p in prefixos_para_agrupamento for p in prefixos):       
 
             # Caso especial: agrupar 011 e 012 juntos
             if '011' in prefixos or '012' in prefixos:
-                prefixos = ['011', '012'] 
+                prefixos = list(set(prefixos) | {'011', '012'})
 
             # Caso especial: agrupar 022 e 023 juntos
             if '022' in prefixos or '023' in prefixos:
-                prefixos = ['022', '023']
+                prefixos = list(set(prefixos) | {'022', '023'})
 
-        
             df_filtrado = df[df['CONTA_PRIMEIROS_3'].isin(prefixos)]
+
+            if 'centro_de_custo_pai' not in df_filtrado.columns:
+                df_filtrado['centro_de_custo_pai'] = None  # Adiciona a coluna com valores padrão
+
+            df_filtrado = df_filtrado.copy()
+            #df_filtrado['centro_de_custo_pai'] = df_filtrado['centro_de_custo_pai'].map(mapa_centros_custo_pai)
+
             df_filtrado['GRUPO_ITENS'] = df_filtrado['CONTA_ULTIMOS_9'].map(grupo_itens_map)
             #df_agrupado = df_filtrado.groupby('GRUPO_ITENS')['valor_usado'].sum().reset_index()
 
@@ -631,6 +636,8 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             #agrupa por centro de custo pai
             centros_custo_pai = CentroCustoPai.objects.all().values('id', 'nome')
             mapa_centros_custo_pai = {cc_pai['id']: cc_pai['nome'] for cc_pai in centros_custo_pai}
+
+            
             df_filtrado['centro_de_custo_pai'] = df_filtrado['centro_de_custo_pai'].map(mapa_centros_custo_pai)
 
             # Calcula a soma corretamente
@@ -761,7 +768,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
 
         
             filters = Q()
-            print('entrou no elseeeeeeeeeeeeeeeeeeeeeeee')
+            
             if grupo_itens:
                 gps_cods = grupo_itens.split(",")  # Divide os códigos em uma lista
                 q_filter = Q()
@@ -769,7 +776,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
                     q_filter |= Q(conta_contabil__endswith=cod)  # Usa OR para qualquer código que corresponda
                 
                 filters &= q_filter  # Aplica ao filtro geral
-                print('filtrossssssssssssssssssssssssss',filters)
+                
             if ano:
                 filters &= Q(ano=ano)
             if mes:
@@ -1040,7 +1047,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         meses = request.query_params.get('periodo', [])
         filial = request.query_params.get('filial', [])
         grupos_itens = request.query_params.get('grupos_itens', [])
-        centros_custo_pai = request.query_params.get('centros_custo', [])
+        centros_custo_pai = request.query_params.get('ccs_pai', [])
 
         filters = Q()
 
@@ -1098,9 +1105,12 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         total_geral = 0
         for cc_pai, group in df.groupby('centro_de_custo_pai'):
             saldo = group['valor_usado'].sum()
-            total_por_cc_pai[cc_pai] = format_locale(saldo)
+            gestor = group['gestor'].iloc[0]
+            total_por_cc_pai[cc_pai] = { 
+               'saldo': format_locale(saldo),
+               'gestor': gestor
+            }
             total_geral += saldo
-
         total_cc = {'saldo': format_locale(total_geral)}
 
         # Agrupamento por grupo de itens
@@ -1114,7 +1124,11 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         total_geral_grupo_itens = 0
         for grupo, group in df.groupby('GRUPO_ITENS'):
             saldo = group['valor_usado'].sum()
-            total_por_grupo_itens[grupo] = format_locale(saldo)
+            gestor = group['gestor'].iloc[0]
+            total_por_grupo_itens[grupo] = {
+            'saldo': format_locale(saldo),
+            'gestor': gestor
+            }
             total_geral_grupo_itens += saldo
 
         total_grupo_itens = {'saldo': format_locale(total_geral_grupo_itens)}
@@ -1276,8 +1290,8 @@ def AplicarPorcentagem(request):
             {"error": f"Ocorreu um erro: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-    
 
-  
-  
+
+
+
 

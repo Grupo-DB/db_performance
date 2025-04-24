@@ -1,3 +1,4 @@
+import calendar
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
@@ -63,25 +64,47 @@ def calculos_realizados_grupo_itens(request):
     else:
         raise ValueError("O parâmetro 'grupo_itens' deve ser uma lista.")
     
+
+    # Verifica se há meses futuros
+    mes_atual = datetime.date.today().month
+    # if any(mes > mes_atual for mes in meses):
+    #     raise ValueError("O parâmetro 'periodo' contém meses futuros, o que não é permitido.")
+
+
+     # Determina a data de início e fim
+    if ano:
+        mes_inicio = min(meses)
+        mes_fim = max(meses)
+
+        data_inicio = datetime.date(ano, mes_inicio, 1)        
+
+        if mes_fim >= mes_atual:
+            data_fim = datetime.date.today()
+        else:
+            ultimo_dia = calendar.monthrange(ano, mes_fim)[1]
+            data_fim = datetime.date(ano, mes_fim, ultimo_dia)
+
+        
+    else:
+        raise ValueError("O parâmetro 'ano' é obrigatório.")
+    
+    data_inicio_formatada = data_inicio.strftime('%d/%m/%Y')
+    data_fim_formatada = data_fim.strftime('%d/%m/%Y')    
+    
+    print(f"Data de início: {data_inicio}")
+    print(f"Data de fim: {data_fim}")
+    
     # Conversão de listas para strings no formato esperado pelo SQL
     filiais_string = ', '.join(map(str, filiais_list))
     grupo_itens_string = ', '.join(map(str, grupo_itens_list))
     cc_string = ", ".join(map(str, cc_list))
     meses_string = ", ".join(map(str, meses))
 
-
      # Constrói cláusula dinâmica para filtro 'CCSTCOD'
     if cc_list:
         cc_conditions = " OR ".join([f"CCSTCOD LIKE '%{cc}%'" for cc in cc_list])
     else:
         cc_conditions = "1=1"  # Condição neutra se 'cc_list' não for fornecida
-
-    # Gera o intervalo de datas com base no ano
-    if ano:
-        data_inicio = f"{ano}-01-01"
-        data_fim = datetime.date.today().strftime("%Y-%m-%d")
-    else:
-        raise ValueError("O parâmetro 'ano' é obrigatório.")
     
     meses_condition = f"MONTH(LC.LANCDATA) IN ({meses_string})" if meses else "1=1"
 
@@ -115,7 +138,7 @@ def calculos_realizados_grupo_itens(request):
                                             AND LC.LANCSIT = 0      
             LEFT OUTER JOIN ESTOQUE ESTQ ON ESTQ.ESTQCOD = BEST.BESTESTQ
             WHERE 
-                CAST(LC.LANCDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+                CAST(LC.LANCDATA AS DATE) BETWEEN '{data_inicio_formatada}' AND '{data_fim_formatada}'
                 AND LC.LANCEMP = 1
                 AND LC.LANCFIL IN ({filiais_string})
                 AND LANCSIT = 0
@@ -221,8 +244,9 @@ def calculos_realizados_grupo_itens(request):
         axis=1
     )
 
-    # Remove os apóstrofos da coluna CONTA
-    consulta_realizado['CONTA'] = consulta_realizado['CONTA'].str.replace("'", "")
+    if not consulta_realizado['CONTA'].isnull().all():
+        # Remove os apóstrofos da coluna CONTA
+        consulta_realizado['CONTA'] = consulta_realizado['CONTA'].str.replace("'", "")
 
     # Cria a coluna DESCRICAO
     consulta_realizado['DESCRICAO'] = consulta_realizado.apply(
@@ -244,15 +268,15 @@ def calculos_realizados_grupo_itens(request):
     # Converte a data
     consulta_realizado['LANCDATA'] = pd.to_datetime(consulta_realizado['LANCDATA']).dt.strftime('%d/%m/%Y')
 
-
-    # Pegando os últimos 9 caracteres da conta
-    consulta_realizado['CONTA_ULTIMOS_9'] = consulta_realizado['CONTA'].str[-9:]
+    if 'CONTA' in consulta_realizado.columns:
+        consulta_realizado['CONTA'] = consulta_realizado['CONTA'].astype(str)  # Converte para string
+        consulta_realizado['CONTA_ULTIMOS_9'] = consulta_realizado['CONTA'].str[-9:]
 
     # Pegando os 3 primeiros caracteres da conta
     consulta_realizado['CONTA_PRIMEIROS_3'] = consulta_realizado['CONTA_ULTIMOS_9'].str[:3]
 
     prefixos = [item[:3] for item in grupo_itens_list]
-    print(prefixos)
+ 
 
     # Lista de prefixos que precisam ser agrupados
     prefixos_para_agrupamento = ['011', '012', '014', '022', '023', '082', '101']
@@ -263,23 +287,28 @@ def calculos_realizados_grupo_itens(request):
         for item in GrupoItens.objects.values('codigo', 'nome_completo')
     }
 
+    def extrair_codigos(codigos):
+        if codigos is None:  # Verifica se o valor é None
+            return []
+        return codigos.strip('+').split('+')
+
     # Se o prefixo consultado for '011' ou '012', agrupar ambos
     if any(p in prefixos_para_agrupamento for p in prefixos):
-        print('Entrou no if')
 
         # Caso especial: agrupar 011 e 012 juntos
         if '011' in prefixos or '012' in prefixos:
-            prefixos = ['011', '012'] 
+            prefixos = list(set(prefixos + ['011', '012']))
 
         # Caso especial: agrupar 022 e 023 juntos
         if '022' in prefixos or '023' in prefixos:
-            prefixos = ['022', '023']
+            prefixos = list(set(prefixos + ['022', '023']))
 
         # Filtrando os dados considerando os prefixos selecionados
         consulta_filtrada = consulta_realizado[consulta_realizado['CONTA_PRIMEIROS_3'].isin(prefixos)]
 
-        # Mapeando o grupo de itens
-        consulta_filtrada['GRUPO_ITENS'] = consulta_filtrada['CONTA_ULTIMOS_9'].map(grupo_itens_map)
+        # Corrigir o uso de .loc para evitar SettingWithCopyWarning
+        consulta_filtrada = consulta_filtrada.copy()
+        consulta_filtrada.loc[:, 'GRUPO_ITENS'] = consulta_filtrada['CONTA_ULTIMOS_9'].map(grupo_itens_map)
 
         # Agrupando os valores somando os saldos
         consulta_agrupada = consulta_filtrada.groupby('GRUPO_ITENS')['SALDO'].sum().reset_index()
@@ -295,8 +324,14 @@ def calculos_realizados_grupo_itens(request):
             total_formatado = locale.format_string("%.0f", total, grouping=True)
 
     else:
+        
         # Caso contrário, processa normalmente
         consulta_filtrada = consulta_realizado[consulta_realizado['CONTA_ULTIMOS_9'].isin(grupo_itens_list)]
+
+        # Corrigir o uso de .loc para evitar SettingWithCopyWarning
+        consulta_filtrada = consulta_filtrada.copy()
+        consulta_filtrada['CODIGOS_SEPARADOS'] = consulta_filtrada['CCSTCOD'].apply(extrair_codigos)
+
         consulta_agrupada = consulta_filtrada.groupby('CONTA_ULTIMOS_9').agg({
             'SALDO': 'sum',
             'DEB_VALOR': 'sum',
@@ -319,9 +354,7 @@ def calculos_realizados_grupo_itens(request):
 
     codigos_requisicao = request.data.get('ccs',[])
     # Função para extrair códigos da string
-    def extrair_codigos(codigos):
-        # Remove "+" e transforma em lista de códigos
-        return codigos.strip('+').split('+')
+    
     
     # Excluir os códigos 4700, 4701 e 4703
     codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in ['4700', '4701', '4703']]

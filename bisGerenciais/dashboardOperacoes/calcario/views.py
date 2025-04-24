@@ -1196,33 +1196,7 @@ def calculos_calcario_graficos_carregamento(request):
         response_data['volume_mensal'] = volume_mensal
 
 
-    return JsonResponse(response_data, safe=False)
-
-# Certifique-se de que 'codigos_requisicao' está definido antes de usá-lo
-if 'codigos_requisicao' not in locals():
-    codigos_requisicao = []  # Inicializa como uma lista vazia caso não esteja definido
-
-# Certifique-se de que 'df_explodido' está definido antes de usá-lo
-if 'df_explodido' not in locals():
-    df_explodido = pd.DataFrame()  # Inicializa como um DataFrame vazio caso não esteja definido
-
-# Certifique-se de que a coluna 'CODIGOS_SEPARADOS' existe no DataFrame
-if 'CODIGOS_SEPARADOS' not in df_explodido.columns:
-    df_explodido['CODIGOS_SEPARADOS'] = ''  # Inicializa a coluna como vazia
-
-# Certifique-se de que os valores em 'codigos_requisicao' e 'CODIGOS_SEPARADOS' são strings
-codigos_requisicao = [str(codigo) for codigo in codigos_requisicao]
-df_explodido['CODIGOS_SEPARADOS'] = df_explodido['CODIGOS_SEPARADOS'].astype(str)
-
-# Adicionar logs para verificar os valores
-print("Codigos requisicao:", codigos_requisicao)
-print("Valores únicos em CODIGOS_SEPARADOS:", df_explodido['CODIGOS_SEPARADOS'].unique())
-
-# Filtrar as linhas que contêm os códigos recebidos na requisição
-df_filtrado = df_explodido[df_explodido['CODIGOS_SEPARADOS'].isin(codigos_requisicao)]
-
-# Adicionar log para verificar o resultado do filtro
-print("df_filtrado após filtro:", df_filtrado)
+    return JsonResponse(response_data, safe=False)   
 
 
 

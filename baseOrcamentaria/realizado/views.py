@@ -1,3 +1,4 @@
+import calendar
 from django.shortcuts import render
 from datetime import datetime, timedelta
 from django.views.decorators.csrf import csrf_exempt
@@ -50,6 +51,30 @@ def calculos_realizado(request):
     # Validação dos meses
     if not isinstance(meses, list) or not all(isinstance(mes, int) and 1 <= mes <= 12 for mes in meses):
         raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
+    
+    # Verifica se há meses futuros
+    mes_atual = datetime.date.today().month
+    #if any(mes > mes_atual for mes in meses):
+        #raise ValueError("O parâmetro 'periodo' contém meses futuros, o que não é permitido.")
+    
+     # Determina a data de início e fim
+    if ano:
+        mes_inicio = min(meses)
+        mes_fim = max(meses)
+
+        data_inicio = datetime.date(ano, mes_inicio, 1)
+
+        if mes_fim >= mes_atual:
+            data_fim = datetime.date.today()
+        else:
+            ultimo_dia = calendar.monthrange(ano, mes_fim)[1]
+            data_fim = datetime.date(ano, mes_fim, ultimo_dia)
+    else:
+        raise ValueError("O parâmetro 'ano' é obrigatório.")
+    
+    print(f"Data de início: {data_inicio}")
+    print(f"Data de fim: {data_fim}")
+
     # Converte listas para strings no formato esperado pelo SQL
     filiais_string = ", ".join(map(str, filiais_list))
     cc_string = ", ".join(map(str, cc_list))
@@ -60,14 +85,7 @@ def calculos_realizado(request):
         cc_conditions = " OR ".join([f"CCSTCOD LIKE '%{cc}%'" for cc in cc_list])
     else:
         cc_conditions = "1=1"  # Condição neutra se 'cc_list' não for fornecida
-
-    # Gera o intervalo de datas com base no ano
-    if ano:
-        data_inicio = f"{ano}-01-01"
-        #data_fim = f"{ano}-12-31"
-        data_fim = datetime.date.today().strftime("%Y-%m-%d")
-    else:
-        raise ValueError("O parâmetro 'ano' é obrigatório.")
+ 
 
     meses_condition = f"MONTH(LC.LANCDATA) IN ({meses_string})" if meses else "1=1"
 

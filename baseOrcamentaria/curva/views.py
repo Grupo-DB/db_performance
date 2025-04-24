@@ -1,3 +1,4 @@
+import calendar
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
@@ -517,6 +518,36 @@ def meus_calculos_gp_curva(request):
     if not isinstance(meses, list) or not all(isinstance(mes, int) and 1 <= mes <= 12 for mes in meses):
         raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
     
+
+     # Verifica se há meses futuros
+    mes_atual = datetime.date.today().month
+    # if any(mes > mes_atual for mes in meses):
+    #     raise ValueError("O parâmetro 'periodo' contém meses futuros, o que não é permitido.")
+
+
+     # Determina a data de início e fim
+    if ano:
+        mes_inicio = min(meses)
+        mes_fim = max(meses)
+
+        data_inicio = datetime.date(ano, mes_inicio, 1)        
+
+        if mes_fim >= mes_atual:
+            data_fim = datetime.date.today()
+        else:
+            ultimo_dia = calendar.monthrange(ano, mes_fim)[1]
+            data_fim = datetime.date(ano, mes_fim, ultimo_dia)
+
+        
+    else:
+        raise ValueError("O parâmetro 'ano' é obrigatório.")
+    
+    data_inicio_formatada = data_inicio.strftime('%d/%m/%Y')
+    data_fim_formatada = data_fim.strftime('%d/%m/%Y')    
+    
+    print(f"Data de início: {data_inicio}")
+    print(f"Data de fim: {data_fim}")
+
     # Conversão de listas para strings no formato esperado pelo SQL
     filiais_string = ', '.join(map(str, filiais_list))
     grupo_itens_list_str = ', '.join(map(str, grupo_itens_list))
@@ -528,13 +559,6 @@ def meus_calculos_gp_curva(request):
         cc_conditions = " OR ".join([f"CCSTCOD LIKE '%{cc}%'" for cc in cc_list])
     else:
         cc_conditions = "1=1"  # Condição neutra se 'cc_list' não for fornecida
-
-    # Gera o intervalo de datas com base no ano
-    if ano:
-        data_inicio = f"{ano}-01-01"
-        data_fim = datetime.date.today().strftime("%Y-%m-%d")
-    else:
-        raise ValueError("O parâmetro 'ano' é obrigatório.")
     
     meses_condition = f"MONTH(LC.LANCDATA) IN ({meses_string})" if meses else "1=1"
     
@@ -675,7 +699,9 @@ def meus_calculos_gp_curva(request):
     )
 
     # Remove os apóstrofos da coluna CONTA
-    consulta_realizado['CONTA'] = consulta_realizado['CONTA'].str.replace("'", "")
+    if not consulta_realizado['CONTA'].isnull().all():
+        # Remove os apóstrofos da coluna CONTA
+        consulta_realizado['CONTA'] = consulta_realizado['CONTA'].str.replace("'", "")
 
     # Cria a coluna DESCRICAO
     consulta_realizado['DESCRICAO'] = consulta_realizado.apply(
@@ -698,7 +724,17 @@ def meus_calculos_gp_curva(request):
     consulta_realizado['LANCDATA'] = pd.to_datetime(consulta_realizado['LANCDATA']).dt.strftime('%d/%m/%Y')
 
     # Pegando os últimos 9 caracteres da conta
-    consulta_realizado['CONTA_ULTIMOS_9'] = consulta_realizado['CONTA'].str[-9:]
+    if 'CONTA' in consulta_realizado.columns:
+        consulta_realizado['CONTA'] = consulta_realizado['CONTA'].astype(str)  # Converte para string
+        consulta_realizado['CONTA_ULTIMOS_9'] = consulta_realizado['CONTA'].str[-9:]
+
+    # Pegando os 3 primeiros caracteres da conta
+    consulta_realizado['CONTA_PRIMEIROS_3'] = consulta_realizado['CONTA_ULTIMOS_9'].str[:3]
+
+    prefixos = [item[:3] for item in grupo_itens_list]
+ 
+    # Lista de prefixos que precisam ser agrupados
+    prefixos_para_agrupamento = ['011', '012', '014', '022', '023', '082', '101']
 
     # Mapeando os grupos de itens
     grupo_itens_map = {
@@ -709,20 +745,45 @@ def meus_calculos_gp_curva(request):
         for item in GrupoItens.objects.values('codigo', 'nome_completo', 'gestor__nome')
     }
 
+    def extrair_codigos(codigos):
+        if codigos is None:  # Verifica se o valor é None
+            return []
+        return codigos.strip('+').split('+')
+
     # Mapeando o grupo de itens no DataFrame
     consulta_realizado['GRUPO_ITENS'] = consulta_realizado['CONTA_ULTIMOS_9'].map(
     lambda codigo: grupo_itens_map.get(codigo, {}).get('nome_completo', 'Gestor Indefinido')
 )
+    
 
-    # Filtra o DataFrame com base nos grupos de itens fornecidos
-    if grupo_itens_list:
-        consulta_realizado = consulta_realizado[consulta_realizado['CONTA_ULTIMOS_9'].isin(grupo_itens_list)]
+     # Se o prefixo consultado for '011' ou '012', agrupar ambos
+    if any(p in prefixos_para_agrupamento for p in prefixos):
+        if grupo_itens_list:
+        # Filtrando os dados considerando os prefixos selecionados
+            consulta_realizado = consulta_realizado[consulta_realizado['CONTA_ULTIMOS_9'].isin(grupo_itens_list)]
 
-    # Agrupando os dados
-    consulta_agrupada = consulta_realizado.groupby(['GRUPO_ITENS', 'CONTA_ULTIMOS_9']).agg({
-    'SALDO': 'sum'
-}).reset_index()
-        
+        # Caso especial: agrupar 011 e 012 juntos
+        if '011' in prefixos or '012' in prefixos:
+            prefixos = list(set(prefixos + ['011', '012']))
+
+        # Caso especial: agrupar 022 e 023 juntos
+        if '022' in prefixos or '023' in prefixos:
+            prefixos = list(set(prefixos + ['022', '023']))
+
+        # Filtrando os dados considerando os prefixos selecionados
+        consulta_filtrada = consulta_realizado[consulta_realizado['CONTA_PRIMEIROS_3'].isin(prefixos)]
+
+        # Corrigir o uso de .loc para evitar SettingWithCopyWarning
+        consulta_filtrada = consulta_filtrada.copy()
+        consulta_filtrada.loc[:, 'GRUPO_ITENS'] = consulta_filtrada['CONTA_ULTIMOS_9'].map(grupo_itens_map)
+
+        # Agrupando os dados
+        consulta_agrupada = consulta_realizado.groupby(['GRUPO_ITENS', 'CONTA_ULTIMOS_9']).agg({
+            'SALDO': 'sum'
+        }).reset_index()
+        print(consulta_agrupada)
+
+
     # Criando o dicionário com saldo e nome do gestor
     dicionario_soma_nomes = {}
     total_soma_nomes = 0
@@ -1209,21 +1270,21 @@ def meus_calculos_cc_curva(request):
 ###################################################################################################
 
     codigos_requisicao = cc_list_str
-
+    print('codigos_requisicao',codigos_requisicao)
     # Função para extrair códigos da string
     def extrair_codigos(codigos):
         # Remove "+" e transforma em lista de códigos
         return codigos.strip('+').split('+')
     
     # # Excluir os códigos 4700, 4701 e 4703
-    codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in ['4700', '4701', '4703']]
+    #codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in ['4700', '4701', '4703']]
     codigos_excluir = ['4700', '4701', '4703']
 
     # Verifica se '0' está presente em filiais_list
     if '0' not in filiais_string:
          # Exclui os códigos especificados de codigos_requisicao
         codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in codigos_excluir]
-
+        
     consulta_ccs = CentroCusto.objects.filter(
         codigo__in=codigos_requisicao
     ).values('codigo', 'nome')
@@ -1242,10 +1303,11 @@ def meus_calculos_cc_curva(request):
     
     # Filtrar as linhas que contêm os códigos recebidos na requisição
     df_filtrado = df_explodido[df_explodido['CODIGOS_SEPARADOS'].isin(codigos_requisicao)]
-    
     # Agrupar por código e somar os valores
     df_agrupado = df_filtrado.groupby('CODIGOS_SEPARADOS')['SALDO'].sum().to_dict()
-    
+    print('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',df_agrupado)
+
+
     df_agrupado_nomes = {}
     df_agrupado_nomes_detalhes = {}
 
@@ -1294,7 +1356,11 @@ def meus_calculos_cc_curva(request):
     consulta_ccs_pais = CentroCusto.objects.filter(
         codigo__in=codigos_agrupados  # Substituí 'id' por 'codigo'
     ).values('codigo', 'nome', 'cc_pai__id', 'cc_pai__nome', 'gestor__nome')
-   
+ 
+    # Verifique os resultados da consulta
+    
+
+    
 
     mapa_codigos_pais = {
         str(item['codigo']): {
