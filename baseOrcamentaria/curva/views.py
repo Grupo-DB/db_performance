@@ -778,18 +778,19 @@ def meus_calculos_gp_curva(request):
         consulta_filtrada.loc[:, 'GRUPO_ITENS'] = consulta_filtrada['CONTA_ULTIMOS_9'].map(grupo_itens_map)
 
         # Agrupando os dados
+    if not consulta_realizado.empty:
         consulta_agrupada = consulta_realizado.groupby(['GRUPO_ITENS', 'CONTA_ULTIMOS_9']).agg({
-            'SALDO': 'sum'
-        }).reset_index()
-        print(consulta_agrupada)
-
+                'SALDO': 'sum'
+                }).reset_index()
+            
+        
 
     # Criando o dicionário com saldo e nome do gestor
     dicionario_soma_nomes = {}
     total_soma_nomes = 0
     for _, row in consulta_agrupada.iterrows():
-        grupo = row['GRUPO_ITENS']
-        saldo = row['SALDO']
+        grupo = row['GRUPO_ITENS'] if pd.notnull(row['GRUPO_ITENS']) else 'Grupo Indefinido'
+        saldo = row['SALDO'] if pd.notnull(row['SALDO']) else 0
         
         # Obter o nome do gestor a partir do mapeamento
         gestor_nome = grupo_itens_map.get(row['CONTA_ULTIMOS_9'], {}).get('gestor_nome', 'Sem Gestor')
@@ -1270,10 +1271,11 @@ def meus_calculos_cc_curva(request):
 ###################################################################################################
 
     codigos_requisicao = cc_list_str
-    print('codigos_requisicao',codigos_requisicao)
+
     # Função para extrair códigos da string
     def extrair_codigos(codigos):
-        # Remove "+" e transforma em lista de códigos
+        if not codigos:
+            return []
         return codigos.strip('+').split('+')
     
     # # Excluir os códigos 4700, 4701 e 4703
@@ -1305,9 +1307,7 @@ def meus_calculos_cc_curva(request):
     df_filtrado = df_explodido[df_explodido['CODIGOS_SEPARADOS'].isin(codigos_requisicao)]
     # Agrupar por código e somar os valores
     df_agrupado = df_filtrado.groupby('CODIGOS_SEPARADOS')['SALDO'].sum().to_dict()
-    print('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',df_agrupado)
-
-
+   
     df_agrupado_nomes = {}
     df_agrupado_nomes_detalhes = {}
 
