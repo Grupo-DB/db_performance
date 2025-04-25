@@ -1,7 +1,6 @@
 from django.shortcuts import render,HttpResponse
 from baseOrcamentaria.orcamento.models import Gestor
 from baseOrcamentaria.orcamento.serializers import GestorSerializer
-
 # Create your views here.
 def management(request):
     return HttpResponse(request,'ok')
@@ -283,8 +282,7 @@ class AvaliadoViewSet(viewsets.ModelViewSet):
 class ColaboradorViewSet(viewsets.ModelViewSet):
     queryset = Colaborador.objects.all()
     serializer_class = ColaboradorSerializer  
-
-
+    permission_classes = [DjangoModelPermissions]
 
     def perform_create(self, serializer):
         username = self.request.data.get('username', None)
@@ -499,9 +497,11 @@ class AvaliadorViewSet(viewsets.ModelViewSet):
         serializer = AvaliadorSerializer(avaliador)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
+@permission_classes([IsInGroup])    
 class EmpresaViewSet(viewsets.ModelViewSet):
     queryset = Empresa.objects.all()
     serializer_class = EmpresaSerializer
+    permission_classes = [DjangoModelPermissions]
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -511,7 +511,8 @@ class EmpresaViewSet(viewsets.ModelViewSet):
 
 class FilialViewSet(viewsets.ModelViewSet):
     queryset = Filial.objects.all()
-    serializer_class = FilialSerializer    
+    serializer_class = FilialSerializer
+    permission_classes = [DjangoModelPermissions]    
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -528,6 +529,7 @@ class FilialViewSet(viewsets.ModelViewSet):
 class AreaViewSet(viewsets.ModelViewSet):
     queryset = Area.objects.all()
     serializer_class = AreaSerializer
+    permission_classes = [DjangoModelPermissions]
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -544,7 +546,8 @@ class AreaViewSet(viewsets.ModelViewSet):
 
 class SetorViewSet(viewsets.ModelViewSet):
     queryset = Setor.objects.all()
-    serializer_class = SetorSerializer        
+    serializer_class = SetorSerializer  
+    permission_classes = [DjangoModelPermissions]      
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -561,7 +564,8 @@ class SetorViewSet(viewsets.ModelViewSet):
     
 class AmbienteViewSet(viewsets.ModelViewSet):
     queryset = Ambiente.objects.all()
-    serializer_class = AmbienteSerializer        
+    serializer_class = AmbienteSerializer
+    permission_classes = [DjangoModelPermissions]        
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -596,7 +600,8 @@ class CargoViewSet(viewsets.ModelViewSet):
 
 class TipoContratoViewSet(viewsets.ModelViewSet):
     queryset = TipoContrato.objects.all()
-    serializer_class = TipoContratoSerializer        
+    serializer_class = TipoContratoSerializer
+    permission_classes = [DjangoModelPermissions]        
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -613,7 +618,8 @@ class TipoContratoViewSet(viewsets.ModelViewSet):
 
 class TipoAvaliacaoViewSet(viewsets.ModelViewSet):
     queryset = TipoAvaliacao.objects.all()
-    serializer_class = TipoAvaliacaoSerializer   
+    serializer_class = TipoAvaliacaoSerializer  
+    permission_classes = [DjangoModelPermissions] 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -632,7 +638,8 @@ class TipoAvaliacaoViewSet(viewsets.ModelViewSet):
 
 class AvaliacaoViewSet(viewsets.ModelViewSet):
     queryset = Avaliacao.objects.all()
-    serializer_class = AvaliacaoSerializer 
+    serializer_class = AvaliacaoSerializer
+    permission_classes = [DjangoModelPermissions] 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -710,7 +717,8 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
 
 class PerguntaViewSet(viewsets.ModelViewSet):
     queryset = Pergunta.objects.all()
-    serializer_class = PerguntaSerializer     
+    serializer_class = PerguntaSerializer  
+    permission_classes = [DjangoModelPermissions]   
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -722,6 +730,7 @@ class PerguntaViewSet(viewsets.ModelViewSet):
 class FormularioViewSet(viewsets.ModelViewSet):
     queryset = Formulario.objects.all()
     serializer_class = FormularioSerializer 
+    permission_classes = [DjangoModelPermissions]
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
