@@ -755,7 +755,6 @@ def meus_calculos_gp_curva(request):
     lambda codigo: grupo_itens_map.get(codigo, {}).get('nome_completo', 'Gestor Indefinido')
 )
     
-
      # Se o prefixo consultado for '011' ou '012', agrupar ambos
     if any(p in prefixos_para_agrupamento for p in prefixos):
         if grupo_itens_list:
@@ -779,12 +778,14 @@ def meus_calculos_gp_curva(request):
 
         # Agrupando os dados
     if not consulta_realizado.empty:
+        if grupo_itens_list:
+            # Filtrando os dados considerando os prefixos selecionados
+            consulta_realizado = consulta_realizado[consulta_realizado['CONTA_ULTIMOS_9'].isin(grupo_itens_list)]
         consulta_agrupada = consulta_realizado.groupby(['GRUPO_ITENS', 'CONTA_ULTIMOS_9']).agg({
                 'SALDO': 'sum'
                 }).reset_index()
             
-        
-
+   
     # Criando o dicionário com saldo e nome do gestor
     dicionario_soma_nomes = {}
     total_soma_nomes = 0
@@ -819,7 +820,7 @@ def meus_calculos_gp_curva(request):
         return codigos.strip('+').split('+')
     
     # # Excluir os códigos 4700, 4701 e 4703
-    codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in ['4700', '4701', '4703']]
+    #codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in ['4700', '4701', '4703']]
     codigos_excluir = ['4700', '4701', '4703']
 
     # Verifica se '0' está presente em filiais_list
