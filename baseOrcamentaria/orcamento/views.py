@@ -764,8 +764,8 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             centro_de_custo_pai_ids = request.query_params.get('centro_de_custo_pai_id')
             filial = request.query_params.get('filial')
             ano = request.query_params.get('ano')
-            mes = request.query_params.get('mes')
-
+            mes = request.query_params.get('periodo')
+            print('eeeeeeeeennnnnnnnnnnn')
         
             filters = Q()
             
@@ -780,7 +780,8 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             if ano:
                 filters &= Q(ano=ano)
             if mes:
-                filters &= Q(mes_especifico=mes)
+                mes = mes.split(",")
+                filters &= Q(mes_especifico__in=mes)
             if centro_de_custo_pai_ids:
                 ids_list = centro_de_custo_pai_ids.split(",")
                 filters &= Q(centro_de_custo_pai_id__in=ids_list)
@@ -793,11 +794,10 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(orcamentos_base, many=True)
             serialized_data = serializer.data    
             df = pd.DataFrame(serialized_data)
-
+            print('df',df)
                 # Função para formatar valores com locale
             def format_locale(value):
                 return locale.format_string("%.0f",value, grouping=True)
-
 
             # Garante que as colunas sejam numéricas
             df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce')
