@@ -15,3 +15,4 @@ router.register(r'produtos', ProdutoViewSet, basename='Produto')
 urlpatterns = [
     path('', include(router.urls)),
 ]
+

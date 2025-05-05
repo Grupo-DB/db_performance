@@ -943,7 +943,6 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         return Response(response_data, status=status.HTTP_200_OK)
     
     
-
     @action(detail=False, methods=['get'], url_path='agrupamentosPorAno')
     def agrupamentosPorAno(self, request):
         ano = request.query_params.get('ano')
@@ -1249,6 +1248,111 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
         return JsonResponse({"resultado": resultado, "total":total_global, "depreciacao": depreciacao_total}, safe=False)
                         
 
+   
+    @action(detail=False, methods=['POST'], url_path='calculosPpr')
+    def calculosPpr(self, request):
+        ano = request.data.get('ano')
+        meses = request.data.get('periodo', [])
+        filial = request.data.get('filial', [])
+        ccs_pai = request.data.get('ccs_pai', [])
+        tipo_custo = request.data.get('tipo_custo', [])
+
+        # Verifica se 'meses' é uma lista, caso contrário, converte para lista
+        if not isinstance(meses, list):
+            meses = [meses]
+
+        # Remove valores None da lista de meses
+        meses = [mes for mes in meses if mes is not None]
+
+        # Construir a consulta de forma condicional
+        filters = {}
+        if ano:
+            filters['ano'] = ano
+        if meses:
+            filters['mes_especifico__in'] = meses
+        if filial:
+            filial = filial.split(",")  # Divide a string em uma lista de filiais
+            filters['filial__in'] = filial
+        if ccs_pai:
+            filters['centro_de_custo_pai__in'] = ccs_pai
+        if tipo_custo:
+        # Certifique-se de que tipo_custo é uma lista
+            if not isinstance(tipo_custo, list):
+                tipo_custo = tipo_custo.split(",")  # Apenas se for uma string
+            filters['tipo_custo__in'] = tipo_custo  
+
+        print('filters', filters)
+
+        # Serializa os dados dos orçamentos
+        if filters: 
+            orcamentos = OrcamentoBase.objects.filter(**filters)
+        else:
+            orcamentos = OrcamentoBase.objects.all()
+
+        serializer = OrcamentoBaseSerializer(orcamentos, many=True)
+        serialized_orcamentos = serializer.data
+
+        # Cria DataFrame a partir dos dados serializados
+        df = pd.DataFrame(serialized_orcamentos)
+        print('df', df)
+
+        # Mapeia Centros de Custo Pai
+        ccs_pai = CentroCustoPai.objects.all().values('id', 'nome')
+        cc_pai_id_to_name = {cc_pai['id']: cc_pai['nome'] for cc_pai in ccs_pai}
+        print('cc_pai_id_to_name', cc_pai_id_to_name)
+
+        # Inicializa acumuladores
+        total_por_cc_pai = defaultdict(float)  # Acumulador por centro_de_custo_pai
+        total_geral_cc_pai = 0  # Soma total de todos os centro_de_custo_pai
+        total_por_tipo = defaultdict(float)  # Acumulador por tipo de custo
+
+        # Verifica se as colunas necessárias existem no DataFrame
+        if 'centro_de_custo_pai' in df.columns and 'valor' in df.columns and 'valor_real' in df.columns:
+            # Converte as colunas para numérico
+            df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
+            df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce').fillna(0)
+
+            # Depuração: Verifica os valores únicos em centro_de_custo_pai e tipo_custo
+            print("Valores únicos em centro_de_custo_pai:", df['centro_de_custo_pai'].unique())
+            print("Valores únicos em tipo_custo:", df['tipo_custo'].unique())
+
+            # Calcula os totais por centro_de_custo_pai
+            for _, row in df.iterrows():
+                valor_real = row['valor_real']
+                valor = row['valor']
+                cc_pai_id = row.get('centro_de_custo_pai')  # Obtém o ID do centro_de_custo_pai
+                cc_pai_nome = cc_pai_id_to_name.get(cc_pai_id, "Indefinido")  # Mapeia o nome do centro_de_custo_pai
+
+                valor_utilizado = valor_real if valor_real > 0 else valor
+
+                # Agrupa por centro_de_custo_pai
+                total_por_cc_pai[cc_pai_nome] += valor_utilizado
+                total_geral_cc_pai += valor_utilizado
+
+                # Agrupa por tipo de custo
+                tipo = row.get('tipo_custo')
+                if tipo:
+                    total_por_tipo[tipo] += valor_utilizado
+
+        # Formata os resultados
+        resultado_cc_pai = [
+            {"nome": cc_pai_nome, "total": total}
+            for cc_pai_nome, total in total_por_cc_pai.items()
+        ]
+
+        resultado_tipos = [
+            {"tipo": tipo, "total": total}
+            for tipo, total in total_por_tipo.items()
+        ]
+
+        return JsonResponse({
+            "agrupado_por_cc_pai": resultado_cc_pai,
+            "total_geral_cc_pai": total_geral_cc_pai,
+            "agrupado_por_tipo": resultado_tipos
+        }, safe=False)
+                    
+
+
 @api_view(['POST'])
 def AplicarPorcentagem(request):
     try:
@@ -1290,8 +1394,6 @@ def AplicarPorcentagem(request):
             {"error": f"Ocorreu um erro: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-
-
 
 
 

@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'baseOrcamentaria.grupoitens',
     'baseOrcamentaria.custoproducao',
     'baseOrcamentaria.curva',
+    'baseOrcamentaria.ppr'
 ]
 
 MIDDLEWARE = [
