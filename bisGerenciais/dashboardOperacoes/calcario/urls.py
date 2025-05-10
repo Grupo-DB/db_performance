@@ -3,7 +3,7 @@ from django.conf.urls.static import static
 from django.conf import settings
 from rest_framework import routers
 from . import views
-from .views import calculos_calcario,calculos_graficos_calcario,calculos_equipamentos_detalhes,calculos_calcario_graficos_carregamento,calculos_calcario_realizado
+from .views import calculos_calcario,calculos_graficos_calcario,calculos_equipamentos_detalhes,calculos_calcario_graficos_carregamento,calculos_calcario_realizado,calculos_atm_realizado
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView,TokenVerifyView
 from rest_framework.routers import DefaultRouter
 
@@ -14,5 +14,6 @@ urlpatterns = [
     path('calcular_calcario_graficos/', calculos_graficos_calcario, name='calcario_graficos'),
     path('calcular_calcario_carregamento_graficos/', calculos_calcario_graficos_carregamento, name='calcarioGraficosCarregamento'),
     path('calcular_equipamentos_detalhes/',calculos_equipamentos_detalhes,name='EquipamentosDetalhes'),
-    path('indicadores/',calculos_calcario_realizado, name='Indicadores')
+    path('indicadores/',calculos_calcario_realizado, name='Indicadores'),
+    path('indicadores_atm/',calculos_atm_realizado, name='IndicadoresATM')
 ]

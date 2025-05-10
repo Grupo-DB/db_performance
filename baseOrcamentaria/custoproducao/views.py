@@ -123,7 +123,7 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
         df_orcamentos['nome_cc_pai'] = df_orcamentos['centro_de_custo_pai'].apply(lambda x: cc_pai_id_to_name[x])
         df_orcamentos['nome_cc_pai'] = df_orcamentos['nome_cc_pai'].astype(str)
         total_orcado = df_orcamentos.groupby('nome_cc_pai')['valor_usado'].sum().to_dict()
-        print
+       
         # Extraindo o nome do produto de 'produto_detalhes'
         df["produto"] = df["produto_detalhes"].apply(lambda x: x["nome"])
         df["centro_custo_pai"] = df["centro_custo_pai_detalhes"].apply(lambda x: x["nome"])
@@ -142,11 +142,20 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
         for cc_pai_id in df['centro_custo_pai'].unique():
             centros_custo = CentroCusto.objects.filter(cc_pai_id=cc_pai_id).values_list('codigo', flat=True)
             centros_custo_list = list(centros_custo)
-            #print(centros_custo_list)
+            #print(f"Centros de custo para cc_pai_id {cc_pai_id}: {centros_custo_list}")
             # Chamar o método calculos_realizado com a lista de centros de custo
             factory = RequestFactory()
             data = request.data.copy()
-            data['filiais'] = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+             # Verifica se o cc_pai_id é 57 e ajusta as filiais
+            
+            # Verifica se o cc_pai_id é 57 e ajusta as filiais
+            if cc_pai_id == 59:
+                data['filiais'] = [3]  # Apenas filial 3
+                #print(f"Filiais ajustadas para cc_pai_id {cc_pai_id}: {data['filiais']}")
+            else:
+                data['filiais'] = [0, 1, 2, 3, 4, 5, 6, 7, 8]  # Todas as filiais
+                #print(f"Filiais ajustadas para cc_pai_id {cc_pai_id}: {data['filiais']}")
+
             data['ano'] = ano  # Ano recebido na requisição
             data['meses'] = [periodo] if isinstance(periodo, int) else periodo
             data['ccs'] = centros_custo_list  # Adiciona a lista de centros de custo
@@ -163,6 +172,7 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
 
         fabricas_metodos = {
             '05 - Fábrica de Calcário': '/calcario/indicadores/',
+            '08 - F08 - UP ATM':'/calcario/indicadores_atm/',
             '04 - Fábrica de Cal': '/cal/indicadores/',
             '06 - Fábrica de Argamassa': '/argamassa/indicadores/',
             '03 - Fábrica de Calcinação': '/cal/indicadores_calcinacao/',
@@ -173,6 +183,7 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
 
          # Adicionar os valores realizados ao DataFrame
         df['realizado_cc_pai'] = df['centro_custo_pai'].map(centro_custo_realizado)
+        #print('df',df['realizado_cc_pai'])
         df['producao'] = None
 
         for fabrica, endpoint in fabricas_metodos.items():
@@ -197,7 +208,7 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
                     df.loc[df['fabrica'] == fabrica, 'producao'] = total_fabricado
                 else:
                     # Em caso de erro, define o valor como 0
-                    df.loc[df['fabrica'] == fabrica, 'fabricado'] = 0
+                    df.loc[df['fabrica'] == fabrica, 'producao'] = 0
 
         #df['realizado'] = df['realizado_cc_pai'] / df['producao']
         df['realizado'] = df.apply(
@@ -234,8 +245,8 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
     )
         df_aggregated['diferenca'] = df_aggregated['projetado'] - df_aggregated['realizado']
         df_aggregated['percentual'] = 1 - (df_aggregated['realizado'] / df_aggregated['projetado'])
-        # print('llll',df_aggregated)
-        # print('df',df)
+        #print('llll',df_aggregated)
+        #print('df',df)
         response_data = {
             "quantidade": quantidade_dict,
             "total_orcado": total_orcado,

@@ -72,8 +72,8 @@ def calculos_realizado(request):
     else:
         raise ValueError("O parâmetro 'ano' é obrigatório.")
     
-    print(f"Data de início: {data_inicio}")
-    print(f"Data de fim: {data_fim}")
+    #print(f"Data de início: {data_inicio}")
+    #print(f"Data de fim: {data_fim}")
 
     # Converte listas para strings no formato esperado pelo SQL
     filiais_string = ", ".join(map(str, filiais_list))

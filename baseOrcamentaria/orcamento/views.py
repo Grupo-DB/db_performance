@@ -1281,7 +1281,6 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
                 tipo_custo = tipo_custo.split(",")  # Apenas se for uma string
             filters['tipo_custo__in'] = tipo_custo  
 
-        print('filters', filters)
 
         # Serializa os dados dos orçamentos
         if filters: 
@@ -1294,29 +1293,38 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
 
         # Cria DataFrame a partir dos dados serializados
         df = pd.DataFrame(serialized_orcamentos)
-        print('df', df)
-
+       
         # Mapeia Centros de Custo Pai
         ccs_pai = CentroCustoPai.objects.all().values('id', 'nome')
         cc_pai_id_to_name = {cc_pai['id']: cc_pai['nome'] for cc_pai in ccs_pai}
-        print('cc_pai_id_to_name', cc_pai_id_to_name)
-
+        
         # Inicializa acumuladores
         total_por_cc_pai = defaultdict(float)  # Acumulador por centro_de_custo_pai
         total_geral_cc_pai = 0  # Soma total de todos os centro_de_custo_pai
         total_por_tipo = defaultdict(float)  # Acumulador por tipo de custo
 
         # Verifica se as colunas necessárias existem no DataFrame
-        if 'centro_de_custo_pai' in df.columns and 'valor' in df.columns and 'valor_real' in df.columns:
+        if 'centro_de_custo_pai' in df.columns and 'valor' in df.columns and 'valor_real' in df.columns and 'filial' in df.columns:
             # Converte as colunas para numérico
             df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
             df['valor_real'] = pd.to_numeric(df['valor_real'], errors='coerce').fillna(0)
 
-            # Depuração: Verifica os valores únicos em centro_de_custo_pai e tipo_custo
-            print("Valores únicos em centro_de_custo_pai:", df['centro_de_custo_pai'].unique())
-            print("Valores únicos em tipo_custo:", df['tipo_custo'].unique())
+            # Usa 'valor_real' se disponível, caso contrário usa 'valor'
+            df['valor_utilizado'] = np.where(df['valor_real'] > 0, df['valor_real'], df['valor'])
 
-            # Calcula os totais por centro_de_custo_pai
+            # Agrupamento por tipo de custo e filial
+            agrupado_por_tipo_e_filial = df.groupby(['tipo_custo', 'filial'])['valor_utilizado'].sum().reset_index()
+
+            # Formata os resultados
+            resultado_tipos_filial = []
+            for _, row in agrupado_por_tipo_e_filial.iterrows():
+                resultado_tipos_filial.append({
+                    "tipo": row['tipo_custo'],
+                    "filial": row['filial'],
+                    "total": row['valor_utilizado']
+                })
+
+            # Agrupamento por centro_de_custo_pai
             for _, row in df.iterrows():
                 valor_real = row['valor_real']
                 valor = row['valor']
@@ -1345,10 +1353,12 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             for tipo, total in total_por_tipo.items()
         ]
 
+        # Retorna o JSON com os agrupamentos
         return JsonResponse({
             "agrupado_por_cc_pai": resultado_cc_pai,
             "total_geral_cc_pai": total_geral_cc_pai,
-            "agrupado_por_tipo": resultado_tipos
+            "agrupado_por_tipo": resultado_tipos,
+            "agrupado_por_tipo_e_filial": resultado_tipos_filial
         }, safe=False)
                     
 
