@@ -204,6 +204,18 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
                     fabricado_data = response.json()  # Converte a resposta para um dicionário
                     total_fabricado = fabricado_data.get('total', 0)
 
+                    if fabrica == '01 - Mineração':
+                        # Faz uma requisição adicional ao endpoint calcular_pedras
+                        pedras_data = {
+                            "ano": ano,  # Inclui o ano
+                            "periodo": periodo  # Inclui o período
+                        }
+                        pedras_response = requests.post('http://172.50.10.79:8008/britagem/calcular_pedras/', json=pedras_data)
+                        if pedras_response.status_code == 200:
+                            pedras_result = pedras_response.json()
+                            total_pedras = pedras_result.get('total', 0)
+                            total_fabricado += total_pedras
+
                     # Atualiza a coluna 'fabricado' no DataFrame
                     df.loc[df['fabrica'] == fabrica, 'producao'] = total_fabricado
                 else:

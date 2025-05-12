@@ -898,3 +898,112 @@ def calculos_minerecao_indicadores(request):
 
     #total = consulta_indicadores['TOTAL'].sum()
     return JsonResponse({'total': total}, safe=False)
+
+@csrf_exempt
+@api_view(['POST'])
+def calculos_pedras(request):
+    ano = request.data.get('ano', None)
+    meses = request.data.get('periodo', [])
+    
+    # Validação dos meses
+    if not isinstance(meses, list) or not all(isinstance(mes, int) and 1 <= mes <= 12 for mes in meses):
+        raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
+    # Converte listas para strings no formato esperado pelo SQL
+    meses_string = ", ".join(map(str, meses))
+
+     # Gera o intervalo de datas com base no ano
+    if ano:
+        data_inicio = f"{ano}-01-01"
+        #data_fim = f"{ano}-12-31"
+        data_fim = datetime.today().strftime("%Y-%m-%d")
+    else:
+        raise ValueError("O parâmetro 'ano' é obrigatório.")    
+
+
+    meses_condition = f"MONTH(NFDATA) IN ({meses_string})" if meses else "1=1"
+    meses_conditions = f"MONTH(NFEDATA) IN ({meses_string})" if meses else "1=1"
+
+
+    consulta_pedra = pd.read_sql(f"""
+        SELECT DISTINCT NFNUM, NFDATA, CLINOME, CLICOD, NFPED, PEDIDENT PEDIDO_CLIENTE, IPEDIDENT ITEM_PEDIDO, NFCOD,
+
+        ESTQNOMECOMP, ESTQCOD, ESPSIGLA,
+        INFQUANT, 
+        (INFQUANT * INFPESO / CAST(1000 AS DOUBLE PRECISION)) TN, 
+
+        (INFTOTAL / NFTOTAL) * NFTOTAL TOTAL, INFICMSSTVALOR ICMSST,
+        (INFTOTAL / NFTOTAL) * NFDAFRETE FRETE,
+
+        CASE 
+        WHEN NFRESPFRETE = 1 THEN 'Emitente'
+        WHEN NFRESPFRETE = 2 THEN 'Destinatario'
+        ELSE 'NÃO DEFINIDO'
+        END RESP_FRETE
+
+        FROM NOTAFISCAL NF
+        JOIN CLIENTE ON CLICOD = NFCLI
+        JOIN CIDADE ON CIDCOD = CLICIDADE
+        JOIN ITEMNOTAFISCAL ON INFNFCOD = NFCOD
+        JOIN ESTOQUE ON ESTQCOD = INFESTQ
+        JOIN ESPECIE ON ESPCOD = ESTQESP
+        JOIN NATUREZAOPERACAO ON NFNOP = NOPCOD
+        LEFT OUTER JOIN PEDIDO ON PEDNUM = NFPED
+        LEFT OUTER JOIN ITEMPEDIDO ON IPEDPED = INFPED AND IPEDESTQ = INFESTQ
+
+        WHERE CAST (NFDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND NFSIT = 1 
+        AND NOPFLAGNF LIKE '_S______________________N%'
+
+        AND INFESTQ IN(224,227,20291,6648)
+        AND ({meses_condition})
+        UNION ALL
+
+        SELECT NFENUMNF NFNUM, NFEDATANF NFDATA, CLINOME, CLICOD, NFPED, PEDIDENT PEDIDO_CLIENTE, IPEDIDENT ITEM_PEDIDO, NFCOD,
+
+        ESTQNOMECOMP, ESTQCOD, ESPSIGLA,
+
+        -INFEQUANT INFQUANT,
+
+        -(CASE
+        WHEN SUBSTRING(NOPEFLAG, 53, 1) = 'S' THEN 0.00 /* Nota Fiscal Complementar de Preço */
+        ELSE (INFEQUANT * ESTQPESO / CAST(1000 AS DOUBLE PRECISION))
+        END) TN, 
+
+        -(((INFETOTAL / NFETOTAL) * NFETOTAL))  TOTAL, 
+
+        -INFEICMSSTVALOR ICMSST,
+
+        -INFEFRETE FRETE,
+
+        CASE 
+        WHEN NFRESPFRETE = 1 THEN 'Emitente'
+        WHEN NFRESPFRETE = 2 THEN 'Destinatario'
+        ELSE 'NÃO DEFINIDO'
+        END RESP_FRETE
+
+
+        FROM ITEMNOTAFISCALENTRADA
+        JOIN NOTAFISCALENTRADA ON NFECOD = INFENFE
+        JOIN FORNECEDOR ON FORCOD = NFEFOR
+        JOIN CIDADE ON CIDCOD = FORCIDADE
+        JOIN NATUREZAOPERACAOENTRADA ON NOPECOD = INFENOPE
+        JOIN ESTOQUE ON ESTQCOD = INFEITEM
+        JOIN ESPECIE ON ESPCOD = ESTQESP
+        JOIN ITEMNOTAFISCAL ON INFNUM = INFEINFNUM
+        JOIN NOTAFISCAL ON NFCOD = INFNFCOD
+        JOIN CLIENTE ON CLICOD = NFCLI
+        LEFT OUTER JOIN PEDIDO ON NFPED = PEDNUM
+        LEFT OUTER JOIN ITEMPEDIDO ON IPEDPED = INFPED AND IPEDESTQ = INFESTQ
+
+        WHERE NFESIT = 1
+        AND SUBSTRING(NOPEFLAG, 10,1) = 'S'
+        AND CAST (NFEDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND INFEITEM  IN (224,227,20291,6648)
+        AND ({meses_conditions})                          
+
+        ORDER BY CLINOME, CLICOD, NFDATA, NFNUM
+
+    """, engine)
+
+    total = consulta_pedra['TN'].sum()
+    return JsonResponse({'total': total}, safe=False)
