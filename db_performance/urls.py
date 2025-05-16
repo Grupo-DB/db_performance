@@ -24,6 +24,7 @@ urlpatterns = [
     path('custoproducao/', include('baseOrcamentaria.custoproducao.urls')),
     path('curva/', include('baseOrcamentaria.curva.urls')),
     path('ppr/', include('baseOrcamentaria.ppr.urls')),
+    path('ensaio/', include('controleQualidade.ensaio.urls')),
 
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
