@@ -3,4 +3,4 @@ from django.apps import AppConfig
 
 class CalculosensaioConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'calculosEnsaio'
+    name = 'controleQualidade.calculosEnsaio'

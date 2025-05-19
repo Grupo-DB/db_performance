@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'baseOrcamentaria.curva',
     'baseOrcamentaria.ppr',
     'controleQualidade.ensaio',
+    'controleQualidade.calculosEnsaio',
 ]
 
 MIDDLEWARE = [

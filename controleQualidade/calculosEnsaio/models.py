@@ -1,5 +1,4 @@
 from django.db import models
-
 from controleQualidade.ensaio.models import Ensaio
 
 class CalculoEnsaio(models.Model):
