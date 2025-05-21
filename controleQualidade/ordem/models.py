@@ -8,6 +8,7 @@ class Ordem(models.Model):
     responsavel = models.CharField(max_length=255, null=True, blank=True)
     digitador = models.CharField(max_length=355, null=True, blank=True)
     modificacoes = models.TextField(null=True, blank=True)
+    #classificação = lista com opções ficas = Controle de Qualidade, SAC, DEsenvolvimento de Produtos
     class Meta:
         verbose_name = 'Ordem'
         verbose_name_plural = 'Ordens'
