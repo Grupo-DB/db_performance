@@ -26,7 +26,7 @@ urlpatterns = [
     path('ppr/', include('baseOrcamentaria.ppr.urls')),
     path('ensaio/', include('controleQualidade.ensaio.urls')),
     path('calculosEnsaio/', include('controleQualidade.calculosEnsaio.urls')),
-
+    path('plano/', include('controleQualidade.plano.urls')),
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

@@ -6,7 +6,7 @@ from .models import CalculoEnsaio
 
 class CalculoEnsaioSerializer(serializers.ModelSerializer):
     ensaios = serializers.PrimaryKeyRelatedField(queryset=Ensaio.objects.all(), write_only=True, many=True)
-    ensaio_detalhes = EnsaioSerializer(source='ensaio', read_only=True)
+    ensaios_detalhes = EnsaioSerializer(source='ensaios', read_only=True, many=True)
     class Meta:
         model = CalculoEnsaio
         fields = '__all__'

@@ -378,6 +378,14 @@ def calculos_realizado(request):
         if codigos is None:
             return []  # Retorna uma lista vazia se codigos for None
         return codigos.strip('+').split('+')
+    
+    codigos_excluir = ['4700', '4701', '4703']
+
+    # Verifica se '0' está presente em filiais_list
+    if '0'  in filiais_string:
+        #print("Filiais diferentes de 0")
+         # Exclui os códigos especificados de codigos_requisicao
+        codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in codigos_excluir]
 
     # Consulta os nomes correspondentes aos códigos requisitados
     consulta_ccs = CentroCusto.objects.filter(
