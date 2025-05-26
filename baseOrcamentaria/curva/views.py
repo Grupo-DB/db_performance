@@ -304,7 +304,7 @@ def calculos_curva(request):
     codigos_excluir = ['4700', '4701', '4703']
 
     # Verifica se '0' está presente em filiais_list
-    if '0'  in filiais_string:
+    if '0' in filiais_string:
         #print("Filiais diferentes de 0")
          # Exclui os códigos especificados de codigos_requisicao
         codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in codigos_excluir]
@@ -371,56 +371,39 @@ def calculos_curva(request):
     # Certifique-se de que os códigos estão no formato correto (string)
     codigos_agrupados = [str(codigo) for codigo in codigos_agrupados]
     
-    # Verifique os valores de codigos_agrupados
-   
 
-    # Consulta os centros de custo e seus pais com base nos códigos agrupados
-    mapa_filiais_requisicao_banco = {
-    0: 'Matriz',
-    1: 'F07 - CD MPA',
-    3: 'F08 - UP ATM',
-    5: 'F09 - CD MFL',
-    # ...
-}
-    filiais_list_ajustada = [mapa_filiais_requisicao_banco.get(f, f) for f in filiais_list]
+    
 
     consulta_ccs_pais = CentroCusto.objects.filter(
         codigo__in=codigos_agrupados
     ).values('codigo', 'nome', 'cc_pai__id', 'cc_pai__nome', 'cc_pai__filial__nome', 'gestor__nome')
 
+   
+
+   # Cria um dicionário para mapear os códigos dos centros de custo para seus pais
     mapa_codigos_pais = {
-        (str(item['codigo']), str(item.get('cc_pai__filial__nome', ''))): {
-                'cc_pai_id': str(item['cc_pai__id']) if item['cc_pai__id'] else None,
-                'cc_pai_nome': item['cc_pai__nome'] or 'Sem Pai',
-                'gestor_nome': item.get('gestor__nome', 'Sem Gestor')
-            }
+        str(item['codigo']): {
+            'cc_pai_id': str(item['cc_pai__id']) if item['cc_pai__id'] else None,
+            'cc_pai_nome': item['cc_pai__nome'] or 'Sem Pai',
+            'gestor_nome': item.get('gestor__nome', 'Sem Gestor')
+        }
         for item in consulta_ccs_pais
     }
-
-    codigo_para_filial = {
-    str(row['CODIGOS_SEPARADOS']): str(row['UNIDADE'])
-    for _, row in df_filtrado.iterrows()
-}
     
     
     df_agrupado_por_pai = {}
     total_geral = 0
     for codigo, saldo in df_agrupado.items():
-        filial = codigo_para_filial.get(str(codigo))
-        pai_info = mapa_codigos_pais.get((str(codigo), str(filial)), {'cc_pai_nome': 'Sem Pai', 'gestor_nome': 'Sem Gestor'})
+
+        pai_info = mapa_codigos_pais.get(str(codigo), {'cc_pai_nome': 'Sem Pai', 'gestor_nome': 'Sem Gestor'})
         pai_nome = pai_info['cc_pai_nome']
         pai_gestor = pai_info['gestor_nome']
-
-        # Pula se for "Sem Pai" ou "Sem Gestor"
-        if pai_nome == 'Sem Pai' or pai_gestor == 'Sem Gestor':
-            continue
-
         if pai_nome not in df_agrupado_por_pai:
             df_agrupado_por_pai[pai_nome] = {
                 'saldo': 0,
                 'gestor': pai_gestor
             }
-        df_agrupado_por_pai[pai_nome]['saldo'] += saldo
+        df_agrupado_por_pai[pai_nome]['saldo'] += saldo 
         total_geral += saldo
     total_geral_formatado = format_locale(total_geral)
 
@@ -942,7 +925,6 @@ def meus_calculos_gp_curva(request):
     total_geral_formatado = format_locale(total_geral)
 
     df_agrupado_pais_detalhes = {}
-
     # Agrupar os valores por centro de custo pai e criar o detalhamento
     for codigo, saldo in df_agrupado.items():
         # Obter informações do pai a partir do mapeamento
@@ -1150,7 +1132,7 @@ def meus_calculos_cc_curva(request):
                 ELSE '?????' 
             END AS SITUACAO,
             CASE 
-                WHEN LANCFIL = 0 THEN (SELECT EMPSIGLA FROM EMPRESA WHERE EMPCOD = LANCEMP) 
+                WHEN LANCFIL = 0 THEN 'Matriz'
                 ELSE (SELECT FILSIGLA FROM FILIAL WHERE FILCOD = LANCFIL) 
             END AS UNIDADE,
             ITEM,
@@ -1188,7 +1170,7 @@ def meus_calculos_cc_curva(request):
                 ELSE '?????' 
             END AS SITUACAO,
             CASE 
-                WHEN LANCFIL = 0 THEN (SELECT EMPSIGLA FROM EMPRESA WHERE EMPCOD = LANCEMP) 
+                WHEN LANCFIL = 0 THEN 'Matriz'
                 ELSE (SELECT FILSIGLA FROM FILIAL WHERE FILCOD = LANCFIL) 
             END AS UNIDADE,
             ITEM,
@@ -1300,14 +1282,13 @@ def meus_calculos_cc_curva(request):
 
     # Verifica se '0' está presente em filiais_list
     if '0' in filiais_string:
-       
+        print("Filial 0 encontrada, excluindo códigos específicos.")
          #Exclui os códigos especificados de codigos_requisicao
         codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in codigos_excluir]
-        
+        print("Códigos após exclusão:", codigos_requisicao)
     consulta_ccs = CentroCusto.objects.filter(
         codigo__in=codigos_requisicao
-    ).values('codigo', 'nome')
-   
+    ).values('codigo', 'nome', 'cc_pai__id', 'cc_pai__nome', 'gestor__nome')
 
     # Converte o resultado da consulta para um dicionário
     mapa_codigos_nomes = {
@@ -1378,9 +1359,9 @@ def meus_calculos_cc_curva(request):
     filiais_list_ajustada = [mapa_filiais_requisicao_banco.get(f, f) for f in filiais_list]
 
     consulta_ccs_pais = CentroCusto.objects.filter(
-        codigo__in=codigos_agrupados
-    ).values('codigo', 'nome', 'cc_pai__id', 'cc_pai__nome', 'cc_pai__filial__nome', 'gestor__nome')
- 
+            codigo__in=codigos_agrupados
+        ).values('codigo', 'nome', 'cc_pai__id', 'cc_pai__nome', 'cc_pai__filial__nome', 'gestor__nome')
+  
     # Verifique os resultados da consulta
     
     mapa_codigos_pais = {
@@ -1421,7 +1402,6 @@ def meus_calculos_cc_curva(request):
     
     
     df_agrupado_pais_detalhes = {}
-
     # Agrupar os valores por centro de custo pai e criar o detalhamento
     for codigo, saldo in df_agrupado.items():
         # Obter informações do pai a partir do mapeamento
