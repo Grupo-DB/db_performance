@@ -108,6 +108,8 @@ def calculos_atm_realizado(request):
                 AND BPROSIT = 1
                 AND IBPROTIPO = 'D'
                 AND BPROEP IN (28,37,38,39,40,35,24,31)
+                AND BPROEQP IN (694,737,743,760)
+                AND BPROFPRO NOT IN(78)
                 AND ({meses_condition})
 
                 ORDER BY BPRODATA1, BPROCOD, ESTQNOMECOMP, ESTQCOD
