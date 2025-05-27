@@ -669,9 +669,20 @@ def calculos_realizado_matriz(request):
                 FROM LANCAMENTOS_BASE
                 
 """,engine)
+    
+    consulta_realizado = consulta_realizado[consulta_realizado.apply(
+    lambda row: row['REFERENCIA'] != 'TRANSF. CUSTO P PROD. ELAB', axis=1
+)]
+
     #Regra para obtenção dos valores usados
     consulta_realizado['SALDO'] = consulta_realizado.apply(
     lambda row: row["DEB_VALOR"] if str(row["CONTA_DEB"])[1] in ['3', '4'] else row["CRED_VALOR"],
+    axis=1
+)
+
+    #Regra para obtenção dos valores usados
+    consulta_realizado['CONTA_USADA'] = consulta_realizado.apply(
+    lambda row: row["CONTA_DEB"] if str(row["CONTA_DEB"])[1] in ['3', '4'] else row["CONTA_CRED"],
     axis=1
 )
 
@@ -713,12 +724,13 @@ def calculos_realizado_matriz(request):
 
 
 
-    def mapear_tipo_custo(conta_deb, conta_cred):
+    def mapear_tipo_custo(conta_usada):
         custos_insumos = {'4101021', '4102021', '4103021', '4104021', '4105021', '4106021', '4107021', '4108021', '4109021', '4110021', '4111021', '4112021'}
         custos_materia_prima = {'4101023', '4102023', '4103023', '4104023', '4105023', '4106023', '4107023', '4108023', '4109023', '4110023', '4111023', '4112023'}
         custos_embalagens = {'4101022', '4102022', '4103022', '4104022', '4105022', '4106022', '4107022', '4108022', '4109022', '4110022', '4111022', '4112022'}
+        #custos_embalagens = {'4106022',}
 
-        for conta in [conta_deb, conta_cred]:  
+        for conta in [conta_usada]:  
             conta = str(conta).lstrip("'")  # Remove a ' extra
             prefixo = conta[:4]
             conta_completa = conta[:7]
@@ -744,13 +756,21 @@ def calculos_realizado_matriz(request):
 
     # Aplicar a função a cada linha, passando ambas as colunas
     consulta_realizado['TIPO_CUSTO'] = consulta_realizado.apply(
-        lambda row: mapear_tipo_custo(row['CONTA_DEB'], row['CONTA_CRED']),
+        lambda row: mapear_tipo_custo(row['CONTA_USADA']),
         axis=1
     )
 
+    
+    linhas_custos = consulta_realizado[
+        consulta_realizado['TIPO_CUSTO'].isin([ 'Custo Direto Variável Embalagens'])
+    ]
+
+    pd.set_option('display.max_rows',None)
+    #print(linhas_custos[['CONTA_DEB', 'CONTA_CRED','CONTA_USADA', 'SALDO', 'TIPO_CUSTO']])
+
     total_tipo_deb = consulta_realizado.groupby('TIPO_CUSTO')['SALDO'].sum().to_dict()
     total_tipo_deb_formatado = {tipo: format_locale(valor) for tipo, valor in total_tipo_deb.items()}
-    
+    print('total_tipo_deb:', total_tipo_deb)
      # Soma os valores para 'Custo Direto Variável'
     total_variavel = (
         total_tipo_deb.get('Custo Direto Variável Insumos', 0) +
@@ -759,11 +779,16 @@ def calculos_realizado_matriz(request):
     )
 
     # Soma os valores para 'Custos Fixos'
-    custos_fixo = (
+    custos_fixo = round(
         total_tipo_deb.get('Custos Indiretos', 0) +
-        total_tipo_deb.get('Custo Direto Fixo', 0)
+        total_tipo_deb.get('Custo Direto Fixo', 0),
+        2
     )
 
+    
+    print('FIXO',  custos_fixo)
+
+    
     # Formata os valores
     total_variavel_formatado = format_locale(total_variavel)
     custos_fixo_formatado = format_locale(custos_fixo)
