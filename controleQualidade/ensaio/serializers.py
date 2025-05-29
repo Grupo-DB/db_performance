@@ -11,4 +11,5 @@ class EnsaioSerializer(serializers.ModelSerializer):
     tipo_ensaio_detalhes = TipoEnsaioSerializer(source='tipo_ensaio', read_only=True)
     class Meta:
         model = Ensaio
-        fields = '__all__'        
+        #fields = '__all__'
+        fields = ['id', 'descricao', 'responsavel', 'valor', 'tipo_ensaio','tipo_ensaio_detalhes','tempo_previsto']        

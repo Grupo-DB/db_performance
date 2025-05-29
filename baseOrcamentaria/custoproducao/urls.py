@@ -13,3 +13,4 @@ router.register(r'custoproducao', CustoProducaoViewSet, basename='CustoProducao'
 urlpatterns = [
     path('', include(router.urls)),
 ]
+

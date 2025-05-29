@@ -23,7 +23,7 @@ class Produto(models.Model):
 class Amostra(models.Model):
     id = models.AutoField(primary_key=True)
     data_coleta = models.DateField(null=False, blank=False)
-    data_entrega = models.DateField(null=False, blank=False)
+    data_entrada = models.DateField(null=False, blank=False)
     material = models.ForeignKey(Linha, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
     numero = models.CharField(max_length=255, null=False, blank=False)
     tipo_amostra = models.ForeignKey(TipoAmostra, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
@@ -37,7 +37,7 @@ class Amostra(models.Model):
     representatividade_lote = models.CharField(max_length=255, null=True, blank=True)
     identificacao_complementar = models.CharField(max_length=955, null=True, blank=True)
     complemento = models.CharField(max_length=955,null=True, blank=True)
-    ordem = models.ForeignKey(Ordem, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
+    ordem = models.OneToOneField(Ordem, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
     digitador = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=255, null=False, blank=False)
     class meta:
