@@ -1229,4 +1229,32 @@ def calculos_cal_graficos_carregamento(request):
     if volume_mensal is not None:
         response_data['volume_mensal'] = volume_mensal                
     
-    return JsonResponse(response_data, safe=False)     
+    return JsonResponse(response_data, safe=False)
+
+@csrf_exempt
+@api_view(['POST'])
+def calculos_filler(request):
+    data = request.data.get('data')
+
+    consulta_filler = pd.read_sql(f"""
+    SELECT BPROCOD, BPRODATA, ESTQCOD,EQPLOC, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,BPROEP,
+                IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
+
+                FROM BAIXAPRODUCAO
+                JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
+                JOIN ESTOQUE ON ESTQCOD = IBPROREF
+                LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
+
+                WHERE CAST(BPRODATA1 as date) =  '{data}'
+
+                AND BPROEMP = 1
+                AND BPROFIL =0
+                AND BPROSIT = 1
+                AND IBPROTIPO = 'D'
+                AND BPROEP IN (6,7)
+                AND ESTQCOD IN (37,2785)
+                ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD,BPROEP
+    """, engine)
+
+    total = consulta_filler['PESO'].sum()
+    return JsonResponse({'total': total}, status=200)
