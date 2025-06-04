@@ -1,14 +1,14 @@
 from rest_framework import serializers
-from .models import Amostra, TipoAmostra, Produto
+from .models import Amostra, TipoAmostra, ProdutoAmostra
 
 class TipoAmostraSerializer(serializers.ModelSerializer):
     class Meta:
         model = TipoAmostra
         fields = '__all__'
-        
-class ProdutoSerializer(serializers.ModelSerializer):
+
+class ProdutoAmostraSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Produto
+        model = ProdutoAmostra
         fields = '__all__'
 
 class AmostraSerializer(serializers.ModelSerializer):

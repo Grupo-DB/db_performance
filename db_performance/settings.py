@@ -39,6 +39,8 @@ INSTALLED_APPS = [
     'autenticacoes',
     "rest_framework",
     "corsheaders",
+    'simple_history',
+    'django_filters',
     'avaliacoes.management',
     'rest_framework_simplejwt',
     'django_celery_beat',
@@ -201,6 +203,9 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.JSONParser',
         'rest_framework.parsers.MultiPartParser',
         'rest_framework.parsers.FormParser',
+    ],
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend'
     ]
     
 }

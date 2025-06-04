@@ -1,5 +1,6 @@
 from django.db import models
 from controleQualidade.plano.models import PlanoAnalise
+from simple_history.models import HistoricalRecords
 class Ordem(models.Model):
     id = models.AutoField(primary_key=True)
     numero = models.CharField(max_length=255, null=False, blank=False)
@@ -7,9 +8,9 @@ class Ordem(models.Model):
     plano_analise = models.ForeignKey(PlanoAnalise, null=True, blank=True, on_delete=models.RESTRICT, related_name='ordem')
     responsavel = models.CharField(max_length=255, null=True, blank=True)
     digitador = models.CharField(max_length=355, null=True, blank=True)
-    modificacoes = models.TextField(null=True, blank=True)
     classificacao = models.CharField(max_length=255, null=True, blank=True)  # Exemplo: Controle de Qualidade, SAC, Desenvolvimento de Produtos
-    #classificação = lista com opções ficas = Controle de Qualidade, SAC, DEsenvolvimento de Produtos
+    
+    history = HistoricalRecords()
     class Meta:
         verbose_name = 'Ordem'
         verbose_name_plural = 'Ordens'

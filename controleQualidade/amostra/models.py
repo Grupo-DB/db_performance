@@ -1,5 +1,5 @@
 from django.db import models
-from baseOrcamentaria.dre.models import Linha
+from baseOrcamentaria.dre.models import Produto
 from controleQualidade.ordem.models import Ordem
 
 class TipoAmostra(models.Model):
@@ -11,7 +11,7 @@ class TipoAmostra(models.Model):
         verbose_name = 'Tipo de Amostra'
         verbose_name_plural = 'Tipos de Amostra'
 
-class Produto(models.Model):
+class ProdutoAmostra(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=255, null=False, blank=False)
     registro_empresa = models.CharField(max_length=255, null=False, blank=False)
@@ -24,11 +24,11 @@ class Amostra(models.Model):
     id = models.AutoField(primary_key=True)
     data_coleta = models.DateField(null=False, blank=False)
     data_entrada = models.DateField(null=False, blank=False)
-    material = models.ForeignKey(Linha, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
+    material = models.ForeignKey(Produto, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
     numero = models.CharField(max_length=255, null=False, blank=False)
     tipo_amostra = models.ForeignKey(TipoAmostra, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
     subtipo = models.CharField(max_length=255, null=True, blank=True)
-    produto_amostra = models.ForeignKey(Produto, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra') 
+    produto_amostra = models.ForeignKey(ProdutoAmostra, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra') 
     fornecedor = models.CharField(max_length=255, null=True, blank=True)
     periodo_hora = models.CharField(max_length=255, null=True, blank=True)
     periodo_turno = models.CharField(max_length=255, null=True, blank=True)

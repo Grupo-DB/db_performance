@@ -1251,8 +1251,8 @@ def calculos_filler(request):
                 AND BPROFIL =0
                 AND BPROSIT = 1
                 AND IBPROTIPO = 'D'
-                AND BPROEP IN (6,7)
-                AND ESTQCOD IN (37,2785)
+                AND BPROEP IN (6)
+                AND ESTQCOD IN (1,2785)
                 ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD,BPROEP
     """, engine)
 

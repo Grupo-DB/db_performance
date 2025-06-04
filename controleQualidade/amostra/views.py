@@ -2,8 +2,8 @@ from datetime import datetime
 from django.shortcuts import render
 from rest_framework import viewsets,status
 from rest_framework.decorators import action
-from .models import Amostra, TipoAmostra, Produto
-from .serializers import AmostraSerializer, TipoAmostraSerializer, ProdutoSerializer
+from .models import Amostra, TipoAmostra, ProdutoAmostra
+from .serializers import AmostraSerializer, TipoAmostraSerializer, ProdutoAmostraSerializer
 from rest_framework.response import Response
 import pandas as pd
 
@@ -19,8 +19,8 @@ class TipoAmostraViewSet(viewsets.ModelViewSet):
     
 
 class ProdutoViewSet(viewsets.ModelViewSet):
-    queryset = Produto.objects.all()
-    serializer_class = ProdutoSerializer
+    queryset = ProdutoAmostra.objects.all()
+    serializer_class = ProdutoAmostraSerializer
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
