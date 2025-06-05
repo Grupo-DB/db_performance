@@ -29,6 +29,7 @@ urlpatterns = [
     path('plano/', include('controleQualidade.plano.urls')),
     path('ordem/', include('controleQualidade.ordem.urls')),
     path('amostra/', include('controleQualidade.amostra.urls')),
+    path('analise/', include('controleQualidade.analise.urls')),
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

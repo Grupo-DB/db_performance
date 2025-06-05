@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     'controleQualidade.plano',
     'controleQualidade.ordem',
     'controleQualidade.amostra',
+    'controleQualidade.analise',
 ]
 
 MIDDLEWARE = [
