@@ -1,3 +1,4 @@
+import calendar
 from datetime import datetime, timedelta  # Importa as classes necessárias
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
@@ -532,17 +533,31 @@ def calculos_graficos(request):
     
     # Recuperando o tipo de cálculo do corpo da requisição
     tipo_calculo = request.data.get('tipo_calculo')
+    mes = request.data.get('mes')
 
     # Definindo as datas com base no tipo de cálculo
+    tipo_calculo = request.data.get('tipo_calculo')
+    mes = request.data.get('mes')  # Espera um inteiro de 1 a 12
+    ano = request.data.get('ano')  # Opcional: pode passar o ano, senão usa o atual
+
     if tipo_calculo == 'atual':
         data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
         data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
     elif tipo_calculo == 'mensal':
-        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
-        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+        if mes:
+            mes = int(mes)
+            ano = int(ano) if ano else datetime.now().year
+            primeiro_dia = datetime(ano, mes, 1)
+            ultimo_dia_num = calendar.monthrange(ano, mes)[1]
+            ultimo_dia = datetime(ano, mes, ultimo_dia_num)
+            data_inicio = primeiro_dia.strftime('%Y-%m-%d 07:10:00')
+            data_fim = ultimo_dia.strftime('%Y-%m-%d 07:10:00')
+        else:
+            data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')
+            data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')
     elif tipo_calculo == 'anual':
-        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
-        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+        data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')
+        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')
     else:
         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)
 
