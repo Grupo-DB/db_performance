@@ -14,7 +14,7 @@ class ProdutoAmostraSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class AmostraSerializer(serializers.ModelSerializer):
-    ordem = serializers.PrimaryKeyRelatedField(queryset=Ordem.objects.all(), write_only=True)
+    ordem = serializers.PrimaryKeyRelatedField(queryset=Ordem.objects.all(), write_only=True, required=False, allow_null=True)
     ordem_detalhes = OrdemSerializer(source='ordem', read_only=True)
     class Meta:
         model = Amostra

@@ -40,6 +40,6 @@ class Amostra(models.Model):
     ordem = models.OneToOneField(Ordem, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
     digitador = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=255, null=False, blank=False)
-    class meta:
+    class Meta:
         verbose_name = 'Amostra'
         verbose_name_plural = 'Amostras'
