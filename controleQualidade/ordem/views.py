@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from controleQualidade.ordem.OrdemHistorySerializer import OrdemHistorySerializer
 from controleQualidade.ordem.serializers import OrdemSerializer
 from .models import Ordem
+from django.db.models import Max, Func, IntegerField
 from rest_framework.response import Response
 from simple_history.utils import update_change_reason
 from django.contrib.auth import get_user_model
@@ -13,7 +14,6 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, DateFromToRangeFilter
-
 
 
 import pandas as pd
@@ -31,8 +31,16 @@ class OrdemViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='proximo-numero')
     def proximo_numero(self, request):
-        ultimo = Ordem.objects.order_by('-numero').first()
-        proximo = int(ultimo.numero) + 1 if ultimo else 1  # converte para int e adiciona 1, se nultimo.numero + 1 if ultimo else 1
+        # Filtra apenas números válidos
+        qs = Ordem.objects.all()
+        numeros = []
+        for ordem in qs:
+            try:
+                numeros.append(int(ordem.numero))
+            except (ValueError, TypeError):
+                continue
+        max_numero = max(numeros) if numeros else 0
+        proximo = max_numero + 1
         return Response({'numero': proximo})
     
 
