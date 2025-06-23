@@ -173,8 +173,13 @@ def calculos_calcario(request):
     
     volume_britado_total = locale.format_string("%.0f",volume_britado_total_val,grouping=True)
 
-    produtividae_val = volume_britado_total_val / total_hs_val
-    produtividade = locale.format_string("%.1f",produtividae_val,grouping=True)
+    produtividae_val = 0
+    if total_hs_val and total_hs_val > 0:
+        produtividae_val = volume_britado_total_val / total_hs_val
+    else:
+        produtividae_val = 0  # ou outro valor padrão, ou trate como erro
+
+    produtividade = locale.format_string("%.1f", produtividae_val, grouping=True)
 
     # Convertendo para dicionário para serialização
     volume_britado_dict = volume_britado_por_loc.to_dict()

@@ -639,8 +639,18 @@ def calculos_equipamentos_detalhes(request):
         fcmi_mg02_produtividade = 0
 
     ##################---------TOTAIS FCMI-----------------####################################
-    fcmi_produtividade_geral_val = 0 #inicializando a variavel
-    if fcmi_mg01_produtividade or fcmi_mg02_produtividade > 0:
+    print('prod',fcmi_mg01_produtividade,fcmi_mg02_produtividade)
+    def to_float(val):
+        if isinstance(val, str):
+            val = val.replace(',', '.')
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return 0
+
+    fcmi_produtividade_geral_val = 0  # inicializando a variável
+    fcmi_mg01_produtividade_val = 0
+    if to_float(fcmi_mg01_produtividade) > 0 or to_float(fcmi_mg02_produtividade) > 0:
         fcmi_produtividade_geral_val = fcmi_mg01_produtividade_val + fcmi_mg02_produtividade_val
         fcmi_produtividade_geral = locale.format_string("%.1f",fcmi_produtividade_geral_val, grouping=True)
     else:      
