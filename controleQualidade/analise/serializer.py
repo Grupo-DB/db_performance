@@ -19,82 +19,56 @@ class AnaliseCalculoSerializer(serializers.ModelSerializer):
 class AnaliseSerializer(serializers.ModelSerializer):
     amostra = serializers.PrimaryKeyRelatedField(queryset=Amostra.objects.all(), write_only=True)
     amostra_detalhes = AmostraSerializer(source='amostra', read_only=True)
-    ensaios = AnaliseEnsaioSerializer(many=True, read_only=True)
-    calculos = AnaliseCalculoSerializer(many=True, read_only=True)
-    ensaios_write = serializers.ListField(write_only=True, required=False)
-    
-    calculos_write = serializers.ListField(write_only=True, required=False)
-    #ensaios_calc = AnaliseEnsaioSerializer(many=True, read_only=True)
-    #calculos_calc = AnaliseCalculoSerializer(many=True, read_only=True)
-
+    ensaios = AnaliseEnsaioSerializer(many=True, required=False, write_only=True)
+    calculos = AnaliseCalculoSerializer(many=True, required=False, write_only=True)
+    ensaios_detalhes = AnaliseEnsaioSerializer(source='ensaios', many=True, read_only=True)
+    calculos_detalhes = AnaliseCalculoSerializer(source='calculos', many=True, read_only=True)
+    ultimo_ensaio = serializers.SerializerMethodField(read_only=True)
+    ultimo_calculo = serializers.SerializerMethodField(read_only=True) 
     class Meta:
         model = Analise
         fields = '__all__'
 
+    def get_ultimo_ensaio(self, obj):
+        ultimo = obj.ensaios.order_by('-id').first()
+        if ultimo:
+            return AnaliseEnsaioSerializer(ultimo).data
+        return None
+    def get_ultimo_calculo(self, obj):
+        ultimo = obj.calculos.order_by('-id').first()
+        if ultimo:
+            return AnaliseCalculoSerializer(ultimo).data
+        return None 
+
     def update(self, instance, validated_data):
         ensaios_data = validated_data.pop('ensaios', [])
         calculos_data = validated_data.pop('calculos', [])
-
-        print("UPDATE SERIALIZER")
-        print("ensaios_data:", ensaios_data)
-        print("calculos_data:", calculos_data)
-
+        
         # Atualiza os campos normais da análise
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # Atualiza ou cria ensaios
+        # Salva ensaios
         for ensaio in ensaios_data:
-            if 'id' in ensaio:
-                AnaliseEnsaio.objects.filter(id=ensaio['id']).update(
-                    valor=ensaio.get('valor'),
-                    responsavel=ensaio.get('responsavel'),
-                    digitador=ensaio.get('digitador'),
-                    # outros campos...
-                )
-            else:
-                AnaliseEnsaio.objects.create(
-                    analise=instance,
-                    valor=ensaio.get('valor'),
-                    responsavel=ensaio.get('responsavel'),
-                    digitador=ensaio.get('digitador'),
-                    # outros campos...
-                )
-
-        # Atualiza ou cria cálculos
+            AnaliseEnsaio.objects.create(
+                analise=instance,
+                ensaios_utilizados=ensaio.get('ensaios_utilizados', []),
+                responsavel=ensaio.get('responsavel'),
+                digitador=ensaio.get('digitador'),
+                ensaios=ensaio.get('ensaios'), # se enviar o id do ensaio
+            )
+            
+        # Salva cálculos
         for calc in calculos_data:
-            if 'id' in calc:
-                AnaliseCalculo.objects.filter(id=calc['id']).update(
-                    resultados=calc.get('resultado'),
-                    responsavel=calc.get('responsavel'),
-                    digitador=calc.get('digitador'),
-                    # outros campos...
-                )
-            else:
-                AnaliseCalculo.objects.create(
-                    analise=instance,
-                    resultados=calc.get('resultado'),
-                    responsavel=calc.get('responsavel'),
-                    digitador=calc.get('digitador'),
-                    # outros campos...
-                )
+            AnaliseCalculo.objects.create(
+                analise=instance,
+                calculos=calc.get('calculos'),
+                resultados=calc.get('resultados'),
+                ensaios_utilizados=calc.get('ensaios_utilizados', []),
+                responsavel=calc.get('responsavel'),
+                digitador=calc.get('digitador'),
+            )
 
         return instance
 
-
-# class AnaliseEnsaioSerializer(serializers.ModelSerializer):
-#     analise = serializers.PrimaryKeyRelatedField(queryset=Analise.objects.all(), write_only=True)
-#     analise_detalhes = AnaliseSerializer(source='analise', read_only=True)
-#     ensaios = serializers.PrimaryKeyRelatedField(queryset=Ensaio.objects.all(), write_only=True)
-#     ensaios_detalhes = AmostraSerializer(source='ensaios', read_only=True)
-#     class Meta:
-#         model = AnaliseEnsaio
-#         fields = '__all__'
-       
-# class AnaliseCalculoSerializer(serializers.ModelSerializer):
-#     analise = serializers.PrimaryKeyRelatedField(queryset=Analise.objects.all(), write_only=True)
-#     analise_detalhes = AnaliseSerializer(source='analise', read_only=True)
-#     class Meta:
-#         model = AnaliseCalculo
-#         fields = '__all__'
