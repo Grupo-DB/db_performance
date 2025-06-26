@@ -12,4 +12,9 @@ class EnsaioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ensaio
         #fields = '__all__'
-        fields = ['id', 'descricao', 'responsavel', 'valor', 'tipo_ensaio','tipo_ensaio_detalhes','tempo_previsto']        
+        fields = ['id', 'descricao', 'responsavel', 'valor', 'tipo_ensaio','tipo_ensaio_detalhes','tempo_previsto','variavel']
+
+    def create(self, validated_data):
+        total = Ensaio.objects.count() + 1
+        validated_data['variavel'] = f'var{total}'
+        return super().create(validated_data)            

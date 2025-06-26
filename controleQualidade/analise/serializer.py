@@ -38,7 +38,7 @@ class AnaliseSerializer(serializers.ModelSerializer):
         ultimo = obj.calculos.order_by('-id').first()
         if ultimo:
             return AnaliseCalculoSerializer(ultimo).data
-        return None 
+        return None
 
     def update(self, instance, validated_data):
         ensaios_data = validated_data.pop('ensaios', [])

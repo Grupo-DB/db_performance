@@ -15,6 +15,7 @@ class Ensaio(models.Model):
     valor = models.FloatField(null=True, blank=True)
     tipo_ensaio = models.ForeignKey(TipoEnsaio, null=True, blank=True, on_delete=models.RESTRICT, related_name='ensaio')
     tempo_previsto = models.CharField(max_length=255, null=True, blank=True)
+    variavel = models.CharField(max_length=20, null=True, blank=True)
     class meta:
         verbose_name = 'Ensaio'
         verbose_name_plural = 'Ensaios'
