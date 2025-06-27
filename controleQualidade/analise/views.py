@@ -38,3 +38,16 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['get'], url_path='byCalculo')
+    def byCalculo(self, request):
+        calculos = request.query_params.get('calculo')
+        print('Nome',calculos)
+        if not calculos:
+            return Response({"error": "Calculo parameter is required"}, status=400)
+        try:
+            resultados = AnaliseCalculo.objects.filter(calculos=calculos)
+            serializer = self.get_serializer(resultados, many=True)
+            return Response(serializer.data)
+        except AnaliseCalculo.DoesNotExist:
+            return Response({"error": "Calculo not found"}, status=404)
+
