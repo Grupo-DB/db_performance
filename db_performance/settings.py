@@ -110,7 +110,7 @@ DATABASES = {
 #         'NAME': 'DB',
 #         'USER': 'DBCONSULTA',
 #         'PASSWORD': 'DB@@2023**',
-#         'HOST': '172.50.10.5',
+#         'HOST': '45.6.118.50',
 #         'PORT': '',
 #         'OPTIONS': {
 #             'driver': 'ODBC Driver 17 for SQL Server',

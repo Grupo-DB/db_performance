@@ -12,6 +12,8 @@ class Analise(models.Model):
         verbose_name = 'Análise'
         verbose_name_plural = 'Análises'
 
+        
+
 class AnaliseEnsaio(models.Model):
     id = models.AutoField(primary_key=True)
     analise = models.ForeignKey(Analise, null=True, blank=True, on_delete=models.RESTRICT, related_name='ensaios')
@@ -33,4 +35,5 @@ class AnaliseCalculo(models.Model):
     digitador = models.CharField(max_length=255, null=True, blank=True)
     class Meta:
         verbose_name = 'Análise de Cálculo'
-        verbose_name_plural = 'Análises de Cálculo'        
+        verbose_name_plural = 'Análises de Cálculo' 
+

@@ -13,7 +13,7 @@ from sqlalchemy import create_engine
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')  # Exemplo de locale brasileiro
 
  # String de conexão
-connection_string = 'mssql+pyodbc://DBCONSULTA:DB%40%402023**@172.50.10.5/DB?driver=ODBC+Driver+17+for+SQL+Server'
+connection_string = 'mssql+pyodbc://DBCONSULTA:DB%40%402023**@45.6.118.50/DB?driver=ODBC+Driver+17+for+SQL+Server'
 # Cria a engine
 engine = create_engine(connection_string)
 
