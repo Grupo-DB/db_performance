@@ -5,7 +5,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from controleQualidade.ordem.OrdemHistorySerializer import OrdemHistorySerializer
 from controleQualidade.ordem.serializers import OrdemSerializer
-from .models import Ordem
+from .models import Ordem, OrdemExpressa
 from django.db.models import Max, Func, IntegerField
 from rest_framework.response import Response
 from simple_history.utils import update_change_reason
@@ -43,6 +43,31 @@ class OrdemViewSet(viewsets.ModelViewSet):
         proximo = max_numero + 1
         return Response({'numero': proximo})
     
+
+class ExpressaViewSet(viewsets.ModelViewSet):
+    queryset = OrdemExpressa.objects.all()
+    serializer_class = OrdemSerializer  # Use the same serializer for simplicity
+
+    def partial_update(self, request, *args, **kwargs):
+        istance = self.get_object()
+        serializer = self.get_serializer(istance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], url_path='proximo-numero')
+    def proximo_numero(self, request):
+        # Filtra apenas números válidos
+        qs = OrdemExpressa.objects.all()
+        numeros = []
+        for ordem in qs:
+            try:
+                numeros.append(int(ordem.numero))
+            except (ValueError, TypeError):
+                continue
+        max_numero = max(numeros) if numeros else 0
+        proximo = max_numero + 1
+        return Response({'numero': proximo})
 
 # History ViewSet    
 class OrdemHistoryFilter(FilterSet):
