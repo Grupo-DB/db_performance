@@ -1,6 +1,6 @@
 from django.db import models
 from baseOrcamentaria.dre.models import Produto
-from controleQualidade.ordem.models import Ordem
+from controleQualidade.ordem.models import Ordem, OrdemExpressa
 
 class TipoAmostra(models.Model):
     id = models.AutoField(primary_key=True)
@@ -20,8 +20,22 @@ class ProdutoAmostra(models.Model):
         verbose_name = 'Produto'
         verbose_name_plural = 'Produtos'
 
+
+# def upload_image_amostra(amostra,filename):
+#         return f"{amostra.id}-{filename}"
+
+def upload_image_amostra(instance, filename):
+    return f"amostra_{instance.amostra.id}/{filename}"
+
 class Amostra(models.Model):
     id = models.AutoField(primary_key=True)
+    especie = models.CharField(max_length=255, null=True, blank=True) #add os 10 tipos
+    finalidade = models.CharField(max_length=255, null=True, blank=True) #(sac, controle de qualidade, desenvolvimento de produtos)
+    numero_sac = models.CharField(max_length=255, null=True, blank=True) #numero do sac quando for da finalidade sac
+    data_envio = models.DateField(null=True, blank=True) #data de envio
+    destino_envio = models.CharField(max_length=255, null=True, blank=True) #destino do envio
+    data_recebida = models.DateField(null=True, blank=True) #data de recebimento    
+    reter = models.BooleanField(default=True) #se a amostra foi retida ou não
     data_coleta = models.DateField(null=False, blank=False)
     data_entrada = models.DateField(null=False, blank=False)
     material = models.ForeignKey(Produto, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
@@ -34,12 +48,28 @@ class Amostra(models.Model):
     periodo_turno = models.CharField(max_length=255, null=True, blank=True)
     tipo_amostragem = models.CharField(max_length=255, null=True, blank=True)
     local_coleta = models.CharField(max_length=255, null=True, blank=True)
+    registro_ep = models.CharField(max_length=255, null=True, blank=True)
+    registro_produto = models.CharField(max_length=255, null=True, blank=True)
+    numero_lote = models.CharField(max_length=255, null=True, blank=True)
     representatividade_lote = models.CharField(max_length=255, null=True, blank=True)
     identificacao_complementar = models.CharField(max_length=955, null=True, blank=True)
+    observacoes = models.CharField(max_length=955, null=True, blank=True)
     complemento = models.CharField(max_length=955,null=True, blank=True)
     ordem = models.OneToOneField(Ordem, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
+    expressa = models.OneToOneField(OrdemExpressa, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
     digitador = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=255, null=False, blank=False)
     class Meta:
         verbose_name = 'Amostra'
         verbose_name_plural = 'Amostras'
+
+class AmostraImagem(models.Model):
+    id = models.AutoField(primary_key=True)
+    amostra = models.ForeignKey(Amostra, on_delete=models.CASCADE, related_name='imagens')
+    image = models.FileField(upload_to=upload_image_amostra, blank=False, null=False)
+    descricao = models.CharField(max_length=255, null=True, blank=True)
+    data_upload = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = 'Imagem da Amostra'
+        verbose_name_plural = 'Imagens da Amostra'        

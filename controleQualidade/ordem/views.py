@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from controleQualidade.ordem.OrdemHistorySerializer import OrdemHistorySerializer
-from controleQualidade.ordem.serializers import OrdemSerializer
+from controleQualidade.ordem.serializers import OrdemSerializer, OrdemExpressaSerializer
 from .models import Ordem, OrdemExpressa
 from django.db.models import Max, Func, IntegerField
 from rest_framework.response import Response
@@ -46,7 +46,7 @@ class OrdemViewSet(viewsets.ModelViewSet):
 
 class ExpressaViewSet(viewsets.ModelViewSet):
     queryset = OrdemExpressa.objects.all()
-    serializer_class = OrdemSerializer  # Use the same serializer for simplicity
+    serializer_class = OrdemExpressaSerializer
 
     def partial_update(self, request, *args, **kwargs):
         istance = self.get_object()

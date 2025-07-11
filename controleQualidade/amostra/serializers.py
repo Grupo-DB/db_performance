@@ -3,8 +3,8 @@ from rest_framework import serializers
 from baseOrcamentaria.dre.models import Produto
 from baseOrcamentaria.dre.serializers import ProdutoSerializer
 from .models import Amostra, TipoAmostra, ProdutoAmostra
-from controleQualidade.ordem.serializers import OrdemSerializer
-from controleQualidade.ordem.models import Ordem
+from controleQualidade.ordem.serializers import OrdemSerializer, OrdemExpressaSerializer
+from controleQualidade.ordem.models import Ordem, OrdemExpressa
 
 class TipoAmostraSerializer(serializers.ModelSerializer):
     class Meta:
@@ -19,6 +19,8 @@ class ProdutoAmostraSerializer(serializers.ModelSerializer):
 class AmostraSerializer(serializers.ModelSerializer):
     ordem = serializers.PrimaryKeyRelatedField(queryset=Ordem.objects.all(), write_only=True, required=False, allow_null=True)
     ordem_detalhes = OrdemSerializer(source='ordem', read_only=True)
+    expressa =  serializers.PrimaryKeyRelatedField(queryset=OrdemExpressa.objects.all(), write_only=True, required=False, allow_null=True)
+    expressa_detalhes = OrdemExpressaSerializer(source='expressa', read_only=True)
     material = serializers.PrimaryKeyRelatedField(queryset=Produto.objects.all(), write_only=True, required=False, allow_null=True)
     material_detalhes = ProdutoSerializer(source='material', read_only=True)
     tipo_amostra = serializers.PrimaryKeyRelatedField(queryset=TipoAmostra.objects.all(), write_only=True, required=False, allow_null=True)

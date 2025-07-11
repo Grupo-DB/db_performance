@@ -17,9 +17,6 @@ class Ordem(models.Model):
         verbose_name = 'Ordem'
         verbose_name_plural = 'Ordens'
 
-    class Meta:
-        verbose_name = 'Ordem'
-        verbose_name_plural = 'Ordens'
 
 class OrdemExpressa(models.Model):
     id = models.AutoField(primary_key=True)

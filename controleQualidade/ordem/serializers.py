@@ -7,6 +7,13 @@ from controleQualidade.plano.models import PlanoAnalise
 from controleQualidade.calculosEnsaio.models import CalculoEnsaio
 from controleQualidade.calculosEnsaio.serializers import CalculoEnsaioSerializer
 
+class FlexibleManyRelatedField(serializers.PrimaryKeyRelatedField):
+    def to_internal_value(self, data):
+        if isinstance(data, list):
+            return [super().to_internal_value(item) for item in data]
+        return [super().to_internal_value(data)]
+
+
 class OrdemSerializer(serializers.ModelSerializer):
     plano_analise = serializers.PrimaryKeyRelatedField(queryset=PlanoAnalise.objects.all(),many=True, write_only=True)
     plano_detalhes = PlanoAnaliseSerializer(source='plano_analise',many=True, read_only=True)
@@ -15,10 +22,10 @@ class OrdemSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class OrdemExpressaSerializer(serializers.ModelSerializer):
-    ensaio = serializers.PrimaryKeyRelatedField(queryset=Ensaio.objects.all(), many=True, write_only=True)
-    ensaio_detalhes = EnsaioSerializer(source='ensaio', many=True, read_only=True)
-    calculo = serializers.PrimaryKeyRelatedField(queryset=CalculoEnsaio.objects.all(), many=True, write_only=True)
-    calculo_detalhes = CalculoEnsaioSerializer(source='calculo', many=True, read_only=True)
+    ensaios = FlexibleManyRelatedField(queryset=Ensaio.objects.all(), write_only=True)
+    calculos_ensaio = FlexibleManyRelatedField(queryset=CalculoEnsaio.objects.all(), write_only=True)
+    ensaio_detalhes = EnsaioSerializer(source='ensaios', read_only=True, many=True)
+    calculo_ensaio_detalhes = CalculoEnsaioSerializer(source='calculos_ensaio', read_only=True, many=True)
     class Meta:
         model = OrdemExpressa
         fields = '__all__' 
