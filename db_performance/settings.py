@@ -211,12 +211,16 @@ REST_FRAMEWORK = {
     
 }
 
-STATIC_URL = '/static/'
-
-
 MEDIA_ROOT = os.path.join(BASE_DIR,'media')
 MEDIA_URL = '/media/'
-''
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+#opara desenvolvimento
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
+
+
 FRONTEND_URL = 'http://172.50.10.79:80'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

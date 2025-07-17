@@ -8,6 +8,15 @@ class TipoEnsaio(models.Model):
         verbose_name = 'Tipo de Ensaio'
         verbose_name_plural = 'Tipos de Ensaio'
 
+
+class Variavel(models.Model):
+    id = models.AutoField(primary_key=True)
+    nome = models.CharField(max_length=255, null=False, blank=False)
+    valor = models.FloatField(null=True, blank=True)
+    class meta:
+        verbose_name = 'Variável'
+        verbose_name_plural = 'Variáveis'
+
 class Ensaio(models.Model):
     id = models.AutoField(primary_key=True)
     descricao = models.CharField(max_length=500, null=False, blank=False)
@@ -15,7 +24,9 @@ class Ensaio(models.Model):
     valor = models.FloatField(null=True, blank=True)
     tipo_ensaio = models.ForeignKey(TipoEnsaio, null=True, blank=True, on_delete=models.RESTRICT, related_name='ensaio')
     tempo_previsto = models.CharField(max_length=255, null=True, blank=True)
-    variavel = models.CharField(max_length=20, null=True, blank=True)
+    variavel = models.ManyToManyField(Variavel,related_name='ensaio')
+    funcao = models.CharField(max_length=500, null=True, blank=True)
     class meta:
         verbose_name = 'Ensaio'
         verbose_name_plural = 'Ensaios'
+
