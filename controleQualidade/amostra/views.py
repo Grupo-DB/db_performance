@@ -38,6 +38,15 @@ class AmostraViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
     
+    @action(detail=False, methods=['get'])
+    def sem_ordem(self, request):
+        amostras = Amostra.objects.filter(
+            ordem__isnull=True,
+            expressa__isnull=True
+        )
+        serializer = self.get_serializer(amostras, many=True)
+        return Response(serializer.data)
+    
     @action(detail=False, methods=['get'], url_path='proximo-sequencial/(?P<material_id>[^/.]+)')
     def proximo_sequencial(self, request, material_id=None):
         ano = datetime.now().year % 100  # dois últimos dígitos do ano
