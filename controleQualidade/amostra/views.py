@@ -27,7 +27,26 @@ class ProdutoViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)
-    
+    @action(detail=False, methods=['get'], url_path='produtos-por-material/(?P<material_nome>[^/.]+)')
+    def por_material(self, request, material_nome=None):
+        try:
+            # Decodifica o nome do material (caso de caracteres especiais na URL)
+            import urllib.parse
+            material_nome = urllib.parse.unquote(material_nome)
+            
+            # Filtra produtos que contêm o nome do material
+            produtos = ProdutoAmostra.objects.filter(
+                material__iexact=material_nome
+            )
+            
+            serializer = self.get_serializer(produtos, many=True)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            return Response(
+                {'error': f'Erro ao filtrar produtos: {str(e)}'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 class AmostraViewSet(viewsets.ModelViewSet):
     queryset = Amostra.objects.all()
     serializer_class = AmostraSerializer
@@ -47,21 +66,39 @@ class AmostraViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(amostras, many=True)
         return Response(serializer.data)
     
-    @action(detail=False, methods=['get'], url_path='proximo-sequencial/(?P<material_id>[^/.]+)')
-    def proximo_sequencial(self, request, material_id=None):
-        ano = datetime.now().year % 100  # dois últimos dígitos do ano
-        # Busca todas as amostras do material e ano atual
-        amostras = Amostra.objects.filter(material_id=material_id, numero__icontains=str(ano))
-        sequenciais = []
-        for amostra in amostras:
-            try:
-                # Exemplo: 'Calc25 08.392' -> pega '08.392', remove ponto, converte para int
-                seq_str = amostra.numero.split(' ')[-1].replace('.', '')
-                sequenciais.append(int(seq_str))
-            except Exception:
-                pass
-        proximo = max(sequenciais) + 1 if sequenciais else 1
-        return Response(proximo)
+    @action(detail=False, methods=['get'], url_path='proximo-sequencial-nome/(?P<material_nome>[^/.]+)')
+    def proximo_sequencial_nome(self, request, material_nome=None):
+        try:
+            # Decodifica o nome do material (case de caracteres especiais na URL)
+            import urllib.parse
+            material_nome = urllib.parse.unquote(material_nome)
+            
+            # Busca todas as amostras que começam com o nome do material
+            amostras = Amostra.objects.filter(numero__istartswith=material_nome)
+            
+            sequenciais = []
+            for amostra in amostras:
+                try:
+                    # Exemplo: 'Calcário 08.392' -> pega '08.392', remove ponto, converte para int
+                    numero_parts = amostra.numero.split(' ')
+                    if len(numero_parts) >= 2:
+                        seq_str = numero_parts[-1].replace('.', '')
+                        if seq_str.isdigit():
+                            sequenciais.append(int(seq_str))
+                except Exception:
+                    continue
+            
+            proximo = max(sequenciais) + 1 if sequenciais else 1
+            return Response(proximo)
+            
+        except Exception as e:
+            # Log do erro para debug
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Erro ao buscar próximo sequencial para material '{material_nome}': {str(e)}")
+            
+            # Retorna um sequencial padrão em caso de erro
+            return Response(1)
     
     @action(detail=True, methods=['post'])
     def upload_images(self, request, pk=None):

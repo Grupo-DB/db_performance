@@ -15,7 +15,8 @@ class ProdutoAmostra(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=255, null=False, blank=False)
     registro_empresa = models.CharField(max_length=255, null=False, blank=False)
-    registro_produto = models.CharField(max_length=255, null=False, blank=False)        
+    registro_produto = models.CharField(max_length=255, null=False, blank=False)
+    material = models.CharField(max_length=255, null=False, blank=False)        
     class meta:
         verbose_name = 'Produto'
         verbose_name_plural = 'Produtos'
@@ -29,7 +30,7 @@ def upload_image_amostra(instance, filename):
 
 class Amostra(models.Model):
     id = models.AutoField(primary_key=True)
-    especie = models.CharField(max_length=255, null=True, blank=True) #add os 10 tipos
+    material = models.CharField(max_length=255, null=False, blank=False) #add os 10 tipos
     finalidade = models.CharField(max_length=255, null=True, blank=True) #(sac, controle de qualidade, desenvolvimento de produtos)
     numero_sac = models.CharField(max_length=255, null=True, blank=True) #numero do sac quando for da finalidade sac
     data_envio = models.DateField(null=True, blank=True) #data de envio
@@ -38,7 +39,6 @@ class Amostra(models.Model):
     reter = models.BooleanField(default=True) #se a amostra foi retida ou não
     data_coleta = models.DateField(null=False, blank=False)
     data_entrada = models.DateField(null=False, blank=False)
-    material = models.ForeignKey(Produto, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
     numero = models.CharField(max_length=255, null=False, blank=False)
     tipo_amostra = models.ForeignKey(TipoAmostra, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
     subtipo = models.CharField(max_length=255, null=True, blank=True)
