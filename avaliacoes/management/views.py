@@ -694,9 +694,9 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
     def byAvaliador(self, request):
         avaliador_id = request.query_params.get('avaliador_id')
         try:
-            avaliador = Avaliador.objects.get(id=avaliador_id)  # Busque o objeto Avaliador
+            avaliador = Avaliador.objects.get(id=avaliador_id)  
         except Avaliador.DoesNotExist:
-            raise NotFound('Avaliador não encontrado')  # type: ignore # Levante um erro se o Avaliador não existir
+            raise NotFound('Avaliador não encontrado') 
         avaliados = avaliador.avaliados.all()
         serializer = AvaliadoSerializer(avaliados, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
