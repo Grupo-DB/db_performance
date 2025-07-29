@@ -12,6 +12,7 @@ class TipoEnsaio(models.Model):
 class Variavel(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=255, null=False, blank=False)
+    tecnica = models.CharField(max_length=255, null=True, blank=True)
     valor = models.FloatField(null=True, blank=True)
     class meta:
         verbose_name = 'Variável'
@@ -25,6 +26,7 @@ class Ensaio(models.Model):
     tipo_ensaio = models.ForeignKey(TipoEnsaio, null=True, blank=True, on_delete=models.RESTRICT, related_name='ensaio')
     tempo_previsto = models.CharField(max_length=255, null=True, blank=True)
     variavel = models.ManyToManyField(Variavel,related_name='ensaio')
+    tecnica = models.CharField(max_length=255, null=True, blank=True)
     funcao = models.CharField(max_length=500, null=True, blank=True)
     class meta:
         verbose_name = 'Ensaio'
