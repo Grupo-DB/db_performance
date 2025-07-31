@@ -18,68 +18,74 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)
+
     @csrf_exempt
     @action(detail=False, methods=['post'], url_path='resultados-anteriores')
     def resultados_anteriores(self, request):
         """
-        Busca resultados anteriores de análises com o mesmo cálculo e ensaios
+        Busca resultados anteriores de análises com o mesmo cálculo e ensaios,
+        podendo pesquisar por ID e/ou nome do ensaio.
         """
         if request.method == 'POST':
-            # Receber dados do corpo da requisição
             data = request.data
             calculo_descricao = data.get('calculo')
             ensaio_ids = data.get('ensaioIds', [])
+            ensaio_nome = data.get('ensaio_nome', None)
             limit = int(data.get('limit', 10))
-            
-            print(f"✅ POST - Parâmetros recebidos: calculo={calculo_descricao}, ensaio_ids={ensaio_ids}, limit={limit}")
-            
-            if not calculo_descricao or not ensaio_ids:
+
+            print(f"✅ POST - Parâmetros recebidos: calculo={calculo_descricao}, ensaio_ids={ensaio_ids}, ensaio_nome={ensaio_nome}, limit={limit}")
+
+            if not calculo_descricao and not ensaio_ids and not ensaio_nome:
                 return Response({
-                    "error": "Parâmetros 'calculo' e 'ensaioIds' são obrigatórios"
+                    "error": "Parâmetros 'calculo', 'ensaioIds' ou 'ensaio_nome' são obrigatórios"
                 }, status=400)
-            
+
             try:
-                # Converter IDs para inteiros
-                ensaio_ids = [int(id) for id in ensaio_ids]
-                
-                print(f"✅ Buscando análises com cálculo: {calculo_descricao}")
-                print(f"✅ E com ensaios: {ensaio_ids}")
-                
-                # Sua lógica existente aqui...
                 from .models import AnaliseCalculo, AnaliseEnsaio
-                
+
+                # Converter IDs para inteiros se existirem
+                if ensaio_ids:
+                    ensaio_ids = [int(id) for id in ensaio_ids]
+                    print(f"✅ Buscando análises com ensaios IDs: {ensaio_ids}")
+
                 # Buscar análises através da tabela AnaliseCalculo
                 analises_com_calculo = Analise.objects.filter(
                     id__in=AnaliseCalculo.objects.filter(
                         calculos=calculo_descricao
                     ).values_list('analise_id', flat=True)
                 ).distinct()
-                
                 print(f"✅ Análises com cálculo encontradas: {analises_com_calculo.count()}")
-                
-                # Buscar análises que têm os ensaios especificados usando AnaliseEnsaio
-                analises_com_ensaios = Analise.objects.filter(
-                    id__in=AnaliseEnsaio.objects.filter(
-                        ensaios_id__in=ensaio_ids
-                    ).values_list('analise_id', flat=True)
-                ).distinct()
-                
+
+                # Buscar análises que têm os ensaios especificados por ID ou nome
+                analises_com_ensaios = Analise.objects.none()
+                if ensaio_ids:
+                    analises_com_ensaios = Analise.objects.filter(
+                        id__in=AnaliseEnsaio.objects.filter(
+                            ensaios_id__in=ensaio_ids
+                        ).values_list('analise_id', flat=True)
+                    )
+                if ensaio_nome:
+                    analises_por_nome = Analise.objects.filter(
+                        id__in=AnaliseEnsaio.objects.filter(
+                            ensaios__descricao__iexact=ensaio_nome
+                        ).values_list('analise_id', flat=True)
+                    )
+                    analises_com_ensaios = analises_com_ensaios | analises_por_nome if analises_com_ensaios.exists() else analises_por_nome
+
+                analises_com_ensaios = analises_com_ensaios.distinct()
                 print(f"✅ Análises com ensaios encontradas: {analises_com_ensaios.count()}")
-                
+
                 # Intersecção das duas consultas
-                analises_filtradas = analises_com_calculo.intersection(analises_com_ensaios)
-                
+                analises_filtradas = analises_com_calculo.union(analises_com_ensaios)
                 print(f"✅ Análises filtradas (intersecção): {analises_filtradas.count()}")
-                
+
                 # Ordenar por ID mais recente e limitar
                 analises_filtradas = analises_filtradas.order_by('-id')[:limit]
-                
+
                 resultados = []
-                
+
                 for analise in analises_filtradas:
                     print(f"✅ Processando análise ID: {analise.id}")
-                    
-                    # Buscar dados básicos da análise
                     analise_data = {
                         'analise_id': analise.id,
                         'amostra_numero': analise.amostra.numero if analise.amostra else None,
@@ -87,16 +93,14 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                         'responsavel': None,
                         'digitador': None,
                     }
-                    
+
                     # Buscar resultado do cálculo na tabela AnaliseCalculo
                     try:
                         calculo_analise = AnaliseCalculo.objects.filter(
                             analise_id=analise.id,
                             calculos=calculo_descricao
                         ).first()
-                        
                         if calculo_analise:
-                            print(f"✅ Resultado do cálculo encontrado: {calculo_analise.resultados}")
                             resultados.append({
                                 **analise_data,
                                 'tipo': 'CALCULO',
@@ -107,42 +111,37 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                                 'ensaio_responsavel': None,
                                 'ensaio_digitador': None
                             })
-                            
                     except Exception as e:
                         print(f"❌ Erro ao buscar cálculo: {e}")
-                    
+
                     # Buscar ensaios utilizados na tabela AnaliseEnsaio
-                    for ensaio_id in ensaio_ids:
-                        try:
-                            ensaio_analise = AnaliseEnsaio.objects.filter(
-                                analise_id=analise.id,
-                                ensaios_id=ensaio_id
-                            ).first()
-                            
-                            if ensaio_analise:
-                                print(f"✅ Ensaio encontrado: {ensaio_analise.ensaios.descricao} = {ensaio_analise.ensaios_utilizados}")
-                                
-                                resultados.append({
-                                    **analise_data,
-                                    'tipo': 'ENSAIO',
-                                    'resultado_calculo': None,
-                                    'ensaio_id': ensaio_analise.ensaios_id,
-                                    'ensaio_descricao': ensaio_analise.ensaios.descricao,
-                                    'valor_ensaio': ensaio_analise.ensaios_utilizados,
-                                    'ensaio_responsavel': ensaio_analise.responsavel,
-                                    'ensaio_digitador': ensaio_analise.digitador,
-                                })
-                                
-                                # Atualizar responsável geral se não foi definido
-                                if not analise_data['responsavel']:
-                                    analise_data['responsavel'] = ensaio_analise.responsavel
-                                    
-                        except Exception as e:
-                            print(f"❌ Erro ao buscar ensaio {ensaio_id}: {e}")
-                
+                    filtro_ensaio = {}
+                    if ensaio_ids:
+                        filtro_ensaio['ensaios_id__in'] = ensaio_ids
+                    if ensaio_nome:
+                        filtro_ensaio['ensaios__descricao__iexact'] = ensaio_nome
+
+                    if filtro_ensaio:
+                        print('kkkkkkkkkkkkkkkkkk')
+                        for ensaio_analise in AnaliseEnsaio.objects.filter(
+                            analise_id=analise.id, **filtro_ensaio
+                        ):
+                            resultados.append({
+                                **analise_data,
+                                'tipo': 'ENSAIO',
+                                'resultado_calculo': None,
+                                'ensaio_id': ensaio_analise.ensaios_id,
+                                'ensaio_descricao': ensaio_analise.ensaios.descricao,
+                                'valor_ensaio': ensaio_analise.ensaios_utilizados,
+                                'ensaio_responsavel': ensaio_analise.responsavel,
+                                'ensaio_digitador': ensaio_analise.digitador,
+                            })
+                            if not analise_data['responsavel']:
+                                analise_data['responsavel'] = ensaio_analise.responsavel
+
                 print(f"✅ Total de resultados retornados: {len(resultados)}")
                 return Response(resultados, status=200)
-                
+
             except ValueError as e:
                 print(f"❌ Erro de valor: {e}")
                 return Response({
@@ -155,8 +154,7 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                 return Response({
                     "error": f"Erro interno do servidor: {str(e)}"
                 }, status=500)
-        
-        # Se não for POST, retornar erro
+
         return Response({
             "error": "Método não permitido. Use POST."
         }, status=405)
