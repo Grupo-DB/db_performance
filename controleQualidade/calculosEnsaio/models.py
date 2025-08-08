@@ -7,6 +7,7 @@ class CalculoEnsaio(models.Model):
     funcao = models.CharField(max_length=500, null=False, blank=False)
     ensaios = models.ManyToManyField(Ensaio, related_name='calculos_ensaios')
     responsavel = models.CharField(max_length=255, null=True, blank=True)
+    unidade = models.CharField(max_length=255, null=True, blank=True)
     valor = models.FloatField(null=True, blank=True)
     class Meta:
         verbose_name = 'Cálculo de Ensaio'

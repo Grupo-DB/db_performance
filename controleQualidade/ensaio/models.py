@@ -24,6 +24,7 @@ class Ensaio(models.Model):
     responsavel = models.CharField(max_length=255, null=True, blank=True)
     valor = models.FloatField(null=True, blank=True)
     tipo_ensaio = models.ForeignKey(TipoEnsaio, null=True, blank=True, on_delete=models.RESTRICT, related_name='ensaio')
+    unidade = models.CharField(max_length=255, null=True, blank=True)
     tempo_previsto = models.CharField(max_length=255, null=True, blank=True)
     variavel = models.ManyToManyField(Variavel,related_name='ensaio')
     tecnica = models.CharField(max_length=255, null=True, blank=True)

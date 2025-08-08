@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from .serializer import AnaliseSerializer, AnaliseEnsaioSerializer, AnaliseCalculoSerializer
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.utils import timezone
 
 @method_decorator(csrf_exempt, name='dispatch')
 class AnaliseViewSet(viewsets.ModelViewSet):
@@ -159,6 +160,49 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             "error": "Método não permitido. Use POST."
         }, status=405)
     
+    @action(detail=True, methods=['post'])
+    def update_finalizada(self, request, pk=None):
+        try:
+            analise = self.get_object()
+            analise.finalizada = True
+            analise.finalizada_at = timezone.now()
+            analise.save()
+            return Response({"status": "Análise finalizada com sucesso."}, status=200)
+        except Analise.DoesNotExist:
+            return Response({"error": "Análise não encontrada."}, status=404)
+        
+    @action(detail=True, methods=['post'])
+    def update_aberta(self, request, pk=None):
+        try:
+            analise = self.get_object()
+            analise.finalizada = False
+            analise.finalizada_at = None
+            analise.save()
+            return Response({"status": "Análise reaberta com sucesso."}, status=200)
+        except Analise.DoesNotExist:
+            return Response({"error": "Análise não encontrada."}, status=404)
+
+    @action(detail=True, methods=['post'])
+    def update_laudo(self, request, pk=None):
+        try:
+            analise = self.get_object()
+            analise.laudo = True
+            analise.save()
+            return Response({"status": "Análise marcada para laudo com sucesso."}, status=200)
+        except Analise.DoesNotExist:
+            return Response({"error": "Análise não encontrada."}, status=404)
+
+    @action(detail=True, methods=['post'])
+    def update_aprovada(self, request, pk=None):
+        try:
+            analise = self.get_object()
+            analise.aprovada = True
+            analise.aprovada_at = timezone.now()
+            analise.save()
+            return Response({"status": "Análise aprovada com sucesso."}, status=200)
+        except Analise.DoesNotExist:
+            return Response({"error": "Análise não encontrada."}, status=404)
+                
 class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
     queryset = AnaliseEnsaio.objects.all()
     serializer_class = AnaliseEnsaioSerializer

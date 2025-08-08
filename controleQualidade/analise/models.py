@@ -7,7 +7,11 @@ class Analise(models.Model):
     data = models.DateTimeField(auto_created=True, auto_now=True, null=False, blank=False)
     amostra = models.ForeignKey(Amostra, null=True, blank=True, on_delete=models.RESTRICT, related_name='analise')
     estado = models.CharField(max_length=255, null=False, blank=False)
-
+    finalizada = models.BooleanField(default=False, blank=True)  # Indica se a análise foi finalizada
+    finalizada_at = models.DateField(null=True, blank=True)  # Data de finalização
+    laudo = models.BooleanField(default=False, blank=True)  # Indica se vai para laudo
+    aprovada = models.BooleanField(default=False, blank=True)  # Indica se a análise foi aprovada
+    aprovada_at = models.DateField(null=True)
     class Meta:
         verbose_name = 'Análise'
         verbose_name_plural = 'Análises'
