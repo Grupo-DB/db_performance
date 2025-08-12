@@ -56,7 +56,7 @@ class AnaliseSerializer(serializers.ModelSerializer):
                 ensaios_utilizados=ensaio.get('ensaios_utilizados', []),
                 responsavel=ensaio.get('responsavel'),
                 digitador=ensaio.get('digitador'),
-                ensaios=ensaio.get('ensaios'), # se enviar o id do ensaio
+                ensaios=ensaio.get('ensaios'),
             )
             
         # Salva cálculos
