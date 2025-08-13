@@ -14,6 +14,7 @@ class Variavel(models.Model):
     nome = models.CharField(max_length=255, null=False, blank=False)
     tecnica = models.CharField(max_length=255, null=True, blank=True)
     valor = models.FloatField(null=True, blank=True)
+    tipo = models.CharField(max_length=255, null=True, blank=True)
     class meta:
         verbose_name = 'Variável'
         verbose_name_plural = 'Variáveis'
@@ -21,7 +22,6 @@ class Variavel(models.Model):
 class Ensaio(models.Model):
     id = models.AutoField(primary_key=True)
     descricao = models.CharField(max_length=500, null=False, blank=False)
-    responsavel = models.CharField(max_length=255, null=True, blank=True)
     valor = models.FloatField(null=True, blank=True)
     tipo_ensaio = models.ForeignKey(TipoEnsaio, null=True, blank=True, on_delete=models.RESTRICT, related_name='ensaio')
     unidade = models.CharField(max_length=255, null=True, blank=True)
@@ -29,6 +29,7 @@ class Ensaio(models.Model):
     variavel = models.ManyToManyField(Variavel,related_name='ensaio')
     tecnica = models.CharField(max_length=255, null=True, blank=True)
     funcao = models.CharField(max_length=500, null=True, blank=True)
+    norma = models.CharField(max_length=500, null=True, blank=True)
     class meta:
         verbose_name = 'Ensaio'
         verbose_name_plural = 'Ensaios'
