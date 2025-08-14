@@ -18,6 +18,26 @@ class TipoAmostraViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
     
 
+    @action(detail=False, methods=['get'], url_path='tipos-por-material/(?P<material_nome>[^/.]+)')
+    def tipos_por_material(self, request, material_nome=None):
+        try:
+            import urllib.parse
+            material_nome = urllib.parse.unquote(material_nome)
+
+            tipos = TipoAmostra.objects.filter(
+                material__iexact=material_nome
+            )
+
+            serializer = self.get_serializer(tipos, many=True)
+            return Response(serializer.data)
+
+        except Exception as e:
+            return Response(
+                {'error': f'Erro ao filtrar tipos: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+
 class ProdutoViewSet(viewsets.ModelViewSet):
     queryset = ProdutoAmostra.objects.all()
     serializer_class = ProdutoAmostraSerializer
@@ -47,6 +67,8 @@ class ProdutoViewSet(viewsets.ModelViewSet):
                 {'error': f'Erro ao filtrar produtos: {str(e)}'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
+        
+
 class AmostraViewSet(viewsets.ModelViewSet):
     queryset = Amostra.objects.all()
     serializer_class = AmostraSerializer
