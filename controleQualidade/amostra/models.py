@@ -18,6 +18,8 @@ class ProdutoAmostra(models.Model):
     registro_produto = models.CharField(max_length=255, null=True, blank=True)
     material = models.CharField(max_length=255, null=False, blank=False)
     cod_db = models.CharField(max_length=255, null=True, blank=True)
+    tipo = models.CharField(max_length=255, null=True, blank=True)
+    subtipo = models.CharField(max_length=255, null=True, blank=True)
     class meta:
         verbose_name = 'Produto'
         verbose_name_plural = 'Produtos'
@@ -41,7 +43,7 @@ class Amostra(models.Model):
     data_coleta = models.DateField(null=False, blank=False)
     data_entrada = models.DateField(null=False, blank=False)
     numero = models.CharField(max_length=255, null=False, blank=False)
-    tipo_amostra = models.ForeignKey(TipoAmostra, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
+    tipo_amostra = models.CharField(max_length=255, null=True, blank=True)
     subtipo = models.CharField(max_length=255, null=True, blank=True)
     produto_amostra = models.ForeignKey(ProdutoAmostra, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra') 
     cod_db = models.CharField(max_length=255, null=True, blank=True)
