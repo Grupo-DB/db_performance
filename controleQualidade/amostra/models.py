@@ -40,13 +40,15 @@ class Amostra(models.Model):
     destino_envio = models.CharField(max_length=255, null=True, blank=True) #destino do envio
     data_recebida = models.DateField(null=True, blank=True) #data de recebimento    
     reter = models.BooleanField(default=True) #se a amostra foi retida ou não
-    data_coleta = models.DateField(null=False, blank=False)
-    data_entrada = models.DateField(null=False, blank=False)
+    data_coleta = models.DateField(null=True, blank=True)
+    data_entrada = models.DateField(null=True, blank=True)
     numero = models.CharField(max_length=255, null=False, blank=False)
     tipo_amostra = models.CharField(max_length=255, null=True, blank=True)
     subtipo = models.CharField(max_length=255, null=True, blank=True)
     produto_amostra = models.ForeignKey(ProdutoAmostra, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra') 
     cod_db = models.CharField(max_length=255, null=True, blank=True)
+    estado_fisico = models.CharField(max_length=255, null=True, blank=True)
+    validade = models.DateField(null=True, blank=True)
     fornecedor = models.CharField(max_length=255, null=True, blank=True)
     periodo_hora = models.CharField(max_length=255, null=True, blank=True)
     periodo_turno = models.CharField(max_length=255, null=True, blank=True)
@@ -62,7 +64,7 @@ class Amostra(models.Model):
     ordem = models.OneToOneField(Ordem, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
     expressa = models.OneToOneField(OrdemExpressa, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
     digitador = models.CharField(max_length=255, null=True, blank=True)
-    status = models.CharField(max_length=255, null=False, blank=False)
+    status = models.CharField(max_length=255, null=True, blank=True)
     class Meta:
         verbose_name = 'Amostra'
         verbose_name_plural = 'Amostras'
