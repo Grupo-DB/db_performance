@@ -9,6 +9,7 @@ class CalculoEnsaio(models.Model):
     responsavel = models.CharField(max_length=255, null=True, blank=True)
     unidade = models.CharField(max_length=255, null=True, blank=True)
     valor = models.FloatField(null=True, blank=True)
+    tecnica = models.CharField(max_length=255, null=True, blank=True)
     class Meta:
         verbose_name = 'Cálculo de Ensaio'
         verbose_name_plural = 'Cálculos de Ensaio'
