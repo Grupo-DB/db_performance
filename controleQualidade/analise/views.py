@@ -20,7 +20,13 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
 
-    
+    @action(detail=False, methods=['get'], url_path='abertas')
+    def abertas(self, request):
+        analises = Analise.objects.filter(
+            finalizada=0,
+        )
+        serializer = self.get_serializer(analises, many=True)
+        return Response(serializer.data)
     
  
     @csrf_exempt
