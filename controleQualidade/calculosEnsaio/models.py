@@ -1,5 +1,5 @@
 from django.db import models
-from controleQualidade.ensaio.models import Ensaio
+from controleQualidade.ensaio.models import Ensaio, Variavel
 
 class CalculoEnsaio(models.Model):
     id = models.AutoField(primary_key=True)
