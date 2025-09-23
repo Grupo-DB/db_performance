@@ -28,6 +28,14 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(analises, many=True)
         return Response(serializer.data)
     
+    @action(detail=False, methods=['get'], url_path='fechadas')
+    def fechadas(self, request):
+        analises = Analise.objects.filter(
+            finalizada=1,
+        )
+        serializer = self.get_serializer(analises, many=True)
+        return Response(serializer.data)
+    
  
     @csrf_exempt
     @action(detail=False, methods=['post'], url_path='resultados-anteriores')

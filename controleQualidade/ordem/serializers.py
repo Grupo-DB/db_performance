@@ -15,7 +15,7 @@ class FlexibleManyRelatedField(serializers.PrimaryKeyRelatedField):
 
 
 class OrdemSerializer(serializers.ModelSerializer):
-    plano_analise = serializers.PrimaryKeyRelatedField(queryset=PlanoAnalise.objects.all(),many=True, write_only=True)
+    plano_analise = FlexibleManyRelatedField(queryset=PlanoAnalise.objects.all(), write_only=True)
     plano_detalhes = PlanoAnaliseSerializer(source='plano_analise',many=True, read_only=True)
     class Meta:
         model = Ordem
