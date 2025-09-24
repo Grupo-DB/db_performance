@@ -61,8 +61,8 @@ class Amostra(models.Model):
     identificacao_complementar = models.CharField(max_length=955, null=True, blank=True)
     observacoes = models.CharField(max_length=955, null=True, blank=True)
     complemento = models.CharField(max_length=955,null=True, blank=True)
-    ordem = models.OneToOneField(Ordem, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
-    expressa = models.OneToOneField(OrdemExpressa, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra')
+    ordem = models.OneToOneField(Ordem, null=True, blank=True, on_delete=models.SET_NULL, related_name='amostra')
+    expressa = models.OneToOneField(OrdemExpressa, null=True, blank=True, on_delete=models.SET_NULL, related_name='amostra')
     digitador = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=255, null=True, blank=True)
     data_descarte = models.DateField(null=True, blank=True) #data de descarte
