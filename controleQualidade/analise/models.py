@@ -15,11 +15,10 @@ class Analise(models.Model):
     metodo_modelagem = models.CharField(max_length=255, null=True, blank=True)
     metodo_muro = models.CharField(max_length=255, null=True, blank=True)
     observacoes_muro = models.TextField(null=True, blank=True)
+    parecer = models.JSONField(null=True, blank=True)
     class Meta:
         verbose_name = 'Análise'
         verbose_name_plural = 'Análises'
-
-        
 
 class AnaliseEnsaio(models.Model):
     id = models.AutoField(primary_key=True)
@@ -43,4 +42,3 @@ class AnaliseCalculo(models.Model):
     class Meta:
         verbose_name = 'Análise de Cálculo'
         verbose_name_plural = 'Análises de Cálculo' 
-
