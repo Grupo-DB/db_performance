@@ -1,12 +1,22 @@
 from django.shortcuts import render
+import requests
 from rest_framework.response import Response
-from rest_framework import viewsets
+from rest_framework import viewsets, status as http_status
 from .models import Analise, AnaliseEnsaio, AnaliseCalculo
 from rest_framework.decorators import action
 from .serializer import AnaliseSerializer, AnaliseEnsaioSerializer, AnaliseCalculoSerializer
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.utils import timezone
+from django.conf import settings
+from openai import AzureOpenAI
+from openai import APIError
+
+
+# URLs e configurações da sua API do Azure OpenAI
+AZURE_OPENAI_ENDPOINT = "https://troop-mg863zkh-eastus2.cognitiveservices.azure.com/"
+AZURE_OPENAI_DEPLOYMENT = "o4-mini-labDb"
+AZURE_OPENAI_API_VERSION = "2024-04-01-preview"
 
 @method_decorator(csrf_exempt, name='dispatch')
 class AnaliseViewSet(viewsets.ModelViewSet):
@@ -236,8 +246,6 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             "error": "Método não permitido. Use POST."
         }, status=405)
 
-
-
     @action(detail=True, methods=['post'])
     def update_finalizada(self, request, pk=None):
         try:
@@ -315,3 +323,65 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
         except AnaliseCalculo.DoesNotExist:
             return Response({"error": "Calculo not found"}, status=404)
 
+# URLs e configurações da sua API do Azure OpenAI
+AZURE_OPENAI_ENDPOINT = "https://troop-mg863zkh-eastus2.cognitiveservices.azure.com/openai/deployments/o4-mini-labDb/chat/completions?api-version=2025-01-01-preview"
+AZURE_OPENAI_DEPLOYMENT = "o4-mini-labDb"
+AZURE_OPENAI_API_VERSION = "2024-04-01-preview"
+
+class ChatViewSet(viewsets.ViewSet):
+    """
+    ViewSet para interagir com a API de Chat do Azure OpenAI.
+    """
+    @action(detail=False, methods=['post'], url_path='completions')
+    def chat_completions(self, request):
+        prompt = request.data.get('prompt')
+
+        if not prompt:
+            return Response({"error": "Prompt não fornecido"}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # 1. Crie o cliente da Azure OpenAI com as credenciais seguras
+            client = AzureOpenAI(
+                api_version=settings.AZURE_OPENAI_API_VERSION,
+                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                api_key=settings.OPENAI_API_KEY,
+            )
+
+            # 2. Faça a chamada para a API usando o cliente
+            response = client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """
+                            Você vai receber dados de 
+                            resultados de analises vai verificar se estão de acordo 
+                            com as normas NBR para emissão de um laudo. 
+                            Responda qual a norma, se estão de acordo com a Norma ou não
+                            e justifique o porquê.
+                        """,
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                model=settings.AZURE_OPENAI_DEPLOYMENT
+            )
+
+            # 3. Extraia e retorne a resposta do modelo
+            model_response = response.choices[0].message.content
+
+            return Response({"message": model_response}, status=http_status.HTTP_200_OK)
+
+        except APIError as e:
+            # Captura erros específicos da API da OpenAI
+            return Response(
+                {"error": f"Erro da API do Azure OpenAI: {e.status_code} - {e.body.get('message')}"},
+                status=http_status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            # Captura outros erros inesperados
+            return Response(
+                {"error": f"Ocorreu um erro inesperado: {str(e)}"},
+                status=http_status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

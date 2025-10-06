@@ -2,6 +2,10 @@ from datetime import timedelta
 from pathlib import Path
 import os
 from celery.schedules import crontab
+from dotenv import load_dotenv
+
+
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CHARSET = 'utf-8'
@@ -24,6 +28,15 @@ CORS_ALLOW_CREDENTIALS = True
 #AUTH_USER_MODEL = 'management.CustomUser'
 # Application definition
 
+load_dotenv()
+#VARIAVEIS DE AMBIENTE DA OPENAI
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+AZURE_OPENAI_ENDPOINT = os.environ.get('AZURE_OPENAI_ENDPOINT')
+AZURE_OPENAI_DEPLOYMENT = os.environ.get('AZURE_OPENAI_DEPLOYMENT')
+AZURE_OPENAI_API_VERSION = os.environ.get('AZURE_OPENAI_API_VERSION')
+# Verifique se as variáveis existem antes de usar
+if not OPENAI_API_KEY or not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_DEPLOYMENT or not AZURE_OPENAI_API_VERSION:
+    raise ValueError("Variáveis de ambiente do Azure OpenAI não configuradas.")
 
 CELERY_RESULT_BACKEND = 'django-db'
 
