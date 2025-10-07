@@ -2,8 +2,8 @@ from datetime import datetime
 from django.shortcuts import render
 from rest_framework import viewsets,status
 from rest_framework.decorators import action
-from .models import Amostra, TipoAmostra, ProdutoAmostra, AmostraImagem
-from .serializers import AmostraSerializer, TipoAmostraSerializer, ProdutoAmostraSerializer, AmostraImagemSerializer
+from .models import Amostra, TipoAmostra, ProdutoAmostra, AmostraImagem, GarantiaProduto
+from .serializers import AmostraSerializer, TipoAmostraSerializer, ProdutoAmostraSerializer, AmostraImagemSerializer, GarantiaProdutoSerializer
 from rest_framework.response import Response
 import pandas as pd
 
@@ -67,7 +67,16 @@ class ProdutoViewSet(viewsets.ModelViewSet):
                 {'error': f'Erro ao filtrar produtos: {str(e)}'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+class GarantiaProdutoViewSet(viewsets.ModelViewSet):
+    queryset = GarantiaProduto.objects.all()
+    serializer_class = GarantiaProdutoSerializer
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)        
 
 class AmostraViewSet(viewsets.ModelViewSet):
     queryset = Amostra.objects.all()

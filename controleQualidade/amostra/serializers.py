@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from baseOrcamentaria.dre.models import Produto
 from baseOrcamentaria.dre.serializers import ProdutoSerializer
-from .models import Amostra, TipoAmostra, ProdutoAmostra, AmostraImagem
+from .models import Amostra, TipoAmostra, ProdutoAmostra, AmostraImagem, GarantiaProduto
 from controleQualidade.ordem.serializers import OrdemSerializer, OrdemExpressaSerializer
 from controleQualidade.ordem.models import Ordem, OrdemExpressa
 
@@ -15,6 +15,11 @@ class ProdutoAmostraSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProdutoAmostra
         fields = '__all__'
+
+class GarantiaProdutoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GarantiaProduto
+        fields = '__all__'    
 
 class AmostraImagemSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()

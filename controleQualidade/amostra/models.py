@@ -24,9 +24,19 @@ class ProdutoAmostra(models.Model):
         verbose_name = 'Produto'
         verbose_name_plural = 'Produtos'
 
-
-# def upload_image_amostra(amostra,filename):
-#         return f"{amostra.id}-{filename}"
+class GarantiaProduto(models.Model):
+    id = models.AutoField(primary_key=True)
+    produto = models.ForeignKey(Produto, on_delete=models.RESTRICT, related_name='garantias')
+    ensaio = models.CharField(max_length=255, null=True, blank=True)
+    calculo= models.CharField(max_length=255, null=True, blank=True)
+    norma = models.CharField(max_length=255, null=True, blank=True)
+    especificacao = models.CharField(max_length=255, null=True, blank=True)
+    minimo = models.FloatField(null=True, blank=True)
+    maximo = models.FloatField(null=True, blank=True)
+    unidade = models.CharField(max_length=255, null=True, blank=True)
+    class meta:
+        verbose_name = 'Garantia do Produto'
+        verbose_name_plural = 'Garantias dos Produtos'
 
 def upload_image_amostra(instance, filename):
     return f"amostra_{instance.amostra.id}/{filename}"
