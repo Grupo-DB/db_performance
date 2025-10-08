@@ -27,9 +27,9 @@ class ProdutoAmostra(models.Model):
 class GarantiaProduto(models.Model):
     id = models.AutoField(primary_key=True)
     produto = models.ForeignKey(Produto, on_delete=models.RESTRICT, related_name='garantias')
-    ensaio = models.CharField(max_length=255, null=True, blank=True)
-    calculo= models.CharField(max_length=255, null=True, blank=True)
+    requisito = models.CharField(max_length=255, null=True, blank=True)
     norma = models.CharField(max_length=255, null=True, blank=True)
+    classe = models.CharField(max_length=255, null=True, blank=True)
     especificacao = models.CharField(max_length=255, null=True, blank=True)
     minimo = models.FloatField(null=True, blank=True)
     maximo = models.FloatField(null=True, blank=True)
