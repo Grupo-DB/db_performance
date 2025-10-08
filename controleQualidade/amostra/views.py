@@ -76,7 +76,27 @@ class GarantiaProdutoViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
-        return Response(serializer.data)        
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['POST'], url_path='por-produto')
+    def por_produto(self, request):
+        try:
+            produto_id = request.data.get('produto_id')
+            if not produto_id:
+                return Response(
+                    {'error': 'produto_id é obrigatório'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            garantias = GarantiaProduto.objects.filter(produto_id=produto_id)
+            serializer = self.get_serializer(garantias, many=True)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            return Response(
+                {'error': f'Erro ao filtrar garantias: {str(e)}'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )        
 
 class AmostraViewSet(viewsets.ModelViewSet):
     queryset = Amostra.objects.all()

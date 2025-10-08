@@ -1,5 +1,4 @@
 from django.db import models
-from baseOrcamentaria.dre.models import Produto
 from controleQualidade.ordem.models import Ordem, OrdemExpressa
 
 class TipoAmostra(models.Model):
@@ -26,7 +25,7 @@ class ProdutoAmostra(models.Model):
 
 class GarantiaProduto(models.Model):
     id = models.AutoField(primary_key=True)
-    produto = models.ForeignKey(Produto, on_delete=models.RESTRICT, related_name='garantias')
+    produto = models.ForeignKey(ProdutoAmostra, on_delete=models.RESTRICT, related_name='garantias')
     requisito = models.CharField(max_length=255, null=True, blank=True)
     norma = models.CharField(max_length=255, null=True, blank=True)
     classe = models.CharField(max_length=255, null=True, blank=True)
