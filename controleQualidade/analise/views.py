@@ -354,10 +354,13 @@ class ChatViewSet(viewsets.ViewSet):
                         "role": "system",
                         "content": """
                             Você vai receber dados de 
-                            resultados de analises vai verificar se estão de acordo 
-                            com as normas NBR para emissão de um laudo. 
-                            Responda qual a norma, se estão de acordo com a Norma ou não
-                            e justifique o porquê.
+                            resultados de analises e vai verificar se estão de acordo com a Ficha Tecnica que voce vai receber na requisição e tambem vai verifiar se estao de acordo 
+                            com as normas NBR recebidas para emissão de um laudo. 
+                            Se o produto for Argamassa tipo Assentamento ou Fixação usar NBR 13281-2, 
+                            Se for Argamassa tipo Revestimento usar NBR 13281-1,
+                            Separe o paracer em uma parte de acordo com a ficha técnica e na outra parte de acordo com as normas NBR.
+                            Se estiver tudo em conformidade responda Conforme, se não responsa Nao Conforme
+                            e justifique o porquê como os valores exigidos pela ficha técnica e pela norma NBR.
                         """,
                     },
                     {
