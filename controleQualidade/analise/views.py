@@ -361,6 +361,7 @@ class ChatViewSet(viewsets.ViewSet):
                             Separe o paracer em uma parte de acordo com a ficha técnica e na outra parte de acordo com as normas NBR.
                             Se estiver tudo em conformidade responda Conforme, se não responsa Nao Conforme
                             e justifique o porquê como os valores exigidos pela ficha técnica e pela norma NBR.
+                            Se o produto não for argamassa, utilize a norma mais recenente equivalente ao produto, mas somente informe os valores desta para refferência e informação. Não precisa verificar conformidade.
                         """,
                     },
                     {
