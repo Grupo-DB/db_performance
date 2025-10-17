@@ -16,6 +16,12 @@ class Analise(models.Model):
     metodo_muro = models.CharField(max_length=255, null=True, blank=True)
     observacoes_muro = models.TextField(null=True, blank=True)
     parecer = models.JSONField(null=True, blank=True)
+    substrato = models.JSONField(null=True, blank=True)
+    superficial = models.JSONField(null=True, blank=True)
+    retacao = models.JSONField(null=True, blank=True)
+    elasticidade = models.JSONField(null=True, blank=True)
+    flexao = models.JSONField(null=True, blank=True)
+    compressao = models.JSONField(null=True, blank=True)
     class Meta:
         verbose_name = 'Análise'
         verbose_name_plural = 'Análises'
