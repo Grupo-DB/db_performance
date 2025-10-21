@@ -18,7 +18,7 @@ class Analise(models.Model):
     parecer = models.JSONField(null=True, blank=True)
     substrato = models.JSONField(null=True, blank=True)
     superficial = models.JSONField(null=True, blank=True)
-    retacao = models.JSONField(null=True, blank=True)
+    retracao = models.JSONField(null=True, blank=True)
     elasticidade = models.JSONField(null=True, blank=True)
     flexao = models.JSONField(null=True, blank=True)
     compressao = models.JSONField(null=True, blank=True)
