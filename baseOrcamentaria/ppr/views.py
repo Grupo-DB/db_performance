@@ -72,8 +72,6 @@ def calculos_realizado_ppr(request):
     else:
         raise ValueError("O parâmetro 'ano' é obrigatório.")
     
-    print(f"Data de início: {data_inicio}")
-    print(f"Data de fim: {data_fim}")
 
     # Converte listas para strings no formato esperado pelo SQL
     filiais_string = ", ".join(map(str, filiais_list))
@@ -530,9 +528,6 @@ def calculos_realizado_matriz(request):
     else:
         raise ValueError("O parâmetro 'ano' é obrigatório.")
     
-    print(f"Data de início: {data_inicio}")
-    print(f"Data de fim: {data_fim}")
-
     # Converte listas para strings no formato esperado pelo SQL
     filiais_string = ", ".join(map(str, filiais_list))
     cc_string = ", ".join(map(str, cc_list))
@@ -770,7 +765,6 @@ def calculos_realizado_matriz(request):
 
     total_tipo_deb = consulta_realizado.groupby('TIPO_CUSTO')['SALDO'].sum().to_dict()
     total_tipo_deb_formatado = {tipo: format_locale(valor) for tipo, valor in total_tipo_deb.items()}
-    print('total_tipo_deb:', total_tipo_deb)
      # Soma os valores para 'Custo Direto Variável'
     total_variavel = (
         total_tipo_deb.get('Custo Direto Variável Insumos', 0) +
@@ -784,10 +778,6 @@ def calculos_realizado_matriz(request):
         total_tipo_deb.get('Custo Direto Fixo', 0),
         2
     )
-
-    
-    print('FIXO',  custos_fixo)
-
     
     # Formata os valores
     total_variavel_formatado = format_locale(total_variavel)

@@ -169,6 +169,27 @@ class GrupoItensViewSet(viewsets.ModelViewSet):
             return Response({"error": "Gestor nao encontrado."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        
+    @action(detail=False, methods=['get'], url_path='byGestor')
+    def byGestor(self, request):
+        gestor_id = request.query_params.get('gestor_id')
+        
+        if not gestor_id:
+            return Response(
+                {"error": "O parâmetro 'gestor_id' é obrigatório."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            grupos = GrupoItens.objects.filter(gestor_id=gestor_id)
+            serializer = self.get_serializer(grupos, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {"error": f"Erro ao buscar registros: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class ContaContabilViewSet(viewsets.ModelViewSet):
     queryset = ContaContabil.objects.all()
@@ -765,7 +786,6 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             filial = request.query_params.get('filial')
             ano = request.query_params.get('ano')
             mes = request.query_params.get('periodo')
-            print('eeeeeeeeennnnnnnnnnnn')
         
             filters = Q()
             
@@ -794,7 +814,7 @@ class OrcamentoBaseViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(orcamentos_base, many=True)
             serialized_data = serializer.data    
             df = pd.DataFrame(serialized_data)
-            print('df',df)
+
                 # Função para formatar valores com locale
             def format_locale(value):
                 return locale.format_string("%.0f",value, grouping=True)

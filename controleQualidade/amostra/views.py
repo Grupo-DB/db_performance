@@ -2,6 +2,7 @@ from datetime import datetime
 from django.shortcuts import render
 from rest_framework import viewsets,status
 from rest_framework.decorators import action
+from django.http import JsonResponse
 from .models import Amostra, TipoAmostra, ProdutoAmostra, AmostraImagem, GarantiaProduto
 from .serializers import AmostraSerializer, TipoAmostraSerializer, ProdutoAmostraSerializer, AmostraImagemSerializer, GarantiaProdutoSerializer
 from rest_framework.response import Response
@@ -117,6 +118,17 @@ class AmostraViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(amostras, many=True)
         return Response(serializer.data)
     
+    @action(detail=False, methods=['get'], url_path='calcs')
+    def calcs(self, request):
+        # Cálculos via ORM para evitar dependência de campos não serializados (write_only)
+        total_amostras = Amostra.objects.count()
+        total_sem_ordem = Amostra.objects.filter(ordem__isnull=True, expressa__isnull=True).count()
+        response_data = {
+            'total_amostras': total_amostras,
+            'total_sem_ordem': total_sem_ordem
+        }
+        return JsonResponse(response_data, safe=False)
+
     @action(detail=False, methods=['get'], url_path='proximo-sequencial-nome/(?P<material_nome>[^/.]+)')
     def proximo_sequencial_nome(self, request, material_nome=None):
         try:

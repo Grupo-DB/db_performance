@@ -2,7 +2,6 @@ from amqp import NotFound
 from django.shortcuts import render,HttpResponse
 from baseOrcamentaria.orcamento.models import Gestor
 from baseOrcamentaria.orcamento.serializers import GestorSerializer
-# Create your views here.
 def management(request):
     return HttpResponse(request,'ok')
 #import logging
@@ -40,7 +39,6 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes
 from .permissions import IsInGroup
 from .tasks import enviar_notificacoes
-
 
 User = get_user_model()
 

@@ -90,10 +90,7 @@ def calculos_realizados_grupo_itens(request):
     
     data_inicio_formatada = data_inicio.strftime('%d/%m/%Y')
     data_fim_formatada = data_fim.strftime('%d/%m/%Y')    
-    
-    print(f"Data de início: {data_inicio}")
-    print(f"Data de fim: {data_fim}")
-    
+      
     # Conversão de listas para strings no formato esperado pelo SQL
     filiais_string = ', '.join(map(str, filiais_list))
     grupo_itens_string = ', '.join(map(str, grupo_itens_list))
@@ -270,20 +267,19 @@ def calculos_realizados_grupo_itens(request):
 
     if 'CONTA' in consulta_realizado.columns:
         consulta_realizado['CONTA'] = consulta_realizado['CONTA'].astype(str)  # Converte para string
-        consulta_realizado['CONTA_ULTIMOS_9'] = consulta_realizado['CONTA'].str[-9:]
+        # Garante padronização em 9 dígitos para o mapeamento
+        consulta_realizado['CONTA_ULTIMOS_9'] = consulta_realizado['CONTA'].str[-9:].str.zfill(9)
 
     # Pegando os 3 primeiros caracteres da conta
     consulta_realizado['CONTA_PRIMEIROS_3'] = consulta_realizado['CONTA_ULTIMOS_9'].str[:3]
-
     prefixos = [item[:3] for item in grupo_itens_list]
  
-
     # Lista de prefixos que precisam ser agrupados
     prefixos_para_agrupamento = ['011', '012', '014', '022', '023', '082', '101']
 
     # Mapeando os grupos de itens
     grupo_itens_map = {
-        item['codigo']: item['nome_completo']
+        str(item['codigo']).zfill(9): item['nome_completo']
         for item in GrupoItens.objects.values('codigo', 'nome_completo')
     }
 
@@ -305,10 +301,15 @@ def calculos_realizados_grupo_itens(request):
 
         # Filtrando os dados considerando os prefixos selecionados
         consulta_filtrada = consulta_realizado[consulta_realizado['CONTA_PRIMEIROS_3'].isin(prefixos)]
-
         # Corrigir o uso de .loc para evitar SettingWithCopyWarning
         consulta_filtrada = consulta_filtrada.copy()
+        # Garante padronização antes do mapeamento
+        consulta_filtrada.loc[:, 'CONTA_ULTIMOS_9'] = (
+            consulta_filtrada['CONTA_ULTIMOS_9'].astype(str).str[-9:].str.zfill(9)
+        )
         consulta_filtrada.loc[:, 'GRUPO_ITENS'] = consulta_filtrada['CONTA_ULTIMOS_9'].map(grupo_itens_map)
+        # Mantém linhas não mapeadas agrupando-as como "Não mapeado" para preservar o total
+        consulta_filtrada.loc[:, 'GRUPO_ITENS'] = consulta_filtrada['GRUPO_ITENS'].fillna('Não mapeado')
 
         # Agrupando os valores somando os saldos
         consulta_agrupada = consulta_filtrada.groupby('GRUPO_ITENS')['SALDO'].sum().reset_index()
@@ -319,7 +320,7 @@ def calculos_realizados_grupo_itens(request):
             total_formatado = "0"
             dados = consulta_agrupada.to_dict(orient='records')
         else:
-            total = consulta_agrupada['SALDO'].sum()  
+            total = consulta_agrupada['SALDO'].sum()
             dados = consulta_agrupada.to_dict(orient='records')
             total_formatado = locale.format_string("%.0f", total, grouping=True)
 
@@ -355,8 +356,9 @@ def calculos_realizados_grupo_itens(request):
     codigos_requisicao = request.data.get('ccs',[])
     # Função para extrair códigos da string
     
-    
     # Excluir os códigos 4700, 4701 e 4703
+    # Normaliza para string para casar com os códigos explodidos e remove códigos indesejados
+    codigos_requisicao = [str(codigo) for codigo in codigos_requisicao]
     codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in ['4700', '4701', '4703']]
 
     consulta_ccs = CentroCusto.objects.filter(
@@ -370,6 +372,14 @@ def calculos_realizados_grupo_itens(request):
 
     # Aplicar a função para criar uma lista de códigos em cada linha
     consulta_filtrada['CODIGOS_SEPARADOS'] = consulta_filtrada['CCSTCOD'].apply(extrair_codigos)
+    # Número de códigos SELECIONADOS por linha (para rateio que preserve o total)
+    consulta_filtrada['N_CODIGOS_SELECIONADOS'] = consulta_filtrada['CODIGOS_SEPARADOS'].apply(
+        lambda lst: sum(1 for c in lst if c in codigos_requisicao) if isinstance(lst, list) else 0
+    )
+    # Evita divisão por zero (linhas sem códigos selecionados serão filtradas depois)
+    consulta_filtrada['N_CODIGOS_SELECIONADOS'] = consulta_filtrada['N_CODIGOS_SELECIONADOS'].replace(0, 1)
+    # Saldo rateado por quantidade de códigos SELECIONADOS
+    consulta_filtrada['SALDO_RATEADO'] = consulta_filtrada['SALDO'] / consulta_filtrada['N_CODIGOS_SELECIONADOS']
 
     # Explodir a lista de códigos em várias linhas, um código por linha
     df_explodido = consulta_filtrada.explode('CODIGOS_SEPARADOS')
@@ -378,7 +388,8 @@ def calculos_realizados_grupo_itens(request):
     df_filtrado = df_explodido[df_explodido['CODIGOS_SEPARADOS'].isin(codigos_requisicao)]
     
     # Agrupar por código e somar os valores
-    df_agrupado = df_filtrado.groupby('CODIGOS_SEPARADOS')['SALDO'].sum().to_dict()
+    # Usa o saldo rateado para garantir que a soma por códigos bata com o total geral
+    df_agrupado = df_filtrado.groupby('CODIGOS_SEPARADOS')['SALDO_RATEADO'].sum().to_dict()
     
     
     df_agrupado_nomes = {}
@@ -393,15 +404,17 @@ def calculos_realizados_grupo_itens(request):
         else:
             df_agrupado_nomes[nome] += saldo
     
-        detalhes = consulta_filtrada[consulta_filtrada['CCSTCOD'].str.contains(codigo)]
-        for _, row in detalhes.iterrows():
+        # Usa o dataframe explodido para obter detalhes exatos daquele código
+        detalhes_cod = df_explodido[df_explodido['CODIGOS_SEPARADOS'] == codigo]
+        for _, row in detalhes_cod.iterrows():
             if row['SALDO'] != 0:
                 df_agrupado_nomes_detalhes[nome].append({
                     'conta': row['CONTA'],
                     'LANCCOD': row['LANCCOD'],
                     'LANCDATA': row['LANCDATA'],
                     'HISTORICO': row['HISTORICO'],
-                    'SALDO': row['SALDO'],
+                    # Mostra o saldo rateado no detalhamento para consistência com o agrupamento
+                    'SALDO': row.get('SALDO_RATEADO', row['SALDO']),
                     'LANCREF': row['LANCREF'],
                     'SITUACAO': row['SITUACAO'],
                     'ITEM': row['ITEM'],
@@ -473,15 +486,15 @@ def calculos_realizados_grupo_itens(request):
         df_agrupado_pais_detalhes[pai_nome]['saldo'] += saldo
 
         # Adicionar os detalhes relacionados ao centro de custo ao pai
-        detalhes = consulta_filtrada[consulta_filtrada['CCSTCOD'].str.contains(codigo)]
-        for _, row in detalhes.iterrows():
+        detalhes_cod = df_explodido[df_explodido['CODIGOS_SEPARADOS'] == codigo]
+        for _, row in detalhes_cod.iterrows():
             if row['SALDO'] != 0:
                 df_agrupado_pais_detalhes[pai_nome]['detalhes'].append({
                     'conta': row['CONTA'],
                     'LANCCOD': row['LANCCOD'],
                     'LANCDATA': row['LANCDATA'],
                     'HISTORICO': row['HISTORICO'],
-                    'SALDO': row['SALDO'],
+                    'SALDO': row.get('SALDO_RATEADO', row['SALDO']),
                     'LANCREF': row['LANCREF'],
                     'SITUACAO': row['SITUACAO'],
                     'ITEM': row['ITEM'],
@@ -504,6 +517,19 @@ def calculos_realizados_grupo_itens(request):
         pai: format_locale(valor) for pai, valor in df_agrupado_por_pai.items()
     }
 
+
+    # Depuração: compara somatórios
+    try:
+        total_sem_cc = consulta_agrupada['SALDO'].sum()
+    except Exception:
+        pass
+
+    # Garante que o total exibido seja consistente com o agrupamento por CCs
+    try:
+        total_cc = sum(df_agrupado.values()) if isinstance(df_agrupado, dict) else 0
+        total_formatado = format_locale(total_cc)
+    except Exception:
+        pass
 
     response_data = {
         'total': total_formatado,

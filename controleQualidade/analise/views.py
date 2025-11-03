@@ -1,5 +1,6 @@
 from django.shortcuts import render
 import requests
+from django.http import JsonResponse
 from rest_framework.response import Response
 from rest_framework import viewsets, status as http_status
 from .models import Analise, AnaliseEnsaio, AnaliseCalculo
@@ -11,7 +12,7 @@ from django.utils import timezone
 from django.conf import settings
 from openai import AzureOpenAI
 from openai import APIError
-
+import pandas as pd
 
 # URLs e configurações da sua API do Azure OpenAI
 AZURE_OPENAI_ENDPOINT = "https://troop-mg863zkh-eastus2.cognitiveservices.azure.com/"
@@ -288,6 +289,23 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             return Response({"status": "Análise aprovada com sucesso."}, status=200)
         except Analise.DoesNotExist:
             return Response({"error": "Análise não encontrada."}, status=404)
+        
+    @action(detail=False, methods=['get'], url_path='calcs')
+    def calcs(self, request):
+        analises = Analise.objects.all()
+        serializer = self.get_serializer(analises, many=True)
+        serializer.analises = serializer.data
+        df = pd.DataFrame(serializer.analises)
+        total_aprovadas = Analise.objects.filter(aprovada=True).count()
+        total_abertas = Analise.objects.filter(finalizada=False).count()
+        total_laudos = Analise.objects.filter(laudo=True).count()
+
+        response_data = {
+            'total_aprovadas': total_aprovadas,
+            'total_abertas': total_abertas,
+            'total_laudos': total_laudos
+        }
+        return JsonResponse(response_data, safe=False)
                 
 class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
     queryset = AnaliseEnsaio.objects.all()
@@ -389,3 +407,6 @@ class ChatViewSet(viewsets.ViewSet):
                 {"error": f"Ocorreu um erro inesperado: {str(e)}"},
                 status=http_status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+        
+#------------------------------------ ------------------------------------############
+

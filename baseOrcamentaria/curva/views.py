@@ -549,9 +549,6 @@ def meus_calculos_gp_curva(request):
     data_inicio_formatada = data_inicio.strftime('%d/%m/%Y')
     data_fim_formatada = data_fim.strftime('%d/%m/%Y')    
     
-    print(f"Data de início: {data_inicio}")
-    print(f"Data de fim: {data_fim}")
-
     # Conversão de listas para strings no formato esperado pelo SQL
     filiais_string = ', '.join(map(str, filiais_list))
     grupo_itens_list_str = ', '.join(map(str, grupo_itens_list))
@@ -1283,10 +1280,8 @@ def meus_calculos_cc_curva(request):
 
     # Verifica se '0' está presente em filiais_list
     if '0' in filiais_string:
-        print("Filial 0 encontrada, excluindo códigos específicos.")
          #Exclui os códigos especificados de codigos_requisicao
         codigos_requisicao = [codigo for codigo in codigos_requisicao if codigo not in codigos_excluir]
-        print("Códigos após exclusão:", codigos_requisicao)
     consulta_ccs = CentroCusto.objects.filter(
         codigo__in=codigos_requisicao
     ).values('codigo', 'nome', 'cc_pai__id', 'cc_pai__nome', 'gestor__nome')
