@@ -22,6 +22,7 @@ class Analise(models.Model):
     elasticidade = models.JSONField(null=True, blank=True)
     flexao = models.JSONField(null=True, blank=True)
     compressao = models.JSONField(null=True, blank=True)
+    peneiras = models.JSONField(null=True, blank=True)
     class Meta:
         verbose_name = 'Análise'
         verbose_name_plural = 'Análises'
