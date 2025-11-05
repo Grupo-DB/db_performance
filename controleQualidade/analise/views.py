@@ -300,10 +300,17 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         total_abertas = Analise.objects.filter(finalizada=False).count()
         total_laudos = Analise.objects.filter(laudo=True).count()
 
+        total_status = {
+            'Total Aprovadas': total_aprovadas,
+            'Total Abertas': total_abertas,
+            'Total Laudos': total_laudos
+        }
+
         response_data = {
             'total_aprovadas': total_aprovadas,
             'total_abertas': total_abertas,
-            'total_laudos': total_laudos
+            'total_laudos': total_laudos,
+            'total_status': total_status
         }
         return JsonResponse(response_data, safe=False)
                 

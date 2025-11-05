@@ -120,12 +120,37 @@ class AmostraViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='calcs')
     def calcs(self, request):
+        amostras = Amostra.objects.all()
+        serializer = self.get_serializer(amostras, many=True)
+        serializer.amostras = serializer.data
+
+        df = pd.DataFrame(serializer.amostras)
+        total_por_finalidade = df['finalidade'].value_counts().to_dict()
+        total_por_material = df['material'].value_counts().to_dict()
+        total_por_fornecedor = df['fornecedor'].value_counts().to_dict()
+        total_por_local_coleta = df['local_coleta'].value_counts().to_dict()
+
         # Cálculos via ORM para evitar dependência de campos não serializados (write_only)
         total_amostras = Amostra.objects.count()
         total_sem_ordem = Amostra.objects.filter(ordem__isnull=True, expressa__isnull=True).count()
+        
+        # Contagem de expressa e ordem
+        total_com_expressa = Amostra.objects.filter(expressa__isnull=False).count()
+        total_com_ordem = Amostra.objects.filter(ordem__isnull=False).count()
+    
+        total_por_tipo = {
+            'Expressa': total_com_expressa,
+            'Com Plano': total_com_ordem
+        }
+
         response_data = {
             'total_amostras': total_amostras,
-            'total_sem_ordem': total_sem_ordem
+            'total_sem_ordem': total_sem_ordem,
+            'total_por_finalidade': total_por_finalidade,
+            'total_por_material': total_por_material,
+            'total_por_fornecedor': total_por_fornecedor,
+            'total_por_local_coleta': total_por_local_coleta,
+            'total_por_tipo': total_por_tipo
         }
         return JsonResponse(response_data, safe=False)
 
