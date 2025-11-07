@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Ordem, OrdemExpressa
+from .models import Ordem, OrdemExpressa, OrdemExpressaEnsaio, OrdemExpressaCalculo
 from controleQualidade.ensaio.models import Ensaio
 from controleQualidade.plano.serializers import PlanoAnaliseSerializer
 from controleQualidade.ensaio.serializers import EnsaioSerializer
@@ -31,10 +31,46 @@ class OrdemSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class OrdemExpressaSerializer(serializers.ModelSerializer):
-    ensaios = FlexibleManyRelatedField(queryset=Ensaio.objects.all(), write_only=True)
-    calculos_ensaio = FlexibleManyRelatedField(queryset=CalculoEnsaio.objects.all(), write_only=True)
-    ensaio_detalhes = EnsaioSerializer(source='ensaios', read_only=True, many=True)
-    calculo_ensaio_detalhes = CalculoEnsaioSerializer(source='calculos_ensaio', read_only=True, many=True)
+    ensaio_detalhes = serializers.SerializerMethodField()
+    calculo_ensaio_detalhes = serializers.SerializerMethodField()
+    
+    def get_ensaio_detalhes(self, obj):
+        """Retorna ensaios da tabela intermediária com info de laboratório"""
+        try:
+            ensaios_intermediarios = obj.ensaios_intermediarios.all().order_by('ordem')
+                        
+            result = []
+            for item in ensaios_intermediarios:
+                ensaio_data = EnsaioSerializer(item.ensaio).data
+                ensaio_data['laboratorio'] = item.laboratorio
+                result.append(ensaio_data)
+            
+            return result
+        except Exception as e:
+            print(f"[ERRO] Erro ao buscar ensaios: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    def get_calculo_ensaio_detalhes(self, obj):
+        """Retorna cálculos da tabela intermediária com info de laboratório"""
+        try:
+            calculos_intermediarios = obj.calculos_intermediarios.all().order_by('ordem')
+                        
+            result = []
+            for item in calculos_intermediarios:
+                calculo_data = CalculoEnsaioSerializer(item.calculo).data
+                #  Adicionar laboratório para controle de edição
+                calculo_data['laboratorio'] = item.laboratorio
+                result.append(calculo_data)
+            
+            return result
+        except Exception as e:
+            print(f"[ERRO] Erro ao buscar cálculos: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
     class Meta:
         model = OrdemExpressa
-        fields = '__all__' 
+        fields = '__all__'

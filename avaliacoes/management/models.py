@@ -127,6 +127,7 @@ class Colaborador(models.Model):
     dominio_id = models.IntegerField(blank=True,null=True)
     minerion_id = models.IntegerField(blank=True,null=True)
     sgg_id = models.IntegerField(blank=True,null=True)
+    laboratorio = models.CharField(max_length=255, null=True, blank=True)
     class Meta:
         verbose_name = "Colaborador"
         verbose_name_plural = "Colaboradores"

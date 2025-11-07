@@ -75,6 +75,7 @@ class Amostra(models.Model):
     digitador = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=255, null=True, blank=True)
     data_descarte = models.DateField(null=True, blank=True) #data de descarte
+    laboratorio = models.CharField(max_length=255, null=False, blank=False)
     class Meta:
         verbose_name = 'Amostra'
         verbose_name_plural = 'Amostras'

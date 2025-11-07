@@ -24,6 +24,7 @@ class Analise(models.Model):
     compressao = models.JSONField(null=True, blank=True)
     peneiras = models.JSONField(null=True, blank=True)
     peneiras_umidas = models.JSONField(null=True, blank=True)
+    laboratorio_atual = models.CharField(max_length=255, null=True, blank=True)
     class Meta:
         verbose_name = 'Análise'
         verbose_name_plural = 'Análises'
@@ -47,6 +48,7 @@ class AnaliseCalculo(models.Model):
     ensaios_utilizados = models.JSONField(null=True, blank=True)
     responsavel = models.CharField(max_length=255, null=True, blank=True)
     digitador = models.CharField(max_length=255, null=True, blank=True)
+    laboratorio = models.CharField(max_length=255, null=True, blank=True)
     class Meta:
         verbose_name = 'Análise de Cálculo'
         verbose_name_plural = 'Análises de Cálculo' 

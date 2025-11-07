@@ -120,7 +120,6 @@ class AnaliseSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         ensaios_data = validated_data.pop('ensaios', [])
         calculos_data = validated_data.pop('calculos', [])
-        
         # Atualiza os campos normais da análise
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -145,6 +144,7 @@ class AnaliseSerializer(serializers.ModelSerializer):
                 ensaios_utilizados=calc.get('ensaios_utilizados', []),
                 responsavel=calc.get('responsavel'),
                 digitador=calc.get('digitador'),
+                laboratorio=calc.get('laboratorio'),
             )
 
         return instance
