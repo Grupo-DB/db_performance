@@ -32,6 +32,7 @@ class Ensaio(models.Model):
     norma = models.CharField(max_length=500, null=True, blank=True)
     garantia = models.CharField(max_length=500, null=True, blank=True)
     estado = models.CharField(max_length=255, null=True, blank=True)
+    tempo_trabalho = models.CharField(max_length=255, null=True, blank=True)
     class meta:
         verbose_name = 'Ensaio'
         verbose_name_plural = 'Ensaios'
