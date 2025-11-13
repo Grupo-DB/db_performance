@@ -25,6 +25,17 @@ class Analise(models.Model):
     peneiras = models.JSONField(null=True, blank=True)
     peneiras_umidas = models.JSONField(null=True, blank=True)
     laboratorio_atual = models.CharField(max_length=255, null=True, blank=True)
+    variacao_dimensional = models.JSONField(null=True, blank=True)
+    variacao_massa = models.JSONField(null=True, blank=True)
+    supercial_colante1 = models.JSONField(null=True, blank=True)
+    supercial_colante2 = models.JSONField(null=True, blank=True)
+    supercial_colante3 = models.JSONField(null=True, blank=True)
+    supercial_colante4 = models.JSONField(null=True, blank=True)
+    substrato_colante1 = models.JSONField(null=True, blank=True)
+    substrato_colante2 = models.JSONField(null=True, blank=True)
+    substrato_colante3 = models.JSONField(null=True, blank=True)
+    substrato_colante4 = models.JSONField(null=True, blank=True)
+
     class Meta:
         verbose_name = 'Análise'
         verbose_name_plural = 'Análises'
