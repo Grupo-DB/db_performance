@@ -27,14 +27,12 @@ class Analise(models.Model):
     laboratorio_atual = models.CharField(max_length=255, null=True, blank=True)
     variacao_dimensional = models.JSONField(null=True, blank=True)
     variacao_massa = models.JSONField(null=True, blank=True)
-    supercial_colante1 = models.JSONField(null=True, blank=True)
-    supercial_colante2 = models.JSONField(null=True, blank=True)
-    supercial_colante3 = models.JSONField(null=True, blank=True)
-    supercial_colante4 = models.JSONField(null=True, blank=True)
-    substrato_colante1 = models.JSONField(null=True, blank=True)
-    substrato_colante2 = models.JSONField(null=True, blank=True)
-    substrato_colante3 = models.JSONField(null=True, blank=True)
-    substrato_colante4 = models.JSONField(null=True, blank=True)
+    tracao_normal = models.JSONField(null=True, blank=True)
+    tracao_submersa = models.JSONField(null=True, blank=True)
+    tracao_estufa = models.JSONField(null=True, blank=True)
+    tracao_tempo_aberto = models.JSONField(null=True, blank=True)
+    modulo_elasticidade = models.JSONField(null=True, blank=True)
+   
 
     class Meta:
         verbose_name = 'Análise'
