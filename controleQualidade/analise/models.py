@@ -32,7 +32,7 @@ class Analise(models.Model):
     tracao_estufa = models.JSONField(null=True, blank=True)
     tracao_tempo_aberto = models.JSONField(null=True, blank=True)
     modulo_elasticidade = models.JSONField(null=True, blank=True)
-   
+    deslizamento = models.JSONField(null=True, blank=True)
 
     class Meta:
         verbose_name = 'Análise'
