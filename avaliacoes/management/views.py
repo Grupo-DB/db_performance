@@ -675,7 +675,6 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
 
             avaliador = Avaliador.objects.get(user=user)
             avaliados = avaliador.avaliados.all()
-
             # Filtrar avaliados que não têm avaliação pelo avaliador atual no período especificado
             avaliados_com_avaliacao_pelo_avaliador = Avaliacao.objects.filter(periodo=periodo, avaliador=avaliador).values_list('avaliado_id', flat=True)
             avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao_pelo_avaliador)
