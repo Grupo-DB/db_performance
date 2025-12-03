@@ -109,6 +109,22 @@ class AmostraViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
     
+    @action(detail=False, methods=['get'], url_path='locais-coleta')
+    def locais_coleta(self, request):
+        """
+        Retorna todos os locais de coleta únicos cadastrados nas amostras.
+        """
+        locais = Amostra.objects.exclude(
+            local_coleta__isnull=True
+        ).exclude(
+            local_coleta__exact=''
+        ).values_list('local_coleta', flat=True).distinct().order_by('local_coleta')
+        
+        return Response({
+            'total': len(locais),
+            'locais_coleta': list(locais)
+        })
+    
     @action(detail=False, methods=['get'])
     def sem_ordem(self, request):
         amostras = Amostra.objects.filter(

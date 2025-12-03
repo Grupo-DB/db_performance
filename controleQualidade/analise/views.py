@@ -353,10 +353,12 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
             }, status=400)
         
         try:
-            data_inicial_obj = datetime.strptime(data_inicial, '%Y-%m-%d')
-            data_final_obj = datetime.strptime(data_final, '%Y-%m-%d')
+            # Validar formato de data sem criar objeto datetime
+            datetime.strptime(data_inicial, '%Y-%m-%d')
+            datetime.strptime(data_final, '%Y-%m-%d')
             
-            if data_inicial_obj > data_final_obj:
+            # Comparar strings de data diretamente
+            if data_inicial > data_final:
                 return Response({
                     "error": "A data_inicial deve ser anterior à data_final"
                 }, status=400)
@@ -398,7 +400,10 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 else:
                     continue
                 
-                # Processar cada ensaio
+                # Dicionário para rastrear o último valor de cada ensaio nesta análise
+                ensaios_por_analise = {}
+                
+                # Processar cada ensaio (o último sobrescreve os anteriores)
                 for ensaio in ensaios_json:
                     ensaio_id = ensaio.get('id')
                     ensaio_desc = ensaio.get('descricao', 'Sem descrição')
@@ -422,17 +427,26 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                     except (ValueError, TypeError):
                         continue
                     
-                    # Agrupar por ID do ensaio
+                    # Armazenar o último valor para este ensaio nesta análise
                     key = f"{ensaio_id}_{ensaio_desc}"
+                    ensaios_por_analise[key] = {
+                        'ensaio_id': ensaio_id,
+                        'ensaio_descricao': ensaio_desc,
+                        'valor': valor_float,
+                        'unidade': ensaio.get('unidade', '')
+                    }
+                
+                # Adicionar os valores únicos desta análise ao agrupamento global
+                for key, dados in ensaios_por_analise.items():
                     if key not in ensaios_agrupados:
                         ensaios_agrupados[key] = {
-                            'ensaio_id': ensaio_id,
-                            'ensaio_descricao': ensaio_desc,
+                            'ensaio_id': dados['ensaio_id'],
+                            'ensaio_descricao': dados['ensaio_descricao'],
                             'valores': [],
-                            'unidade': ensaio.get('unidade', '')
+                            'unidade': dados['unidade']
                         }
                     
-                    ensaios_agrupados[key]['valores'].append(valor_float)
+                    ensaios_agrupados[key]['valores'].append(dados['valor'])
             
             except (json.JSONDecodeError, TypeError) as e:
                 continue
@@ -479,6 +493,9 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
         - data_final: data final no formato YYYY-MM-DD (obrigatório)
         - analise_id: ID da análise específica (opcional)
         - ensaio_ids: lista de IDs de ensaios (opcional)
+        - ensaio_descricao: descrição do ensaio para filtrar (opcional)
+        - local_coleta: filtrar por local de coleta da amostra (opcional)
+        - apenas_finalizadas: boolean - se True, filtra apenas finalizadas (default: False)
         - agrupar_por_ensaio: boolean - se True, agrupa por ensaio (default: False)
         """
         from django.db.models import Q
@@ -490,6 +507,9 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
         data_final = data.get('data_final')
         analise_id = data.get('analise_id')
         ensaio_ids = data.get('ensaio_ids', [])
+        ensaio_descricao = data.get('ensaio_descricao')
+        local_coleta = data.get('local_coleta',[])
+        apenas_finalizadas = data.get('apenas_finalizadas', False)
         agrupar_por_ensaio = data.get('agrupar_por_ensaio', False)
         
         # Validações
@@ -511,16 +531,23 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 "error": "Formato de data inválido. Use YYYY-MM-DD"
             }, status=400)
         
-        # Filtrar análises finalizadas no período
+        # Filtrar análises no período
         queryset = AnaliseEnsaio.objects.filter(
-            analise__finalizada_at__gte=data_inicial,
-            analise__finalizada_at__lte=data_final,
-            analise__finalizada=True
+            analise__data__gte=data_inicial,
+            analise__data__lte=data_final
         )
+        
+        # Filtrar apenas finalizadas se solicitado
+        if apenas_finalizadas:
+            queryset = queryset.filter(analise__finalizada=True)
         
         # Filtrar por análise específica se fornecido
         if analise_id:
             queryset = queryset.filter(analise_id=analise_id)
+        
+        # Filtrar por local de coleta da amostra se fornecido
+        if local_coleta:
+            queryset = queryset.filter(analise__amostra__local_coleta__icontains=local_coleta)
         
         # Filtrar por ensaios específicos se fornecidos
         if ensaio_ids:
@@ -612,13 +639,13 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 return f'{mins}min'
         
         # Processar resultados
+        # Criar cache de ensaios do modelo para buscar tempo_trabalho
+        from controleQualidade.ensaio.models import Ensaio
+        ensaios_cache = {}
+        
         if agrupar_por_ensaio:
             # Agrupar por ensaio
             ensaios_agrupados = {}
-            
-            # Criar cache de ensaios do modelo para buscar tempo_trabalho
-            from controleQualidade.ensaio.models import Ensaio
-            ensaios_cache = {}
             
             for analise_ensaio in queryset:
                 try:
@@ -638,6 +665,10 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                         tempo_trabalho = ensaio.get('tempo_trabalho')
                         
                         if ensaio_id is None:
+                            continue
+                        
+                        # Filtrar por descrição se fornecida
+                        if ensaio_descricao and ensaio_descricao.lower() not in ensaio_desc.lower():
                             continue
                         
                         # Se tempo_trabalho não está no JSON, buscar do modelo Ensaio
@@ -677,6 +708,139 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 
                 except (json.JSONDecodeError, TypeError):
                     continue
+            
+            # Processar campos JSON do modelo Analise que contêm ensaios
+            campos_json_analise = [
+                'substrato', 'superficial', 'retracao', 'elasticidade', 
+                'flexao', 'compressao', 'peneiras', 'peneiras_umidas',
+                'variacao_dimensional', 'variacao_massa', 'tracao_normal',
+                'tracao_submersa', 'tracao_estufa', 'tracao_tempo_aberto',
+                'modulo_elasticidade', 'deslizamento'
+            ]
+            
+            # Buscar análises do período para processar campos JSON
+            analises_periodo = Analise.objects.filter(
+                data__gte=data_inicial,
+                data__lte=data_final
+            )
+            
+            if apenas_finalizadas:
+                analises_periodo = analises_periodo.filter(finalizada=True)
+            
+            if analise_id:
+                analises_periodo = analises_periodo.filter(id=analise_id)
+            
+            if local_coleta:
+                analises_periodo = analises_periodo.filter(amostra__local_coleta__icontains=local_coleta)
+            
+            for analise in analises_periodo:
+                for campo_nome in campos_json_analise:
+                    campo_valor = getattr(analise, campo_nome, None)
+                    
+                    if not campo_valor:
+                        continue
+                    
+                    try:
+                        # Se for string, parsear JSON
+                        if isinstance(campo_valor, str):
+                            campo_json = json.loads(campo_valor)
+                        else:
+                            campo_json = campo_valor
+                        
+                        # Verificar se é uma lista de ensaios
+                        if isinstance(campo_json, list):
+                            for item in campo_json:
+                                if isinstance(item, dict):
+                                    ensaio_id = item.get('id')
+                                    ensaio_desc = item.get('descricao', campo_nome.replace('_', ' ').title())
+                                    tempo_previsto = item.get('tempo_previsto')
+                                    tempo_trabalho = item.get('tempo_trabalho')
+                                    
+                                    # Filtrar por descrição se fornecida
+                                    if ensaio_descricao and ensaio_descricao.lower() not in ensaio_desc.lower():
+                                        continue
+                                    
+                                    # Buscar do modelo Ensaio se necessário
+                                    if ensaio_id and not tempo_trabalho:
+                                        if ensaio_id not in ensaios_cache:
+                                            try:
+                                                ensaio_modelo = Ensaio.objects.get(id=ensaio_id)
+                                                ensaios_cache[ensaio_id] = {
+                                                    'tempo_previsto': ensaio_modelo.tempo_previsto,
+                                                    'tempo_trabalho': ensaio_modelo.tempo_trabalho
+                                                }
+                                            except Ensaio.DoesNotExist:
+                                                ensaios_cache[ensaio_id] = {
+                                                    'tempo_previsto': None,
+                                                    'tempo_trabalho': None
+                                                }
+                                        
+                                        tempo_trabalho = ensaios_cache[ensaio_id]['tempo_trabalho']
+                                        if not tempo_previsto:
+                                            tempo_previsto = ensaios_cache[ensaio_id]['tempo_previsto']
+                                    
+                                    # Agrupar por ID do ensaio
+                                    key = f"{ensaio_id}_{ensaio_desc}"
+                                    if key not in ensaios_agrupados:
+                                        ensaios_agrupados[key] = {
+                                            'ensaio_id': ensaio_id,
+                                            'ensaio_descricao': ensaio_desc,
+                                            'tempo_previsto_total_minutos': 0,
+                                            'tempo_trabalho_total_minutos': 0,
+                                            'quantidade_execucoes': 0
+                                        }
+                                    
+                                    ensaios_agrupados[key]['tempo_previsto_total_minutos'] += tempo_para_minutos(tempo_previsto)
+                                    ensaios_agrupados[key]['tempo_trabalho_total_minutos'] += tempo_para_minutos(tempo_trabalho)
+                                    ensaios_agrupados[key]['quantidade_execucoes'] += 1
+                        
+                        # Verificar se é um dicionário com campos tempo diretos
+                        elif isinstance(campo_json, dict):
+                            ensaio_id = campo_json.get('id')
+                            ensaio_desc = campo_json.get('descricao', campo_nome.replace('_', ' ').title())
+                            tempo_previsto = campo_json.get('tempo_previsto')
+                            tempo_trabalho = campo_json.get('tempo_trabalho')
+                            
+                            # Filtrar por descrição se fornecida
+                            if ensaio_descricao and ensaio_descricao.lower() not in ensaio_desc.lower():
+                                continue
+                            
+                            if tempo_previsto or tempo_trabalho:
+                                # Buscar do modelo Ensaio se necessário
+                                if ensaio_id and not tempo_trabalho:
+                                    if ensaio_id not in ensaios_cache:
+                                        try:
+                                            ensaio_modelo = Ensaio.objects.get(id=ensaio_id)
+                                            ensaios_cache[ensaio_id] = {
+                                                'tempo_previsto': ensaio_modelo.tempo_previsto,
+                                                'tempo_trabalho': ensaio_modelo.tempo_trabalho
+                                            }
+                                        except Ensaio.DoesNotExist:
+                                            ensaios_cache[ensaio_id] = {
+                                                'tempo_previsto': None,
+                                                'tempo_trabalho': None
+                                            }
+                                    
+                                    tempo_trabalho = ensaios_cache[ensaio_id]['tempo_trabalho']
+                                    if not tempo_previsto:
+                                        tempo_previsto = ensaios_cache[ensaio_id]['tempo_previsto']
+                                
+                                key = f"{ensaio_id}_{ensaio_desc}"
+                                if key not in ensaios_agrupados:
+                                    ensaios_agrupados[key] = {
+                                        'ensaio_id': ensaio_id,
+                                        'ensaio_descricao': ensaio_desc,
+                                        'tempo_previsto_total_minutos': 0,
+                                        'tempo_trabalho_total_minutos': 0,
+                                        'quantidade_execucoes': 0
+                                    }
+                                
+                                ensaios_agrupados[key]['tempo_previsto_total_minutos'] += tempo_para_minutos(tempo_previsto)
+                                ensaios_agrupados[key]['tempo_trabalho_total_minutos'] += tempo_para_minutos(tempo_trabalho)
+                                ensaios_agrupados[key]['quantidade_execucoes'] += 1
+                    
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        continue
             
             # Formatar resultados
             resultados = []
@@ -741,8 +905,13 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                     # Processar cada ensaio
                     for ensaio in ensaios_json:
                         ensaio_id = ensaio.get('id')
+                        ensaio_desc = ensaio.get('descricao', 'Sem descrição')
                         tempo_previsto = ensaio.get('tempo_previsto')
                         tempo_trabalho = ensaio.get('tempo_trabalho')
+                        
+                        # Filtrar por descrição se fornecida
+                        if ensaio_descricao and ensaio_descricao.lower() not in ensaio_desc.lower():
+                            continue
                         
                         # Se tempo_trabalho não está no JSON, buscar do modelo Ensaio
                         if ensaio_id and not tempo_trabalho:
@@ -770,6 +939,120 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 
                 except (json.JSONDecodeError, TypeError):
                     continue
+            
+            # Processar campos JSON do modelo Analise que contêm ensaios
+            campos_json_analise = [
+                'substrato', 'superficial', 'retracao', 'elasticidade', 
+                'flexao', 'compressao', 'peneiras', 'peneiras_umidas',
+                'variacao_dimensional', 'variacao_massa', 'tracao_normal',
+                'tracao_submersa', 'tracao_estufa', 'tracao_tempo_aberto',
+                'modulo_elasticidade', 'deslizamento'
+            ]
+            
+            # Buscar análises do período para processar campos JSON
+            analises_periodo = Analise.objects.filter(
+                data__gte=data_inicial,
+                data__lte=data_final
+            )
+            
+            if apenas_finalizadas:
+                analises_periodo = analises_periodo.filter(finalizada=True)
+            
+            if analise_id:
+                analises_periodo = analises_periodo.filter(id=analise_id)
+            
+            if local_coleta:
+                analises_periodo = analises_periodo.filter(amostra__local_coleta__icontains=local_coleta)
+            
+            for analise in analises_periodo:
+                analises_processadas.add(analise.id)
+                
+                for campo_nome in campos_json_analise:
+                    campo_valor = getattr(analise, campo_nome, None)
+                    
+                    if not campo_valor:
+                        continue
+                    
+                    try:
+                        # Se for string, parsear JSON
+                        if isinstance(campo_valor, str):
+                            campo_json = json.loads(campo_valor)
+                        else:
+                            campo_json = campo_valor
+                        
+                        # Verificar se é uma lista de ensaios
+                        if isinstance(campo_json, list):
+                            for item in campo_json:
+                                if isinstance(item, dict):
+                                    ensaio_id = item.get('id')
+                                    ensaio_desc = item.get('descricao', campo_nome.replace('_', ' ').title())
+                                    tempo_previsto = item.get('tempo_previsto')
+                                    tempo_trabalho = item.get('tempo_trabalho')
+                                    
+                                    # Filtrar por descrição se fornecida
+                                    if ensaio_descricao and ensaio_descricao.lower() not in ensaio_desc.lower():
+                                        continue
+                                    
+                                    # Buscar do modelo Ensaio se necessário
+                                    if ensaio_id and not tempo_trabalho:
+                                        if ensaio_id not in ensaios_cache:
+                                            try:
+                                                ensaio_modelo = Ensaio.objects.get(id=ensaio_id)
+                                                ensaios_cache[ensaio_id] = {
+                                                    'tempo_previsto': ensaio_modelo.tempo_previsto,
+                                                    'tempo_trabalho': ensaio_modelo.tempo_trabalho
+                                                }
+                                            except Ensaio.DoesNotExist:
+                                                ensaios_cache[ensaio_id] = {
+                                                    'tempo_previsto': None,
+                                                    'tempo_trabalho': None
+                                                }
+                                        
+                                        tempo_trabalho = ensaios_cache[ensaio_id]['tempo_trabalho']
+                                        if not tempo_previsto:
+                                            tempo_previsto = ensaios_cache[ensaio_id]['tempo_previsto']
+                                    
+                                    tempo_previsto_total_min += tempo_para_minutos(tempo_previsto)
+                                    tempo_trabalho_total_min += tempo_para_minutos(tempo_trabalho)
+                                    total_ensaios_executados += 1
+                        
+                        # Verificar se é um dicionário com campos tempo diretos
+                        elif isinstance(campo_json, dict):
+                            ensaio_id = campo_json.get('id')
+                            ensaio_desc = campo_json.get('descricao', campo_nome.replace('_', ' ').title())
+                            tempo_previsto = campo_json.get('tempo_previsto')
+                            tempo_trabalho = campo_json.get('tempo_trabalho')
+                            
+                            # Filtrar por descrição se fornecida
+                            if ensaio_descricao and ensaio_descricao.lower() not in ensaio_desc.lower():
+                                continue
+                            
+                            if tempo_previsto or tempo_trabalho:
+                                # Buscar do modelo Ensaio se necessário
+                                if ensaio_id and not tempo_trabalho:
+                                    if ensaio_id not in ensaios_cache:
+                                        try:
+                                            ensaio_modelo = Ensaio.objects.get(id=ensaio_id)
+                                            ensaios_cache[ensaio_id] = {
+                                                'tempo_previsto': ensaio_modelo.tempo_previsto,
+                                                'tempo_trabalho': ensaio_modelo.tempo_trabalho
+                                            }
+                                        except Ensaio.DoesNotExist:
+                                            ensaios_cache[ensaio_id] = {
+                                                'tempo_previsto': None,
+                                                'tempo_trabalho': None
+                                            }
+                                    
+                                    tempo_trabalho = ensaios_cache[ensaio_id]['tempo_trabalho']
+                                    if not tempo_previsto:
+                                        tempo_previsto = ensaios_cache[ensaio_id]['tempo_previsto']
+                                
+                                tempo_previsto_total_min += tempo_para_minutos(tempo_previsto)
+                                tempo_trabalho_total_min += tempo_para_minutos(tempo_trabalho)
+                                total_ensaios_executados += 1
+                    
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        continue
             
             # Calcular diferença e eficiência
             diferenca_minutos = tempo_trabalho_total_min - tempo_previsto_total_min
@@ -804,6 +1087,10 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
         - data_inicial: data inicial no formato YYYY-MM-DD (obrigatório)
         - data_final: data final no formato YYYY-MM-DD (obrigatório)
         - analise_ids: lista de IDs de análises específicas (opcional)
+        - ensaio_descricao: descrição do ensaio para filtrar (opcional)
+        - local_coleta: filtrar por local de coleta da amostra (opcional)
+        - laboratorio: filtrar por laboratório da amostra (opcional)
+        - apenas_finalizadas: boolean - se True, filtra apenas finalizadas (default: False)
         """
         from django.db.models import Q
         from datetime import datetime
@@ -813,6 +1100,10 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
         data_inicial = data.get('data_inicial')
         data_final = data.get('data_final')
         analise_ids = data.get('analise_ids', [])
+        ensaio_descricao = data.get('ensaio_descricao')
+        local_coleta = data.get('local_coleta')
+        laboratorio = data.get('laboratorio', [])
+        apenas_finalizadas = data.get('apenas_finalizadas', False)
         
         # Validações
         if not data_inicial or not data_final:
@@ -821,10 +1112,12 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
             }, status=400)
         
         try:
-            data_inicial_obj = datetime.strptime(data_inicial, '%Y-%m-%d')
-            data_final_obj = datetime.strptime(data_final, '%Y-%m-%d')
+            # Validar formato de data sem criar objeto datetime
+            datetime.strptime(data_inicial, '%Y-%m-%d')
+            datetime.strptime(data_final, '%Y-%m-%d')
             
-            if data_inicial_obj > data_final_obj:
+            # Comparar strings de data diretamente
+            if data_inicial > data_final:
                 return Response({
                     "error": "A data_inicial deve ser anterior à data_final"
                 }, status=400)
@@ -833,17 +1126,45 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 "error": "Formato de data inválido. Use YYYY-MM-DD"
             }, status=400)
         
-        # Filtrar análises finalizadas no período
-        queryset = AnaliseEnsaio.objects.filter(
-            analise__finalizada_at__gte=data_inicial,
-            analise__finalizada_at__lte=data_final,
-            analise__finalizada=True
-        ).select_related('analise', 'analise__amostra')
+        # Filtrar análises no período
+        if apenas_finalizadas:
+            queryset = AnaliseEnsaio.objects.filter(
+                analise__finalizada_at__gte=data_inicial,
+                analise__finalizada_at__lte=data_final,
+                analise__finalizada=True
+            ).select_related('analise', 'analise__amostra')
+        else:
+            queryset = AnaliseEnsaio.objects.filter(
+                analise__data__gte=data_inicial,
+                analise__data__lte=data_final
+            ).select_related('analise', 'analise__amostra')
         
         # Filtrar por análises específicas se fornecido
         if analise_ids:
             analise_ids = [int(id) for id in analise_ids]
             queryset = queryset.filter(analise_id__in=analise_ids)
+        
+        # Filtrar por local de coleta da amostra se fornecido
+        if local_coleta:
+            if isinstance(local_coleta, list):
+                from django.db.models import Q
+                filtros_local = Q()
+                for local in local_coleta:
+                    filtros_local |= Q(analise__amostra__local_coleta__icontains=local)
+                queryset = queryset.filter(filtros_local)
+            else:
+                queryset = queryset.filter(analise__amostra__local_coleta__icontains=local_coleta)
+        
+        # Filtrar por laboratório da amostra se fornecido
+        if laboratorio:
+            if isinstance(laboratorio, list):
+                from django.db.models import Q
+                filtros_lab = Q()
+                for lab in laboratorio:
+                    filtros_lab |= Q(analise__amostra__laboratorio__icontains=lab)
+                queryset = queryset.filter(filtros_lab)
+            else:
+                queryset = queryset.filter(analise__amostra__laboratorio__icontains=laboratorio)
         
         # Função auxiliar para converter tempo em minutos (reutilizando a mesma do método anterior)
         def tempo_para_minutos(tempo_str):
@@ -923,13 +1244,16 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 analises_agrupadas[analise_id] = {
                     'analise_id': analise_id,
                     'amostra_numero': analise.amostra.numero if analise.amostra else None,
+                    'laboratorio': analise.amostra.laboratorio if (analise.amostra and analise.amostra.laboratorio) else None,
                     'data_finalizacao': str(analise.finalizada_at) if analise.finalizada_at else None,
                     'tempo_previsto_total_minutos': 0,
                     'tempo_trabalho_total_minutos': 0,
                     'quantidade_ensaios': 0,
                     'quantidade_ensaios_diretos': 0,
                     'quantidade_ensaios_calculos': 0,
-                    'ensaios_detalhes': []
+                    'quantidade_ensaios_campos_json': 0,
+                    'ensaios_detalhes': [],
+                    'ensaios_por_id': {}  # Rastreia o último ensaio de cada ID
                 }
             
             try:
@@ -941,12 +1265,16 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 else:
                     continue
                 
-                # Processar cada ensaio
+                # Processar cada ensaio (o último sobrescreve os anteriores do mesmo ID)
                 for ensaio in ensaios_json:
                     ensaio_id = ensaio.get('id')
                     ensaio_desc = ensaio.get('descricao', 'Sem descrição')
                     tempo_previsto = ensaio.get('tempo_previsto')
                     tempo_trabalho = ensaio.get('tempo_trabalho')
+                    
+                    # Filtrar por descrição se fornecida
+                    if ensaio_descricao and ensaio_descricao.lower() not in ensaio_desc.lower():
+                        continue
                     
                     # Se tempo_trabalho não está no JSON, buscar do modelo Ensaio
                     if ensaio_id and not tempo_trabalho:
@@ -970,33 +1298,60 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                     tempo_prev_min = tempo_para_minutos(tempo_previsto)
                     tempo_trab_min = tempo_para_minutos(tempo_trabalho)
                     
-                    analises_agrupadas[analise_id]['tempo_previsto_total_minutos'] += tempo_prev_min
-                    analises_agrupadas[analise_id]['tempo_trabalho_total_minutos'] += tempo_trab_min
-                    analises_agrupadas[analise_id]['quantidade_ensaios'] += 1
-                    analises_agrupadas[analise_id]['quantidade_ensaios_diretos'] += 1
+                    # Criar chave única para este ensaio (id + origem)
+                    ensaio_key = f"ensaio_{ensaio_id}"
                     
-                    # Adicionar detalhes do ensaio
-                    analises_agrupadas[analise_id]['ensaios_detalhes'].append({
+                    # Armazenar/substituir com o ensaio mais recente
+                    analises_agrupadas[analise_id]['ensaios_por_id'][ensaio_key] = {
                         'ensaio_id': ensaio_id,
                         'ensaio_descricao': ensaio_desc,
-                        'tempo_previsto': minutos_para_horas_str(tempo_prev_min),
-                        'tempo_trabalho': minutos_para_horas_str(tempo_trab_min),
-                        'origem': 'ensaio'
-                    })
+                        'tempo_previsto_min': tempo_prev_min,
+                        'tempo_trabalho_min': tempo_trab_min,
+                        'origem': 'ensaio',
+                        'tipo_contador': 'diretos'
+                    }
             
             except (json.JSONDecodeError, TypeError):
                 continue
         
         # Processar ensaios dentro dos cálculos
-        calculos_queryset = AnaliseCalculo.objects.filter(
-            analise__finalizada_at__gte=data_inicial,
-            analise__finalizada_at__lte=data_final,
-            analise__finalizada=True
-        ).select_related('analise', 'analise__amostra')
+        if apenas_finalizadas:
+            calculos_queryset = AnaliseCalculo.objects.filter(
+                analise__finalizada_at__gte=data_inicial,
+                analise__finalizada_at__lte=data_final,
+                analise__finalizada=True
+            ).select_related('analise', 'analise__amostra')
+        else:
+            calculos_queryset = AnaliseCalculo.objects.filter(
+                analise__data__gte=data_inicial,
+                analise__data__lte=data_final
+            ).select_related('analise', 'analise__amostra')
         
         # Filtrar por análises específicas se fornecido
         if analise_ids:
             calculos_queryset = calculos_queryset.filter(analise_id__in=analise_ids)
+        
+        # Filtrar por local de coleta da amostra se fornecido
+        if local_coleta:
+            if isinstance(local_coleta, list):
+                from django.db.models import Q
+                filtros_local = Q()
+                for local in local_coleta:
+                    filtros_local |= Q(analise__amostra__local_coleta__icontains=local)
+                calculos_queryset = calculos_queryset.filter(filtros_local)
+            else:
+                calculos_queryset = calculos_queryset.filter(analise__amostra__local_coleta__icontains=local_coleta)
+        
+        # Filtrar por laboratório da amostra se fornecido
+        if laboratorio:
+            if isinstance(laboratorio, list):
+                from django.db.models import Q
+                filtros_lab = Q()
+                for lab in laboratorio:
+                    filtros_lab |= Q(analise__amostra__laboratorio__icontains=lab)
+                calculos_queryset = calculos_queryset.filter(filtros_lab)
+            else:
+                calculos_queryset = calculos_queryset.filter(analise__amostra__laboratorio__icontains=laboratorio)
         
         for analise_calculo in calculos_queryset:
             analise = analise_calculo.analise
@@ -1007,13 +1362,15 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 analises_agrupadas[analise_id] = {
                     'analise_id': analise_id,
                     'amostra_numero': analise.amostra.numero if analise.amostra else None,
+                    'laboratorio': analise.amostra.laboratorio if (analise.amostra and analise.amostra.laboratorio) else None,
                     'data_finalizacao': str(analise.finalizada_at) if analise.finalizada_at else None,
                     'tempo_previsto_total_minutos': 0,
                     'tempo_trabalho_total_minutos': 0,
                     'quantidade_ensaios': 0,
                     'quantidade_ensaios_diretos': 0,
                     'quantidade_ensaios_calculos': 0,
-                    'ensaios_detalhes': []
+                    'ensaios_detalhes': [],
+                    'ensaios_por_id': {}  # Rastreia o último ensaio de cada ID
                 }
             
             try:
@@ -1032,6 +1389,10 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                     tempo_previsto = ensaio.get('tempo_previsto')
                     tempo_trabalho = ensaio.get('tempo_trabalho')
                     
+                    # Filtrar por descrição se fornecida
+                    if ensaio_descricao and ensaio_descricao.lower() not in ensaio_desc.lower():
+                        continue
+                    
                     # Se tempo_trabalho não está no JSON, buscar do modelo Ensaio
                     if ensaio_id and not tempo_trabalho:
                         if ensaio_id not in ensaios_cache:
@@ -1054,27 +1415,233 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                     tempo_prev_min = tempo_para_minutos(tempo_previsto)
                     tempo_trab_min = tempo_para_minutos(tempo_trabalho)
                     
-                    analises_agrupadas[analise_id]['tempo_previsto_total_minutos'] += tempo_prev_min
-                    analises_agrupadas[analise_id]['tempo_trabalho_total_minutos'] += tempo_trab_min
-                    analises_agrupadas[analise_id]['quantidade_ensaios'] += 1
-                    analises_agrupadas[analise_id]['quantidade_ensaios_calculos'] += 1
+                    # Criar chave única para este ensaio (id + origem calculo)
+                    ensaio_key = f"calculo_{ensaio_id}_{analise_calculo.calculos}"
                     
-                    # Adicionar detalhes do ensaio (com indicação de que vem de cálculo)
-                    analises_agrupadas[analise_id]['ensaios_detalhes'].append({
+                    # Armazenar/substituir com o ensaio mais recente
+                    analises_agrupadas[analise_id]['ensaios_por_id'][ensaio_key] = {
                         'ensaio_id': ensaio_id,
                         'ensaio_descricao': f"{ensaio_desc} (via {analise_calculo.calculos})",
-                        'tempo_previsto': minutos_para_horas_str(tempo_prev_min),
-                        'tempo_trabalho': minutos_para_horas_str(tempo_trab_min),
+                        'tempo_previsto_min': tempo_prev_min,
+                        'tempo_trabalho_min': tempo_trab_min,
                         'origem': 'calculo',
-                        'calculo': analise_calculo.calculos
-                    })
+                        'calculo': analise_calculo.calculos,
+                        'tipo_contador': 'calculos'
+                    }
             
             except (json.JSONDecodeError, TypeError):
                 continue
         
+        # Processar campos JSON do modelo Analise que contêm ensaios
+        campos_json_analise = [
+            'substrato', 'superficial', 'retracao', 'elasticidade', 
+            'flexao', 'compressao', 'peneiras', 'peneiras_umidas',
+            'variacao_dimensional', 'variacao_massa', 'tracao_normal',
+            'tracao_submersa', 'tracao_estufa', 'tracao_tempo_aberto',
+            'modulo_elasticidade', 'deslizamento'
+        ]
+        
+        # Buscar todas as análises do período para processar campos JSON
+        if apenas_finalizadas:
+            analises_periodo = Analise.objects.filter(
+                finalizada_at__gte=data_inicial,
+                finalizada_at__lte=data_final,
+                finalizada=True
+            ).select_related('amostra')
+        else:
+            analises_periodo = Analise.objects.filter(
+                data__gte=data_inicial,
+                data__lte=data_final
+            ).select_related('amostra')
+        
+        # Filtrar por análises específicas se fornecido
+        if analise_ids:
+            analises_periodo = analises_periodo.filter(id__in=analise_ids)
+        
+        # Filtrar por local de coleta da amostra se fornecido
+        if local_coleta:
+            if isinstance(local_coleta, list):
+                from django.db.models import Q
+                filtros_local = Q()
+                for local in local_coleta:
+                    filtros_local |= Q(amostra__local_coleta__icontains=local)
+                analises_periodo = analises_periodo.filter(filtros_local)
+            else:
+                analises_periodo = analises_periodo.filter(amostra__local_coleta__icontains=local_coleta)
+        
+        # Filtrar por laboratório da amostra se fornecido
+        if laboratorio:
+            if isinstance(laboratorio, list):
+                from django.db.models import Q
+                filtros_lab = Q()
+                for lab in laboratorio:
+                    filtros_lab |= Q(amostra__laboratorio__icontains=lab)
+                analises_periodo = analises_periodo.filter(filtros_lab)
+            else:
+                analises_periodo = analises_periodo.filter(amostra__laboratorio__icontains=laboratorio)
+        
+        for analise in analises_periodo:
+            analise_id = analise.id
+            
+            # Inicializar se ainda não existe
+            if analise_id not in analises_agrupadas:
+                analises_agrupadas[analise_id] = {
+                    'analise_id': analise_id,
+                    'amostra_numero': analise.amostra.numero if analise.amostra else None,
+                    'laboratorio': analise.amostra.laboratorio if (analise.amostra and analise.amostra.laboratorio) else None,
+                    'data_finalizacao': str(analise.finalizada_at) if analise.finalizada_at else None,
+                    'tempo_previsto_total_minutos': 0,
+                    'tempo_trabalho_total_minutos': 0,
+                    'quantidade_ensaios': 0,
+                    'quantidade_ensaios_diretos': 0,
+                    'quantidade_ensaios_calculos': 0,
+                    'quantidade_ensaios_campos_json': 0,
+                    'ensaios_detalhes': [],
+                    'ensaios_por_id': {}  # Rastreia o último ensaio de cada ID
+                }
+            
+            # Processar cada campo JSON
+            for campo_nome in campos_json_analise:
+                campo_valor = getattr(analise, campo_nome, None)
+                
+                if not campo_valor:
+                    continue
+                
+                try:
+                    # Se for string, parsear JSON
+                    if isinstance(campo_valor, str):
+                        campo_json = json.loads(campo_valor)
+                    else:
+                        campo_json = campo_valor
+                    
+                    # Verificar se é uma lista de ensaios
+                    if isinstance(campo_json, list):
+                        for item in campo_json:
+                            if isinstance(item, dict):
+                                ensaio_id = item.get('id')
+                                ensaio_desc = item.get('descricao', campo_nome.replace('_', ' ').title())
+                                tempo_previsto = item.get('tempo_previsto')
+                                tempo_trabalho = item.get('tempo_trabalho')
+                                
+                                # Filtrar por descrição se fornecida
+                                if ensaio_descricao and ensaio_descricao.lower() not in ensaio_desc.lower():
+                                    continue
+                                
+                                # Buscar do modelo Ensaio se necessário
+                                if ensaio_id and not tempo_trabalho:
+                                    if ensaio_id not in ensaios_cache:
+                                        try:
+                                            ensaio_modelo = Ensaio.objects.get(id=ensaio_id)
+                                            ensaios_cache[ensaio_id] = {
+                                                'tempo_previsto': ensaio_modelo.tempo_previsto,
+                                                'tempo_trabalho': ensaio_modelo.tempo_trabalho
+                                            }
+                                        except Ensaio.DoesNotExist:
+                                            ensaios_cache[ensaio_id] = {
+                                                'tempo_previsto': None,
+                                                'tempo_trabalho': None
+                                            }
+                                    
+                                    tempo_trabalho = ensaios_cache[ensaio_id]['tempo_trabalho']
+                                    if not tempo_previsto:
+                                        tempo_previsto = ensaios_cache[ensaio_id]['tempo_previsto']
+                                
+                                tempo_prev_min = tempo_para_minutos(tempo_previsto)
+                                tempo_trab_min = tempo_para_minutos(tempo_trabalho)
+                                
+                                # Criar chave única para este ensaio
+                                ensaio_key = f"json_{campo_nome}_{ensaio_id}"
+                                
+                                # Armazenar/substituir com o ensaio mais recente
+                                analises_agrupadas[analise_id]['ensaios_por_id'][ensaio_key] = {
+                                    'ensaio_id': ensaio_id,
+                                    'ensaio_descricao': f"{ensaio_desc} ({campo_nome})",
+                                    'tempo_previsto_min': tempo_prev_min,
+                                    'tempo_trabalho_min': tempo_trab_min,
+                                    'origem': 'campo_json',
+                                    'campo': campo_nome,
+                                    'tipo_contador': 'campos_json'
+                                }
+                    
+                    # Verificar se é um dicionário com campos tempo_previsto/tempo_trabalho diretos
+                    elif isinstance(campo_json, dict):
+                        ensaio_desc = campo_json.get('descricao', campo_nome.replace('_', ' ').title())
+                        tempo_previsto = campo_json.get('tempo_previsto')
+                        tempo_trabalho = campo_json.get('tempo_trabalho')
+                        
+                        # Filtrar por descrição se fornecida
+                        if ensaio_descricao and ensaio_descricao.lower() not in ensaio_desc.lower():
+                            continue
+                        
+                        if tempo_previsto or tempo_trabalho:
+                            tempo_prev_min = tempo_para_minutos(tempo_previsto)
+                            tempo_trab_min = tempo_para_minutos(tempo_trabalho)
+                            
+                            # Criar chave única para este campo
+                            ensaio_key = f"json_{campo_nome}"
+                            
+                            # Armazenar/substituir com o ensaio mais recente
+                            analises_agrupadas[analise_id]['ensaios_por_id'][ensaio_key] = {
+                                'ensaio_id': None,
+                                'ensaio_descricao': campo_nome.replace('_', ' ').title(),
+                                'tempo_previsto_min': tempo_prev_min,
+                                'tempo_trabalho_min': tempo_trab_min,
+                                'origem': 'campo_json',
+                                'campo': campo_nome,
+                                'tipo_contador': 'campos_json'
+                            }
+                
+                except (json.JSONDecodeError, TypeError, AttributeError):
+                    continue
+        
+        # Processar ensaios_por_id para criar listas finais e calcular totais
+        for analise_id in analises_agrupadas:
+            dados = analises_agrupadas[analise_id]
+            
+            # Processar cada ensaio único e calcular totais
+            for ensaio_data in dados['ensaios_por_id'].values():
+                tempo_prev_min = ensaio_data['tempo_previsto_min']
+                tempo_trab_min = ensaio_data['tempo_trabalho_min']
+                
+                # Atualizar totais
+                dados['tempo_previsto_total_minutos'] += tempo_prev_min
+                dados['tempo_trabalho_total_minutos'] += tempo_trab_min
+                dados['quantidade_ensaios'] += 1
+                
+                # Atualizar contadores específicos
+                tipo_contador = ensaio_data['tipo_contador']
+                if tipo_contador == 'diretos':
+                    dados['quantidade_ensaios_diretos'] += 1
+                elif tipo_contador == 'calculos':
+                    dados['quantidade_ensaios_calculos'] += 1
+                elif tipo_contador == 'campos_json':
+                    dados['quantidade_ensaios_campos_json'] += 1
+                
+                # Adicionar aos detalhes formatados
+                detalhes = {
+                    'ensaio_id': ensaio_data['ensaio_id'],
+                    'ensaio_descricao': ensaio_data['ensaio_descricao'],
+                    'tempo_previsto': minutos_para_horas_str(tempo_prev_min),
+                    'tempo_trabalho': minutos_para_horas_str(tempo_trab_min),
+                    'origem': ensaio_data['origem']
+                }
+                
+                # Adicionar campo se existir
+                if 'campo' in ensaio_data:
+                    detalhes['campo'] = ensaio_data['campo']
+                
+                dados['ensaios_detalhes'].append(detalhes)
+            
+            # Remover dicionário temporário
+            del dados['ensaios_por_id']
+        
         # Formatar resultados
         resultados = []
         for analise_id, dados in analises_agrupadas.items():
+            # Se ensaio_descricao foi fornecido e a análise não tem nenhum ensaio correspondente, pular
+            if ensaio_descricao and dados['quantidade_ensaios'] == 0:
+                continue
+            
             tempo_prev_min = dados['tempo_previsto_total_minutos']
             tempo_trab_min = dados['tempo_trabalho_total_minutos']
             
@@ -1085,6 +1652,7 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
             resultados.append({
                 'analise_id': dados['analise_id'],
                 'amostra_numero': dados['amostra_numero'],
+                'laboratorio': dados['laboratorio'],
                 'data_finalizacao': dados['data_finalizacao'],
                 'tempo_previsto_total': minutos_para_horas_str(tempo_prev_min),
                 'tempo_previsto_minutos': round(tempo_prev_min, 2),
@@ -1097,17 +1665,34 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 'quantidade_ensaios': dados['quantidade_ensaios'],
                 'quantidade_ensaios_diretos': dados['quantidade_ensaios_diretos'],
                 'quantidade_ensaios_calculos': dados['quantidade_ensaios_calculos'],
+                'quantidade_ensaios_campos_json': dados.get('quantidade_ensaios_campos_json', 0),
                 'ensaios_detalhes': dados['ensaios_detalhes']
             })
         
         # Ordenar por ID da análise (mais recente primeiro)
         resultados.sort(key=lambda x: x['analise_id'], reverse=True)
         
+        # Calcular totais gerais de todas as análises
+        tempo_previsto_geral = sum(r['tempo_previsto_minutos'] for r in resultados)
+        tempo_trabalho_geral = sum(r['tempo_trabalho_minutos'] for r in resultados)
+        diferenca_geral = tempo_trabalho_geral - tempo_previsto_geral
+        eficiencia_geral = (tempo_previsto_geral / tempo_trabalho_geral * 100) if tempo_trabalho_geral > 0 else 0
+        
         return Response({
             'total_analises': len(resultados),
             'periodo': {
                 'data_inicial': data_inicial,
                 'data_final': data_final
+            },
+            'totais_gerais': {
+                'tempo_previsto_total': minutos_para_horas_str(tempo_previsto_geral),
+                'tempo_previsto_minutos': round(tempo_previsto_geral, 2),
+                'tempo_trabalho_total': minutos_para_horas_str(tempo_trabalho_geral),
+                'tempo_trabalho_minutos': round(tempo_trabalho_geral, 2),
+                'diferenca': minutos_para_horas_str(abs(diferenca_geral)),
+                'diferenca_minutos': round(diferenca_geral, 2),
+                'status': 'No prazo' if diferenca_geral <= 0 else 'Atrasado',
+                'eficiencia_percentual': round(eficiencia_geral, 2)
             },
             'resultados': resultados
         })
@@ -1154,6 +1739,7 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
         
         data = request.data
         calculo_descricao = data.get('calculo')
+        calculos_descricoes = data.get('calculos_descricoes', [])
         calculos_ids = data.get('calculos_ids', [])
         agrupar_por = data.get('agrupar_por', 'id' if calculos_ids else 'descricao')
         data_inicial = data.get('data_inicio')
@@ -1188,8 +1774,16 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
             #analise__finalizada=True
         )
         
-        # Filtrar por cálculo se fornecido
-        if calculo_descricao:
+        # Filtrar por cálculo(s) se fornecido
+        if calculos_descricoes:
+            if isinstance(calculos_descricoes, list) and len(calculos_descricoes) > 0:
+                filtros_calc = Q()
+                for desc in calculos_descricoes:
+                    filtros_calc |= Q(calculos__icontains=desc)
+                queryset = queryset.filter(filtros_calc)
+            else:
+                queryset = queryset.filter(calculos__icontains=calculos_descricoes)
+        elif calculo_descricao:
             queryset = queryset.filter(calculos__icontains=calculo_descricao)
         
         # Filtrar por cálculos se fornecidos
@@ -1206,6 +1800,7 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
         for analise_calculo in queryset:
             calculo_nome = analise_calculo.calculos
             ensaios_utilizados = analise_calculo.ensaios_utilizados
+            analise_id = analise_calculo.analise_id
             
             if agrupar_por == 'descricao':
                 # Agrupar apenas por descrição do cálculo
@@ -1214,34 +1809,36 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
                 if chave not in resultados_por_calculo:
                     resultados_por_calculo[chave] = {
                         'nome': calculo_nome,
-                        'valores': [],
+                        'valores_por_analise': {},  # Rastrear por análise
                         'quantidade': 0
                     }
                 
+                # Armazenar apenas o último resultado desta análise para este cálculo
                 if analise_calculo.resultados is not None:
-                    resultados_por_calculo[chave]['valores'].append(analise_calculo.resultados)
-                    resultados_por_calculo[chave]['quantidade'] += 1
+                    resultados_por_calculo[chave]['valores_por_analise'][analise_id] = analise_calculo.resultados
             else:
                 # Agrupar por ID de cálculo
                 if not ensaios_utilizados:
                     continue
                 
-                # Encontrar os IDs dos cálculos neste registro
-                ids_encontrados = []
+                # Dicionário para rastrear o último resultado de cada cálculo nesta análise
+                calculos_nesta_analise = {}
+                
+                # Encontrar os IDs dos cálculos neste registro (o último sobrescreve)
                 for ensaio in ensaios_utilizados:
                     if isinstance(ensaio, dict):
                         ensaio_id = ensaio.get('id')
                         if ensaio_id:
                             # Se calculos_ids foi fornecido, verificar se este ID está na lista
                             if not calculos_ids or ensaio_id in calculos_ids:
-                                ids_encontrados.append(ensaio_id)
+                                calculos_nesta_analise[ensaio_id] = True
                 
                 # Se não encontrou nenhum ID relevante, pular este registro
-                if not ids_encontrados:
+                if not calculos_nesta_analise:
                     continue
                 
                 # Agrupar por cada ID de cálculo encontrado
-                for calculo_id in ids_encontrados:
+                for calculo_id in calculos_nesta_analise.keys():
                     # Criar chave única combinando ID e nome
                     chave = f"{calculo_id}|{calculo_nome}"
                     
@@ -1249,23 +1846,24 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
                         resultados_por_calculo[chave] = {
                             'id': calculo_id,
                             'nome': calculo_nome,
-                            'valores': [],
+                            'valores_por_analise': {},  # Rastrear por análise
                             'quantidade': 0
                         }
                     
+                    # Armazenar apenas o último resultado desta análise para este cálculo
                     if analise_calculo.resultados is not None:
-                        resultados_por_calculo[chave]['valores'].append(analise_calculo.resultados)
-                        resultados_por_calculo[chave]['quantidade'] += 1
+                        resultados_por_calculo[chave]['valores_por_analise'][analise_id] = analise_calculo.resultados
         
-        # Calcular médias
+        # Calcular médias usando apenas um valor por análise
         resultados = []
         for chave, dados in resultados_por_calculo.items():
-            valores = dados['valores']
+            # Extrair valores únicos por análise
+            valores = list(dados['valores_por_analise'].values())
             if valores:
                 resultado = {
                     'calculo': dados['nome'],
                     'media': round(sum(valores) / len(valores), 4),
-                    'quantidade_analises': dados['quantidade'],
+                    'quantidade_analises': len(valores),
                     'valor_minimo': min(valores),
                     'valor_maximo': max(valores),
                     'periodo': {
@@ -1284,6 +1882,332 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
             'resultados': resultados
         })
     
+    @action(detail=False, methods=['post'], url_path='totais-tempo-por-periodo')
+    def totais_tempo_por_periodo(self, request):
+        """
+        Retorna os totais de tempo previsto e tempo trabalhado dos ensaios
+        contidos nos cálculos, agrupados por período e cálculo.
+        
+        Parâmetros esperados (POST):
+        - data_inicial: data inicial no formato YYYY-MM-DD (obrigatório)
+        - data_final: data final no formato YYYY-MM-DD (obrigatório)
+        - calculo_descricao: descrição do cálculo para filtrar (opcional)
+        - calculos_ids: lista de IDs de cálculos (opcional)
+        - agrupar_por_calculo: boolean - se True, agrupa por cálculo (default: False)
+        """
+        from django.db.models import Q
+        from datetime import datetime
+        import json
+        
+        data = request.data
+        data_inicial = data.get('data_inicial')
+        data_final = data.get('data_final')
+        calculo_descricao = data.get('calculo_descricao')
+        calculos_ids = data.get('calculos_ids', [])
+        agrupar_por_calculo = data.get('agrupar_por_calculo', False)
+        
+        # Validações
+        if not data_inicial or not data_final:
+            return Response({
+                "error": "Parâmetros 'data_inicial' e 'data_final' são obrigatórios (formato: YYYY-MM-DD)"
+            }, status=400)
+        
+        try:
+            data_inicial_obj = datetime.strptime(data_inicial, '%Y-%m-%d')
+            data_final_obj = datetime.strptime(data_final, '%Y-%m-%d')
+            
+            if data_inicial_obj > data_final_obj:
+                return Response({
+                    "error": "A data_inicial deve ser anterior à data_final"
+                }, status=400)
+        except ValueError:
+            return Response({
+                "error": "Formato de data inválido. Use YYYY-MM-DD"
+            }, status=400)
+        
+        # Filtrar análises finalizadas no período
+        queryset = AnaliseCalculo.objects.filter(
+            analise__finalizada_at__gte=data_inicial,
+            analise__finalizada_at__lte=data_final,
+            analise__finalizada=True
+        )
+        
+        # Filtrar por descrição do cálculo se fornecido
+        if calculo_descricao:
+            queryset = queryset.filter(calculos__icontains=calculo_descricao)
+        
+        # Filtrar por IDs de cálculos se fornecidos
+        if calculos_ids:
+            calculos_ids = [int(id) for id in calculos_ids]
+            filtros_calculos = Q()
+            for calculo_id in calculos_ids:
+                filtros_calculos |= Q(ensaios_utilizados__icontains=f'"id": {calculo_id}')
+            queryset = queryset.filter(filtros_calculos)
+        
+        # Função auxiliar para converter tempo em minutos
+        def tempo_para_minutos(tempo_str):
+            """
+            Converte string de tempo para minutos.
+            Formatos suportados: 
+            - '2h', '30min', '1h30min'
+            - '2 Horas', '540 Minutos', '90 minutos'
+            - '2 Turnos' (considerando 8h por turno)
+            - Números: '120' (assume minutos)
+            """
+            if not tempo_str:
+                return 0
+            
+            tempo_str = str(tempo_str).lower().strip()
+            total_minutos = 0
+            
+            try:
+                # Remover acentos e normalizar
+                tempo_str = tempo_str.replace('ç', 'c').replace('õ', 'o').replace('ã', 'a')
+                
+                # Turnos (8 horas cada)
+                if 'turno' in tempo_str:
+                    numero = ''.join(filter(str.isdigit, tempo_str.split('turno')[0]))
+                    if numero:
+                        return float(numero) * 8 * 60
+                    return 0
+                
+                # Horas
+                if 'hora' in tempo_str or 'h' in tempo_str:
+                    # Separar por 'hora' ou 'h'
+                    if 'hora' in tempo_str:
+                        partes = tempo_str.split('hora')
+                    else:
+                        partes = tempo_str.split('h')
+                    
+                    # Extrair número antes de 'hora' ou 'h'
+                    numero_str = partes[0].strip()
+                    numero = ''.join(filter(lambda x: x.isdigit() or x == '.', numero_str))
+                    if numero:
+                        horas = float(numero)
+                        total_minutos += horas * 60
+                    
+                    # Verificar se há minutos depois
+                    if len(partes) > 1:
+                        resto = partes[1]
+                        if 'min' in resto:
+                            numero_min = ''.join(filter(lambda x: x.isdigit() or x == '.', resto.split('min')[0]))
+                            if numero_min:
+                                total_minutos += float(numero_min)
+                
+                # Minutos
+                elif 'min' in tempo_str:
+                    numero = ''.join(filter(lambda x: x.isdigit() or x == '.', tempo_str.split('min')[0]))
+                    if numero:
+                        total_minutos += float(numero)
+                
+                # Apenas número (assume minutos)
+                elif tempo_str.replace('.', '').replace(',', '').isdigit():
+                    total_minutos = float(tempo_str.replace(',', '.'))
+                
+            except Exception as e:
+                print(f"Erro ao converter tempo '{tempo_str}': {e}")
+                return 0
+            
+            return total_minutos
+        
+        def minutos_para_horas_str(minutos):
+            """Converte minutos para formato legível (ex: '2h 30min')"""
+            if minutos == 0:
+                return '0min'
+            
+            horas = int(minutos // 60)
+            mins = int(minutos % 60)
+            
+            if horas > 0 and mins > 0:
+                return f'{horas}h {mins}min'
+            elif horas > 0:
+                return f'{horas}h'
+            else:
+                return f'{mins}min'
+        
+        # Criar cache de ensaios do modelo
+        from controleQualidade.ensaio.models import Ensaio
+        ensaios_cache = {}
+        
+        # Processar resultados
+        if agrupar_por_calculo:
+            # Agrupar por cálculo
+            calculos_agrupados = {}
+            
+            for analise_calculo in queryset:
+                calculo_nome = analise_calculo.calculos
+                
+                if calculo_nome not in calculos_agrupados:
+                    calculos_agrupados[calculo_nome] = {
+                        'calculo_descricao': calculo_nome,
+                        'tempo_previsto_total_minutos': 0,
+                        'tempo_trabalho_total_minutos': 0,
+                        'quantidade_execucoes': 0,
+                        'ensaios_unicos': set()
+                    }
+                
+                try:
+                    # Parsear JSON dos ensaios
+                    if isinstance(analise_calculo.ensaios_utilizados, list):
+                        ensaios_json = analise_calculo.ensaios_utilizados
+                    elif isinstance(analise_calculo.ensaios_utilizados, str):
+                        ensaios_json = json.loads(analise_calculo.ensaios_utilizados)
+                    else:
+                        continue
+                    
+                    # Processar cada ensaio
+                    for ensaio in ensaios_json:
+                        ensaio_id = ensaio.get('id')
+                        tempo_previsto = ensaio.get('tempo_previsto')
+                        tempo_trabalho = ensaio.get('tempo_trabalho')
+                        
+                        if ensaio_id is None:
+                            continue
+                        
+                        # Se tempo_trabalho não está no JSON, buscar do modelo Ensaio
+                        if not tempo_trabalho:
+                            if ensaio_id not in ensaios_cache:
+                                try:
+                                    ensaio_modelo = Ensaio.objects.get(id=ensaio_id)
+                                    ensaios_cache[ensaio_id] = {
+                                        'tempo_previsto': ensaio_modelo.tempo_previsto,
+                                        'tempo_trabalho': ensaio_modelo.tempo_trabalho
+                                    }
+                                except Ensaio.DoesNotExist:
+                                    ensaios_cache[ensaio_id] = {
+                                        'tempo_previsto': None,
+                                        'tempo_trabalho': None
+                                    }
+                            
+                            tempo_trabalho = ensaios_cache[ensaio_id]['tempo_trabalho']
+                            # Se tempo_previsto também não está no JSON, usar do modelo
+                            if not tempo_previsto:
+                                tempo_previsto = ensaios_cache[ensaio_id]['tempo_previsto']
+                        
+                        calculos_agrupados[calculo_nome]['tempo_previsto_total_minutos'] += tempo_para_minutos(tempo_previsto)
+                        calculos_agrupados[calculo_nome]['tempo_trabalho_total_minutos'] += tempo_para_minutos(tempo_trabalho)
+                        calculos_agrupados[calculo_nome]['quantidade_execucoes'] += 1
+                        calculos_agrupados[calculo_nome]['ensaios_unicos'].add(ensaio_id)
+                
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            
+            # Formatar resultados
+            resultados = []
+            for calculo_nome, dados in calculos_agrupados.items():
+                tempo_prev_min = dados['tempo_previsto_total_minutos']
+                tempo_trab_min = dados['tempo_trabalho_total_minutos']
+                
+                # Calcular diferença e eficiência
+                diferenca_minutos = tempo_trab_min - tempo_prev_min
+                eficiencia = (tempo_prev_min / tempo_trab_min * 100) if tempo_trab_min > 0 else 0
+                
+                resultados.append({
+                    'calculo_descricao': dados['calculo_descricao'],
+                    'tempo_previsto_total': minutos_para_horas_str(tempo_prev_min),
+                    'tempo_previsto_minutos': round(tempo_prev_min, 2),
+                    'tempo_trabalho_total': minutos_para_horas_str(tempo_trab_min),
+                    'tempo_trabalho_minutos': round(tempo_trab_min, 2),
+                    'diferenca': minutos_para_horas_str(abs(diferenca_minutos)),
+                    'diferenca_minutos': round(diferenca_minutos, 2),
+                    'status': 'No prazo' if diferenca_minutos <= 0 else 'Atrasado',
+                    'eficiencia_percentual': round(eficiencia, 2),
+                    'quantidade_execucoes': dados['quantidade_execucoes'],
+                    'ensaios_diferentes': len(dados['ensaios_unicos'])
+                })
+            
+            # Ordenar por descrição
+            resultados.sort(key=lambda x: x['calculo_descricao'])
+            
+            return Response({
+                'tipo_agrupamento': 'por_calculo',
+                'total_calculos': len(resultados),
+                'periodo': {
+                    'data_inicial': data_inicial,
+                    'data_final': data_final
+                },
+                'resultados': resultados
+            })
+        
+        else:
+            # Totais gerais (sem agrupar por cálculo)
+            tempo_previsto_total_min = 0
+            tempo_trabalho_total_min = 0
+            total_ensaios_executados = 0
+            calculos_processados = set()
+            ensaios_unicos = set()
+            
+            for analise_calculo in queryset:
+                calculos_processados.add(analise_calculo.calculos)
+                
+                try:
+                    # Parsear JSON dos ensaios
+                    if isinstance(analise_calculo.ensaios_utilizados, list):
+                        ensaios_json = analise_calculo.ensaios_utilizados
+                    elif isinstance(analise_calculo.ensaios_utilizados, str):
+                        ensaios_json = json.loads(analise_calculo.ensaios_utilizados)
+                    else:
+                        continue
+                    
+                    # Processar cada ensaio
+                    for ensaio in ensaios_json:
+                        ensaio_id = ensaio.get('id')
+                        tempo_previsto = ensaio.get('tempo_previsto')
+                        tempo_trabalho = ensaio.get('tempo_trabalho')
+                        
+                        # Se tempo_trabalho não está no JSON, buscar do modelo Ensaio
+                        if ensaio_id and not tempo_trabalho:
+                            if ensaio_id not in ensaios_cache:
+                                try:
+                                    ensaio_modelo = Ensaio.objects.get(id=ensaio_id)
+                                    ensaios_cache[ensaio_id] = {
+                                        'tempo_previsto': ensaio_modelo.tempo_previsto,
+                                        'tempo_trabalho': ensaio_modelo.tempo_trabalho
+                                    }
+                                except Ensaio.DoesNotExist:
+                                    ensaios_cache[ensaio_id] = {
+                                        'tempo_previsto': None,
+                                        'tempo_trabalho': None
+                                    }
+                            
+                            tempo_trabalho = ensaios_cache[ensaio_id]['tempo_trabalho']
+                            # Se tempo_previsto também não está no JSON, usar do modelo
+                            if not tempo_previsto:
+                                tempo_previsto = ensaios_cache[ensaio_id]['tempo_previsto']
+                        
+                        tempo_previsto_total_min += tempo_para_minutos(tempo_previsto)
+                        tempo_trabalho_total_min += tempo_para_minutos(tempo_trabalho)
+                        total_ensaios_executados += 1
+                        if ensaio_id:
+                            ensaios_unicos.add(ensaio_id)
+                
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            
+            # Calcular diferença e eficiência
+            diferenca_minutos = tempo_trabalho_total_min - tempo_previsto_total_min
+            eficiencia = (tempo_previsto_total_min / tempo_trabalho_total_min * 100) if tempo_trabalho_total_min > 0 else 0
+            
+            return Response({
+                'tipo_agrupamento': 'geral',
+                'periodo': {
+                    'data_inicial': data_inicial,
+                    'data_final': data_final
+                },
+                'totais': {
+                    'tempo_previsto_total': minutos_para_horas_str(tempo_previsto_total_min),
+                    'tempo_previsto_minutos': round(tempo_previsto_total_min, 2),
+                    'tempo_trabalho_total': minutos_para_horas_str(tempo_trabalho_total_min),
+                    'tempo_trabalho_minutos': round(tempo_trabalho_total_min, 2),
+                    'diferenca': minutos_para_horas_str(abs(diferenca_minutos)),
+                    'diferenca_minutos': round(diferenca_minutos, 2),
+                    'status': 'No prazo' if diferenca_minutos <= 0 else 'Atrasado',
+                    'eficiencia_percentual': round(eficiencia, 2),
+                    'total_ensaios_executados': total_ensaios_executados,
+                    'ensaios_diferentes': len(ensaios_unicos),
+                    'calculos_diferentes': len(calculos_processados)
+                }
+            })
 
 
 ###############################################################################################
