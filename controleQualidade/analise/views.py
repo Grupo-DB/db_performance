@@ -333,6 +333,7 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
         Parâmetros esperados (POST):
         - ensaio_ids: lista de IDs de ensaios (opcional - se não informado, busca todos)
         - ensaio_descricao: descrição do ensaio para filtrar (opcional)
+        - produto_ids: lista de IDs de produtos da amostra (opcional)
         - data_inicial: data inicial no formato YYYY-MM-DD
         - data_final: data final no formato YYYY-MM-DD
         """
@@ -343,6 +344,7 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
         data = request.data
         ensaio_ids = data.get('ensaios_ids', [])
         ensaio_descricao = data.get('ensaio_descricao')
+        produto_ids = data.get('produto_ids', [])
         data_inicial = data.get('data_inicio')
         data_final = data.get('data_fim')
         
@@ -387,8 +389,19 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 ensaios_utilizados__icontains=f'"descricao": "{ensaio_descricao}"'
             )
         
+        # Filtrar por produto da amostra se fornecido
+        if produto_ids:
+            if isinstance(produto_ids, list):
+                queryset = queryset.filter(analise__amostra__produto_amostra_id__in=produto_ids)
+            else:
+                queryset = queryset.filter(analise__amostra__produto_amostra_id=produto_ids)
+        
         # Processar resultados e calcular médias manualmente
         ensaios_agrupados = {}
+        
+        # Dicionário para rastrear o último valor de cada ensaio por análise
+        # Formato: {analise_id: {key_ensaio: {dados}}}
+        ensaios_por_analise = {}
         
         for analise_ensaio in queryset:
             try:
@@ -400,8 +413,11 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 else:
                     continue
                 
-                # Dicionário para rastrear o último valor de cada ensaio nesta análise
-                ensaios_por_analise = {}
+                analise_id = analise_ensaio.analise_id
+                
+                # Inicializar dicionário para esta análise se não existir
+                if analise_id not in ensaios_por_analise:
+                    ensaios_por_analise[analise_id] = {}
                 
                 # Processar cada ensaio (o último sobrescreve os anteriores)
                 for ensaio in ensaios_json:
@@ -429,32 +445,43 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                     
                     # Armazenar o último valor para este ensaio nesta análise
                     key = f"{ensaio_id}_{ensaio_desc}"
-                    ensaios_por_analise[key] = {
+                    ensaios_por_analise[analise_id][key] = {
                         'ensaio_id': ensaio_id,
                         'ensaio_descricao': ensaio_desc,
                         'valor': valor_float,
-                        'unidade': ensaio.get('unidade', '')
+                        'unidade': ensaio.get('unidade', ''),
+                        'analise_id': analise_id,
+                        'amostra_numero': analise_ensaio.analise.amostra.numero if analise_ensaio.analise.amostra else None
                     }
-                
-                # Adicionar os valores únicos desta análise ao agrupamento global
-                for key, dados in ensaios_por_analise.items():
-                    if key not in ensaios_agrupados:
-                        ensaios_agrupados[key] = {
-                            'ensaio_id': dados['ensaio_id'],
-                            'ensaio_descricao': dados['ensaio_descricao'],
-                            'valores': [],
-                            'unidade': dados['unidade']
-                        }
-                    
-                    ensaios_agrupados[key]['valores'].append(dados['valor'])
             
             except (json.JSONDecodeError, TypeError) as e:
                 continue
+        
+        # Adicionar os valores únicos ao agrupamento global
+        for analise_id, ensaios_dict in ensaios_por_analise.items():
+            for key, dados in ensaios_dict.items():
+                if key not in ensaios_agrupados:
+                    ensaios_agrupados[key] = {
+                        'ensaio_id': dados['ensaio_id'],
+                        'ensaio_descricao': dados['ensaio_descricao'],
+                        'valores': [],
+                        'unidade': dados['unidade'],
+                        'detalhes': []
+                    }
+                
+                # Adiciona apenas uma vez por ensaio por análise
+                ensaios_agrupados[key]['valores'].append(dados['valor'])
+                ensaios_agrupados[key]['detalhes'].append({
+                    'analise_id': dados['analise_id'],
+                    'amostra_numero': dados['amostra_numero'],
+                    'valor': dados['valor']
+                })
         
         # Calcular estatísticas
         resultados = []
         for key, dados in ensaios_agrupados.items():
             valores = dados['valores']
+            detalhes = dados['detalhes']
             if valores:
                 media = sum(valores) / len(valores)
                 minimo = min(valores)
@@ -468,6 +495,7 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                     'valor_minimo': minimo,
                     'valor_maximo': maximo,
                     'quantidade_medicoes': len(valores),
+                    'detalhes': detalhes,
                     'periodo': {
                         'data_inicial': data_inicial,
                         'data_final': data_final
@@ -479,6 +507,225 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
         
         return Response({
             'total_ensaios': len(resultados),
+            'resultados': resultados
+        })
+    
+    @action(detail=False, methods=['post'], url_path='medias-campos-json-por-periodo')
+    def medias_campos_json_por_periodo(self, request):
+        """
+        Retorna as médias dos campos JSON (substrato, superficial, retracao, etc.)
+        agrupados por campo dentro de um período específico.
+        
+        Cada campo JSON possui estrutura: {"media": valor, "linhas": [...]}
+        Este endpoint calcula a média das "medias" de cada campo.
+        
+        Parâmetros esperados (POST):
+        - campos: lista de nomes de campos para filtrar (opcional - se não informado, busca todos)
+          Campos disponíveis: substrato, superficial, retracao, elasticidade, flexao, 
+          compressao, peneiras, peneiras_umidas, variacao_dimensional, variacao_massa,
+          tracao_normal, tracao_submersa, tracao_estufa, tracao_tempo_aberto, 
+          modulo_elasticidade, deslizamento
+        - local_coleta: filtrar por local de coleta (opcional)
+        - laboratorio: filtrar por laboratório (opcional)
+        - produto_ids: lista de IDs de produtos da amostra (opcional)
+        - data_inicio: data inicial no formato YYYY-MM-DD
+        - data_fim: data final no formato YYYY-MM-DD
+        - apenas_finalizadas: boolean - se True, filtra apenas finalizadas (default: False)
+        """
+        from django.db.models import Q
+        from datetime import datetime
+        from controleQualidade.analise.models import Analise
+        import json
+        
+        data = request.data
+        campos = data.get('campos', [])
+        local_coleta = data.get('local_coleta')
+        laboratorio = data.get('laboratorio', [])
+        produto_ids = data.get('produto_ids', [])
+        data_inicial = data.get('data_inicio')
+        data_final = data.get('data_fim')
+        apenas_finalizadas = data.get('apenas_finalizadas', False)
+        
+        # Validações
+        if not data_inicial or not data_final:
+            return Response({
+                "error": "Parâmetros 'data_inicio' e 'data_fim' são obrigatórios (formato: YYYY-MM-DD)"
+            }, status=400)
+        
+        try:
+            datetime.strptime(data_inicial, '%Y-%m-%d')
+            datetime.strptime(data_final, '%Y-%m-%d')
+            
+            if data_inicial > data_final:
+                return Response({
+                    "error": "A data_inicio deve ser anterior à data_fim"
+                }, status=400)
+        except ValueError:
+            return Response({
+                "error": "Formato de data inválido. Use YYYY-MM-DD"
+            }, status=400)
+        
+        # Lista de campos JSON disponíveis na Analise
+        campos_disponiveis = [
+            'substrato', 'superficial', 'retracao', 'elasticidade', 
+            'flexao', 'compressao', 'peneiras', 'peneiras_umidas',
+            'variacao_dimensional', 'variacao_massa', 'tracao_normal',
+            'tracao_submersa', 'tracao_estufa', 'tracao_tempo_aberto',
+            'modulo_elasticidade', 'deslizamento'
+        ]
+        
+        # Se campos foram especificados, validar
+        if campos:
+            campos_invalidos = [c for c in campos if c not in campos_disponiveis]
+            if campos_invalidos:
+                return Response({
+                    "error": f"Campos inválidos: {', '.join(campos_invalidos)}",
+                    "campos_disponiveis": campos_disponiveis
+                }, status=400)
+            campos_para_processar = campos
+        else:
+            campos_para_processar = campos_disponiveis
+        
+        # Filtrar análises no período
+        if apenas_finalizadas:
+            queryset = Analise.objects.filter(
+                finalizada_at__gte=data_inicial,
+                finalizada_at__lte=data_final,
+                finalizada=True
+            ).select_related('amostra')
+        else:
+            queryset = Analise.objects.filter(
+                data__gte=data_inicial,
+                data__lte=data_final
+            ).select_related('amostra')
+        
+        # Filtrar por local de coleta
+        if local_coleta:
+            if isinstance(local_coleta, list):
+                filtros_local = Q()
+                for local in local_coleta:
+                    filtros_local |= Q(amostra__local_coleta__icontains=local)
+                queryset = queryset.filter(filtros_local)
+            else:
+                queryset = queryset.filter(amostra__local_coleta__icontains=local_coleta)
+        
+        # Filtrar por laboratório
+        if laboratorio:
+            if isinstance(laboratorio, list):
+                filtros_lab = Q()
+                for lab in laboratorio:
+                    filtros_lab |= Q(amostra__laboratorio__icontains=lab)
+                queryset = queryset.filter(filtros_lab)
+            else:
+                queryset = queryset.filter(amostra__laboratorio__icontains=laboratorio)
+        
+        # Filtrar por produto
+        if produto_ids:
+            if isinstance(produto_ids, list):
+                queryset = queryset.filter(amostra__produto_amostra_id__in=produto_ids)
+            else:
+                queryset = queryset.filter(amostra__produto_amostra_id=produto_ids)
+        
+        # Processar resultados e calcular médias
+        campos_agrupados = {}
+        
+        # Dicionário para rastrear o valor mais recente de cada campo por análise
+        campos_por_analise = {}
+        
+        for analise in queryset:
+            analise_id = analise.id
+            
+            # Inicializar dicionário para esta análise se ainda não existe
+            if analise_id not in campos_por_analise:
+                campos_por_analise[analise_id] = {}
+            
+            # Para cada campo JSON solicitado
+            for campo_nome in campos_para_processar:
+                campo_valor = getattr(analise, campo_nome, None)
+                
+                if not campo_valor:
+                    continue
+                
+                try:
+                    # Se for string, parsear JSON
+                    if isinstance(campo_valor, str):
+                        campo_json = json.loads(campo_valor)
+                    else:
+                        campo_json = campo_valor
+                    
+                    # Verificar se tem a estrutura esperada com "media"
+                    if isinstance(campo_json, dict) and 'media' in campo_json:
+                        media_valor = campo_json.get('media')
+                        
+                        # Pular se media for None ou não for numérico
+                        if media_valor is None:
+                            continue
+                        
+                        try:
+                            media_float = float(media_valor)
+                        except (ValueError, TypeError):
+                            continue
+                        
+                        # Armazenar o valor mais recente para este campo nesta análise
+                        # (sobrescreve se já existir)
+                        campos_por_analise[analise_id][campo_nome] = {
+                            'valor': media_float,
+                            'amostra_numero': analise.amostra.numero if analise.amostra else None
+                        }
+                
+                except (json.JSONDecodeError, TypeError, AttributeError):
+                    continue
+        
+        # Agrupar valores únicos por campo (apenas um valor por análise)
+        for analise_id, campos in campos_por_analise.items():
+            for campo_nome, dados in campos.items():
+                if campo_nome not in campos_agrupados:
+                    campos_agrupados[campo_nome] = {
+                        'campo': campo_nome,
+                        'valores': [],
+                        'analises_ids': [],
+                        'detalhes': []
+                    }
+                
+                campos_agrupados[campo_nome]['valores'].append(dados['valor'])
+                campos_agrupados[campo_nome]['analises_ids'].append(analise_id)
+                campos_agrupados[campo_nome]['detalhes'].append({
+                    'analise_id': analise_id,
+                    'amostra_numero': dados['amostra_numero'],
+                    'valor': round(dados['valor'], 4)
+                })
+        
+        # Calcular estatísticas
+        resultados = []
+        for campo_nome, dados in campos_agrupados.items():
+            valores = dados['valores']
+            analises_ids = dados['analises_ids']
+            detalhes = dados['detalhes']
+            if valores:
+                media = sum(valores) / len(valores)
+                minimo = min(valores)
+                maximo = max(valores)
+                
+                resultados.append({
+                    'campo': campo_nome,
+                    'campo_formatado': campo_nome.replace('_', ' ').title(),
+                    'media': round(media, 4),
+                    'valor_minimo': round(minimo, 4),
+                    'valor_maximo': round(maximo, 4),
+                    'quantidade_analises': len(valores),
+                    'analises_ids': analises_ids,
+                    'detalhes': detalhes,
+                    'periodo': {
+                        'data_inicial': data_inicial,
+                        'data_final': data_final
+                    }
+                })
+        
+        # Ordenar por nome do campo
+        resultados.sort(key=lambda x: x['campo'])
+        
+        return Response({
+            'total_campos': len(resultados),
             'resultados': resultados
         })
     
@@ -1091,6 +1338,8 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
         - local_coleta: filtrar por local de coleta da amostra (opcional)
         - laboratorio: filtrar por laboratório da amostra (opcional)
         - apenas_finalizadas: boolean - se True, filtra apenas finalizadas (default: False)
+        - agrupar_por: 'analise' (padrão), 'local_coleta' ou 'laboratorio' (opcional)
+        - formato_saida: 'json' (padrão) ou 'dataframe' - se dataframe, retorna estrutura para pd.DataFrame
         """
         from django.db.models import Q
         from datetime import datetime
@@ -1104,6 +1353,8 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
         local_coleta = data.get('local_coleta')
         laboratorio = data.get('laboratorio', [])
         apenas_finalizadas = data.get('apenas_finalizadas', False)
+        agrupar_por = data.get('agrupar_por', 'analise')  # 'analise', 'local_coleta' ou 'laboratorio'
+        formato_saida = data.get('formato_saida', 'json')  # 'json' ou 'dataframe'
         
         # Validações
         if not data_inicial or not data_final:
@@ -1636,66 +1887,366 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
             del dados['ensaios_por_id']
         
         # Formatar resultados
-        resultados = []
-        for analise_id, dados in analises_agrupadas.items():
-            # Se ensaio_descricao foi fornecido e a análise não tem nenhum ensaio correspondente, pular
-            if ensaio_descricao and dados['quantidade_ensaios'] == 0:
-                continue
+        if agrupar_por == 'local_coleta':
+            # Agrupar por local de coleta
+            grupos = {}
+            for analise_id, dados in analises_agrupadas.items():
+                if ensaio_descricao and dados['quantidade_ensaios'] == 0:
+                    continue
+                
+                # Extrair local_coleta da amostra
+                amostra = dados.get('amostra_numero', '')
+                if amostra:
+                    # Assumindo que o local está no formato do número da amostra
+                    # Adaptar conforme necessário baseado no formato real
+                    partes = amostra.split()
+                    local = partes[0] if partes else 'Não especificado'
+                else:
+                    local = 'Não especificado'
+                
+                if local not in grupos:
+                    grupos[local] = {
+                        'local_coleta': local,
+                        'tempo_previsto_minutos': 0,
+                        'tempo_trabalho_minutos': 0,
+                        'quantidade_analises': 0,
+                        'laboratorios': set()
+                    }
+                
+                grupos[local]['tempo_previsto_minutos'] += dados['tempo_previsto_total_minutos']
+                grupos[local]['tempo_trabalho_minutos'] += dados['tempo_trabalho_total_minutos']
+                grupos[local]['quantidade_analises'] += 1
+                if dados.get('laboratorio'):
+                    grupos[local]['laboratorios'].add(dados['laboratorio'])
             
-            tempo_prev_min = dados['tempo_previsto_total_minutos']
-            tempo_trab_min = dados['tempo_trabalho_total_minutos']
+            # Calcular totais gerais para percentuais
+            tempo_previsto_geral = sum(g['tempo_previsto_minutos'] for g in grupos.values())
+            tempo_trabalho_geral = sum(g['tempo_trabalho_minutos'] for g in grupos.values())
             
-            # Calcular diferença e eficiência
-            diferenca_minutos = tempo_trab_min - tempo_prev_min
-            eficiencia = (tempo_prev_min / tempo_trab_min * 100) if tempo_trab_min > 0 else 0
+            resultados = []
+            for local, grupo_dados in grupos.items():
+                tempo_prev_min = grupo_dados['tempo_previsto_minutos']
+                tempo_trab_min = grupo_dados['tempo_trabalho_minutos']
+                
+                # Calcular percentuais
+                percentual_previsto = (tempo_prev_min / tempo_previsto_geral * 100) if tempo_previsto_geral > 0 else 0
+                percentual_trabalho = (tempo_trab_min / tempo_trabalho_geral * 100) if tempo_trabalho_geral > 0 else 0
+                
+                resultados.append({
+                    'local_coleta': local,
+                    'tempo_previsto': minutos_para_horas_str(tempo_prev_min),
+                    'tempo_trabalho': minutos_para_horas_str(tempo_trab_min),
+                    'laboratorio': ', '.join(sorted(grupo_dados['laboratorios'])) if grupo_dados['laboratorios'] else 'Não especificado',
+                    'percentual_previsto': round(percentual_previsto, 2),
+                    'percentual_trabalho': round(percentual_trabalho, 2),
+                    'tempo_previsto_minutos': round(tempo_prev_min, 2),
+                    'tempo_trabalho_minutos': round(tempo_trab_min, 2),
+                    'quantidade_analises': grupo_dados['quantidade_analises']
+                })
             
-            resultados.append({
-                'analise_id': dados['analise_id'],
-                'amostra_numero': dados['amostra_numero'],
-                'laboratorio': dados['laboratorio'],
-                'data_finalizacao': dados['data_finalizacao'],
-                'tempo_previsto_total': minutos_para_horas_str(tempo_prev_min),
-                'tempo_previsto_minutos': round(tempo_prev_min, 2),
-                'tempo_trabalho_total': minutos_para_horas_str(tempo_trab_min),
-                'tempo_trabalho_minutos': round(tempo_trab_min, 2),
-                'diferenca': minutos_para_horas_str(abs(diferenca_minutos)),
-                'diferenca_minutos': round(diferenca_minutos, 2),
-                'status': 'No prazo' if diferenca_minutos <= 0 else 'Atrasado',
-                'eficiencia_percentual': round(eficiencia, 2),
-                'quantidade_ensaios': dados['quantidade_ensaios'],
-                'quantidade_ensaios_diretos': dados['quantidade_ensaios_diretos'],
-                'quantidade_ensaios_calculos': dados['quantidade_ensaios_calculos'],
-                'quantidade_ensaios_campos_json': dados.get('quantidade_ensaios_campos_json', 0),
-                'ensaios_detalhes': dados['ensaios_detalhes']
+            resultados.sort(key=lambda x: x['local_coleta'])
+            
+            diferenca_geral = tempo_trabalho_geral - tempo_previsto_geral
+            eficiencia_geral = (tempo_previsto_geral / tempo_trabalho_geral * 100) if tempo_trabalho_geral > 0 else 0
+            
+            if formato_saida == 'dataframe':
+                # Criar DataFrame do pandas com ordem específica das colunas
+                df = pd.DataFrame(resultados)
+                
+                # Reordenar colunas para match exato com o formato solicitado
+                colunas_ordenadas = [
+                    'local_coleta',
+                    'tempo_previsto', 
+                    'tempo_trabalho',
+                    'laboratorio',
+                    'percentual_previsto',
+                    'percentual_trabalho'
+                ]
+                
+                # Renomear colunas para formato de exibição
+                df_display = df[colunas_ordenadas].copy()
+                df_display.columns = [
+                    'LOCAL COLETA',
+                    'TEMPO PREVISTO',
+                    'TEMPO TRABALHO',
+                    'LABORATORIO',
+                    '% do total previsto',
+                    '% do total trabalho'
+                ]
+                
+                # Adicionar linha de totais
+                total_row = pd.DataFrame([{
+                    'LOCAL COLETA': 'TOTAL',
+                    'TEMPO PREVISTO': minutos_para_horas_str(tempo_previsto_geral),
+                    'TEMPO TRABALHO': minutos_para_horas_str(tempo_trabalho_geral),
+                    'LABORATORIO': 'Todos',
+                    '% do total previsto': 100.00,
+                    '% do total trabalho': 100.00
+                }])
+                
+                df_display = pd.concat([df_display, total_row], ignore_index=True)
+                
+                return Response({
+                    'agrupamento': 'local_coleta',
+                    'formato': 'dataframe',
+                    'dataframe': df_display.to_dict('records'),
+                    'dataframe_html': df_display.to_html(index=False, classes='table table-striped'),
+                    'colunas': df_display.columns.tolist(),
+                    'periodo': {
+                        'data_inicial': data_inicial,
+                        'data_final': data_final
+                    },
+                    'metadados': {
+                        'quantidade_analises_total': sum(r['quantidade_analises'] for r in resultados),
+                        'total_grupos': len(resultados)
+                    }
+                })
+            
+            return Response({
+                'agrupamento': 'local_coleta',
+                'total_grupos': len(resultados),
+                'periodo': {
+                    'data_inicial': data_inicial,
+                    'data_final': data_final
+                },
+                'totais_gerais': {
+                    'tempo_previsto_total': minutos_para_horas_str(tempo_previsto_geral),
+                    'tempo_previsto_minutos': round(tempo_previsto_geral, 2),
+                    'tempo_trabalho_total': minutos_para_horas_str(tempo_trabalho_geral),
+                    'tempo_trabalho_minutos': round(tempo_trabalho_geral, 2),
+                    'diferenca': minutos_para_horas_str(abs(diferenca_geral)),
+                    'diferenca_minutos': round(diferenca_geral, 2),
+                    'status': 'No prazo' if diferenca_geral <= 0 else 'Atrasado',
+                    'eficiencia_percentual': round(eficiencia_geral, 2)
+                },
+                'resultados': resultados
             })
         
-        # Ordenar por ID da análise (mais recente primeiro)
-        resultados.sort(key=lambda x: x['analise_id'], reverse=True)
+        elif agrupar_por == 'laboratorio':
+            # Agrupar por laboratório
+            grupos = {}
+            for analise_id, dados in analises_agrupadas.items():
+                if ensaio_descricao and dados['quantidade_ensaios'] == 0:
+                    continue
+                
+                lab = dados.get('laboratorio', 'Não especificado')
+                if not lab:
+                    lab = 'Não especificado'
+                
+                if lab not in grupos:
+                    grupos[lab] = {
+                        'laboratorio': lab,
+                        'tempo_previsto_minutos': 0,
+                        'tempo_trabalho_minutos': 0,
+                        'quantidade_analises': 0,
+                        'locais_coleta': set()
+                    }
+                
+                grupos[lab]['tempo_previsto_minutos'] += dados['tempo_previsto_total_minutos']
+                grupos[lab]['tempo_trabalho_minutos'] += dados['tempo_trabalho_total_minutos']
+                grupos[lab]['quantidade_analises'] += 1
+                
+                # Extrair local_coleta
+                amostra = dados.get('amostra_numero', '')
+                if amostra:
+                    partes = amostra.split()
+                    local = partes[0] if partes else None
+                    if local:
+                        grupos[lab]['locais_coleta'].add(local)
+            
+            # Calcular totais gerais para percentuais
+            tempo_previsto_geral = sum(g['tempo_previsto_minutos'] for g in grupos.values())
+            tempo_trabalho_geral = sum(g['tempo_trabalho_minutos'] for g in grupos.values())
+            
+            resultados = []
+            for lab, grupo_dados in grupos.items():
+                tempo_prev_min = grupo_dados['tempo_previsto_minutos']
+                tempo_trab_min = grupo_dados['tempo_trabalho_minutos']
+                
+                # Calcular percentuais
+                percentual_previsto = (tempo_prev_min / tempo_previsto_geral * 100) if tempo_previsto_geral > 0 else 0
+                percentual_trabalho = (tempo_trab_min / tempo_trabalho_geral * 100) if tempo_trabalho_geral > 0 else 0
+                
+                resultados.append({
+                    'laboratorio': lab,
+                    'tempo_previsto': minutos_para_horas_str(tempo_prev_min),
+                    'tempo_trabalho': minutos_para_horas_str(tempo_trab_min),
+                    'local_coleta': ', '.join(sorted(grupo_dados['locais_coleta'])) if grupo_dados['locais_coleta'] else 'Não especificado',
+                    'percentual_previsto': round(percentual_previsto, 2),
+                    'percentual_trabalho': round(percentual_trabalho, 2),
+                    'tempo_previsto_minutos': round(tempo_prev_min, 2),
+                    'tempo_trabalho_minutos': round(tempo_trab_min, 2),
+                    'quantidade_analises': grupo_dados['quantidade_analises']
+                })
+            
+            resultados.sort(key=lambda x: x['laboratorio'])
+            
+            diferenca_geral = tempo_trabalho_geral - tempo_previsto_geral
+            eficiencia_geral = (tempo_previsto_geral / tempo_trabalho_geral * 100) if tempo_trabalho_geral > 0 else 0
+            
+            if formato_saida == 'dataframe':
+                # Criar DataFrame do pandas com ordem específica das colunas
+                df = pd.DataFrame(resultados)
+                
+                # Reordenar colunas para formato de laboratório
+                colunas_ordenadas = [
+                    'laboratorio',
+                    'tempo_previsto', 
+                    'tempo_trabalho',
+                    'local_coleta',
+                    'percentual_previsto',
+                    'percentual_trabalho'
+                ]
+                
+                # Renomear colunas para formato de exibição
+                df_display = df[colunas_ordenadas].copy()
+                df_display.columns = [
+                    'LABORATORIO',
+                    'TEMPO PREVISTO',
+                    'TEMPO TRABALHO',
+                    'LOCAL COLETA',
+                    '% do total previsto',
+                    '% do total trabalho'
+                ]
+                
+                # Adicionar linha de totais
+                total_row = pd.DataFrame([{
+                    'LABORATORIO': 'TOTAL',
+                    'TEMPO PREVISTO': minutos_para_horas_str(tempo_previsto_geral),
+                    'TEMPO TRABALHO': minutos_para_horas_str(tempo_trabalho_geral),
+                    'LOCAL COLETA': 'Todos',
+                    '% do total previsto': 100.00,
+                    '% do total trabalho': 100.00
+                }])
+                
+                df_display = pd.concat([df_display, total_row], ignore_index=True)
+                
+                return Response({
+                    'agrupamento': 'laboratorio',
+                    'formato': 'dataframe',
+                    'dataframe': df_display.to_dict('records'),
+                    'dataframe_html': df_display.to_html(index=False, classes='table table-striped'),
+                    'colunas': df_display.columns.tolist(),
+                    'periodo': {
+                        'data_inicial': data_inicial,
+                        'data_final': data_final
+                    },
+                    'metadados': {
+                        'quantidade_analises_total': sum(r['quantidade_analises'] for r in resultados),
+                        'total_grupos': len(resultados)
+                    }
+                })
+            
+            return Response({
+                'agrupamento': 'laboratorio',
+                'total_grupos': len(resultados),
+                'periodo': {
+                    'data_inicial': data_inicial,
+                    'data_final': data_final
+                },
+                'totais_gerais': {
+                    'tempo_previsto_total': minutos_para_horas_str(tempo_previsto_geral),
+                    'tempo_previsto_minutos': round(tempo_previsto_geral, 2),
+                    'tempo_trabalho_total': minutos_para_horas_str(tempo_trabalho_geral),
+                    'tempo_trabalho_minutos': round(tempo_trabalho_geral, 2),
+                    'diferenca': minutos_para_horas_str(abs(diferenca_geral)),
+                    'diferenca_minutos': round(diferenca_geral, 2),
+                    'status': 'No prazo' if diferenca_geral <= 0 else 'Atrasado',
+                    'eficiencia_percentual': round(eficiencia_geral, 2)
+                },
+                'resultados': resultados
+            })
         
-        # Calcular totais gerais de todas as análises
-        tempo_previsto_geral = sum(r['tempo_previsto_minutos'] for r in resultados)
-        tempo_trabalho_geral = sum(r['tempo_trabalho_minutos'] for r in resultados)
-        diferenca_geral = tempo_trabalho_geral - tempo_previsto_geral
-        eficiencia_geral = (tempo_previsto_geral / tempo_trabalho_geral * 100) if tempo_trabalho_geral > 0 else 0
-        
-        return Response({
-            'total_analises': len(resultados),
-            'periodo': {
-                'data_inicial': data_inicial,
-                'data_final': data_final
-            },
-            'totais_gerais': {
-                'tempo_previsto_total': minutos_para_horas_str(tempo_previsto_geral),
-                'tempo_previsto_minutos': round(tempo_previsto_geral, 2),
-                'tempo_trabalho_total': minutos_para_horas_str(tempo_trabalho_geral),
-                'tempo_trabalho_minutos': round(tempo_trabalho_geral, 2),
-                'diferenca': minutos_para_horas_str(abs(diferenca_geral)),
-                'diferenca_minutos': round(diferenca_geral, 2),
-                'status': 'No prazo' if diferenca_geral <= 0 else 'Atrasado',
-                'eficiencia_percentual': round(eficiencia_geral, 2)
-            },
-            'resultados': resultados
-        })
+        else:
+            # Agrupar por análise (comportamento padrão)
+            resultados = []
+            for analise_id, dados in analises_agrupadas.items():
+                # Se ensaio_descricao foi fornecido e a análise não tem nenhum ensaio correspondente, pular
+                if ensaio_descricao and dados['quantidade_ensaios'] == 0:
+                    continue
+                
+                tempo_prev_min = dados['tempo_previsto_total_minutos']
+                tempo_trab_min = dados['tempo_trabalho_total_minutos']
+                
+                # Calcular diferença e eficiência
+                diferenca_minutos = tempo_trab_min - tempo_prev_min
+                eficiencia = (tempo_prev_min / tempo_trab_min * 100) if tempo_trab_min > 0 else 0
+                
+                resultados.append({
+                    'analise_id': dados['analise_id'],
+                    'amostra_numero': dados['amostra_numero'],
+                    'laboratorio': dados['laboratorio'],
+                    'data_finalizacao': dados['data_finalizacao'],
+                    'tempo_previsto_total': minutos_para_horas_str(tempo_prev_min),
+                    'tempo_previsto_minutos': round(tempo_prev_min, 2),
+                    'tempo_trabalho_total': minutos_para_horas_str(tempo_trab_min),
+                    'tempo_trabalho_minutos': round(tempo_trab_min, 2),
+                    # 'diferenca': minutos_para_horas_str(abs(diferenca_minutos)),
+                    # 'diferenca_minutos': round(diferenca_minutos, 2),
+                    # 'status': 'No prazo' if diferenca_minutos <= 0 else 'Atrasado',
+                    # 'eficiencia_percentual': round(eficiencia, 2),
+                    # 'quantidade_ensaios': dados['quantidade_ensaios'],
+                    # 'quantidade_ensaios_diretos': dados['quantidade_ensaios_diretos'],
+                    # 'quantidade_ensaios_calculos': dados['quantidade_ensaios_calculos'],
+                    # 'quantidade_ensaios_campos_json': dados.get('quantidade_ensaios_campos_json', 0),
+                    # 'ensaios_detalhes': dados['ensaios_detalhes']
+                })
+            
+            # Ordenar por ID da análise (mais recente primeiro)
+            resultados.sort(key=lambda x: x['analise_id'], reverse=True)
+            
+            # Calcular totais gerais de todas as análises
+            tempo_previsto_geral = sum(r['tempo_previsto_minutos'] for r in resultados)
+            tempo_trabalho_geral = sum(r['tempo_trabalho_minutos'] for r in resultados)
+            diferenca_geral = tempo_trabalho_geral - tempo_previsto_geral
+            eficiencia_geral = (tempo_previsto_geral / tempo_trabalho_geral * 100) if tempo_trabalho_geral > 0 else 0
+            
+            if formato_saida == 'dataframe':
+                # Criar DataFrame do pandas
+                df = pd.DataFrame(resultados)
+                
+                return Response({
+                    'agrupamento': 'analise',
+                    'formato': 'dataframe',
+                    'dataframe': df.to_dict('records'),
+                    'dataframe_html': df.to_html(index=False, classes='table table-striped'),
+                    'colunas': df.columns.tolist(),
+                    'total_analises': len(resultados),
+                    'periodo': {
+                        'data_inicial': data_inicial,
+                        'data_final': data_final
+                    },
+                    'totais_gerais': {
+                        'tempo_previsto_total': minutos_para_horas_str(tempo_previsto_geral),
+                        'tempo_previsto_minutos': round(tempo_previsto_geral, 2),
+                        'tempo_trabalho_total': minutos_para_horas_str(tempo_trabalho_geral),
+                        'tempo_trabalho_minutos': round(tempo_trabalho_geral, 2),
+                        # 'diferenca': minutos_para_horas_str(abs(diferenca_geral)),
+                        # 'diferenca_minutos': round(diferenca_geral, 2),
+                        # 'status': 'No prazo' if diferenca_geral <= 0 else 'Atrasado',
+                        # 'eficiencia_percentual': round(eficiencia_geral, 2)
+                    }
+                })
+            
+            return Response({
+                'agrupamento': 'analise',
+                'total_analises': len(resultados),
+                'periodo': {
+                    'data_inicial': data_inicial,
+                    'data_final': data_final
+                },
+                'totais_gerais': {
+                    'tempo_previsto_total': minutos_para_horas_str(tempo_previsto_geral),
+                    'tempo_previsto_minutos': round(tempo_previsto_geral, 2),
+                    'tempo_trabalho_total': minutos_para_horas_str(tempo_trabalho_geral),
+                    'tempo_trabalho_minutos': round(tempo_trabalho_geral, 2),
+                    # 'diferenca': minutos_para_horas_str(abs(diferenca_geral)),
+                    # 'diferenca_minutos': round(diferenca_geral, 2),
+                    # 'status': 'No prazo' if diferenca_geral <= 0 else 'Atrasado',
+                    # 'eficiencia_percentual': round(eficiencia_geral, 2)
+                },
+                'resultados': resultados
+            })
     
 class AnaliseCalculoViewSet(viewsets.ModelViewSet):
     queryset = AnaliseCalculo.objects.all()
@@ -1729,10 +2280,12 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
         
         Parâmetros esperados (POST):
         - calculo: descrição do cálculo (opcional) - agrupa por nome
+        - calculos_descricoes: lista de descrições de cálculos (opcional)
         - calculos_ids: lista de IDs de cálculos (opcional) - agrupa por ID
+        - produto_ids: lista de IDs de produtos da amostra (opcional)
         - agrupar_por: 'id' ou 'descricao' (padrão: 'id' se calculos_ids fornecido, senão 'descricao')
-        - data_inicial: data inicial no formato YYYY-MM-DD
-        - data_final: data final no formato YYYY-MM-DD
+        - data_inicio: data inicial no formato YYYY-MM-DD
+        - data_fim: data final no formato YYYY-MM-DD
         """
         from django.db.models import Avg, Count, Min, Max, Q
         from datetime import datetime
@@ -1741,6 +2294,7 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
         calculo_descricao = data.get('calculo')
         calculos_descricoes = data.get('calculos_descricoes', [])
         calculos_ids = data.get('calculos_ids', [])
+        produto_ids = data.get('produto_ids', [])
         agrupar_por = data.get('agrupar_por', 'id' if calculos_ids else 'descricao')
         data_inicial = data.get('data_inicio')
         data_final = data.get('data_fim')
@@ -1772,7 +2326,7 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
             analise__data__gte=data_inicial,
             analise__data__lte=data_final,
             #analise__finalizada=True
-        )
+        ).select_related('analise', 'analise__amostra')
         
         # Filtrar por cálculo(s) se fornecido
         if calculos_descricoes:
@@ -1794,6 +2348,13 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
                 filtros_calculos |= Q(ensaios_utilizados__icontains=f'"id": {calculo_id}')
             queryset = queryset.filter(filtros_calculos)
         
+        # Filtrar por produto da amostra se fornecido
+        if produto_ids:
+            if isinstance(produto_ids, list):
+                queryset = queryset.filter(analise__amostra__produto_amostra_id__in=produto_ids)
+            else:
+                queryset = queryset.filter(analise__amostra__produto_amostra_id=produto_ids)
+        
         # Processar resultados manualmente
         resultados_por_calculo = {}
         
@@ -1801,6 +2362,7 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
             calculo_nome = analise_calculo.calculos
             ensaios_utilizados = analise_calculo.ensaios_utilizados
             analise_id = analise_calculo.analise_id
+            amostra_numero = analise_calculo.analise.amostra.numero if analise_calculo.analise.amostra else None
             
             if agrupar_por == 'descricao':
                 # Agrupar apenas por descrição do cálculo
@@ -1815,7 +2377,10 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
                 
                 # Armazenar apenas o último resultado desta análise para este cálculo
                 if analise_calculo.resultados is not None:
-                    resultados_por_calculo[chave]['valores_por_analise'][analise_id] = analise_calculo.resultados
+                    resultados_por_calculo[chave]['valores_por_analise'][analise_id] = {
+                        'valor': analise_calculo.resultados,
+                        'amostra_numero': amostra_numero
+                    }
             else:
                 # Agrupar por ID de cálculo
                 if not ensaios_utilizados:
@@ -1852,13 +2417,25 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
                     
                     # Armazenar apenas o último resultado desta análise para este cálculo
                     if analise_calculo.resultados is not None:
-                        resultados_por_calculo[chave]['valores_por_analise'][analise_id] = analise_calculo.resultados
+                        resultados_por_calculo[chave]['valores_por_analise'][analise_id] = {
+                            'valor': analise_calculo.resultados,
+                            'amostra_numero': amostra_numero
+                        }
         
         # Calcular médias usando apenas um valor por análise
         resultados = []
         for chave, dados in resultados_por_calculo.items():
             # Extrair valores únicos por análise
-            valores = list(dados['valores_por_analise'].values())
+            valores = []
+            detalhes = []
+            for analise_id, info in dados['valores_por_analise'].items():
+                valores.append(info['valor'])
+                detalhes.append({
+                    'analise_id': analise_id,
+                    'amostra_numero': info['amostra_numero'],
+                    'valor': info['valor']
+                })
+            
             if valores:
                 resultado = {
                     'calculo': dados['nome'],
@@ -1866,6 +2443,7 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
                     'quantidade_analises': len(valores),
                     'valor_minimo': min(valores),
                     'valor_maximo': max(valores),
+                    'detalhes': detalhes,
                     'periodo': {
                         'data_inicial': data_inicial,
                         'data_final': data_final
