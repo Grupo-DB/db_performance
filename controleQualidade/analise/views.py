@@ -1946,6 +1946,19 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
             
             resultados.sort(key=lambda x: x['local_coleta'])
             
+            # Adicionar linha de totais aos resultados
+            resultados.append({
+                'local_coleta': 'TOTAL',
+                'tempo_previsto': minutos_para_horas_str(tempo_previsto_geral),
+                'tempo_trabalho': minutos_para_horas_str(tempo_trabalho_geral),
+                'laboratorio': 'Todos',
+                'percentual_previsto': 100.00,
+                'percentual_trabalho': 100.00,
+                'tempo_previsto_minutos': round(tempo_previsto_geral, 2),
+                'tempo_trabalho_minutos': round(tempo_trabalho_geral, 2),
+                'quantidade_analises': sum(r['quantidade_analises'] for r in resultados if r['local_coleta'] != 'TOTAL')
+            })
+            
             diferenca_geral = tempo_trabalho_geral - tempo_previsto_geral
             eficiencia_geral = (tempo_previsto_geral / tempo_trabalho_geral * 100) if tempo_trabalho_geral > 0 else 0
             
@@ -1995,6 +2008,16 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                     'periodo': {
                         'data_inicial': data_inicial,
                         'data_final': data_final
+                    },
+                    'totais': {
+                        'tempo_previsto_total': minutos_para_horas_str(tempo_previsto_geral),
+                        'tempo_previsto_minutos': round(tempo_previsto_geral, 2),
+                        'tempo_trabalho_total': minutos_para_horas_str(tempo_trabalho_geral),
+                        'tempo_trabalho_minutos': round(tempo_trabalho_geral, 2),
+                        'diferenca': minutos_para_horas_str(abs(diferenca_geral)),
+                        'diferenca_minutos': round(diferenca_geral, 2),
+                        'percentual_previsto': 100.00,
+                        'percentual_trabalho': 100.00
                     },
                     'metadados': {
                         'quantidade_analises_total': sum(r['quantidade_analises'] for r in resultados),
@@ -2081,6 +2104,19 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
             
             resultados.sort(key=lambda x: x['laboratorio'])
             
+            # Adicionar linha de totais aos resultados
+            resultados.append({
+                'laboratorio': 'TOTAL',
+                'tempo_previsto': minutos_para_horas_str(tempo_previsto_geral),
+                'tempo_trabalho': minutos_para_horas_str(tempo_trabalho_geral),
+                'local_coleta': 'Todos',
+                'percentual_previsto': 100.00,
+                'percentual_trabalho': 100.00,
+                'tempo_previsto_minutos': round(tempo_previsto_geral, 2),
+                'tempo_trabalho_minutos': round(tempo_trabalho_geral, 2),
+                'quantidade_analises': sum(r['quantidade_analises'] for r in resultados if r['laboratorio'] != 'TOTAL')
+            })
+            
             diferenca_geral = tempo_trabalho_geral - tempo_previsto_geral
             eficiencia_geral = (tempo_previsto_geral / tempo_trabalho_geral * 100) if tempo_trabalho_geral > 0 else 0
             
@@ -2130,6 +2166,16 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                     'periodo': {
                         'data_inicial': data_inicial,
                         'data_final': data_final
+                    },
+                    'totais': {
+                        'tempo_previsto_total': minutos_para_horas_str(tempo_previsto_geral),
+                        'tempo_previsto_minutos': round(tempo_previsto_geral, 2),
+                        'tempo_trabalho_total': minutos_para_horas_str(tempo_trabalho_geral),
+                        'tempo_trabalho_minutos': round(tempo_trabalho_geral, 2),
+                        'diferenca': minutos_para_horas_str(abs(diferenca_geral)),
+                        'diferenca_minutos': round(diferenca_geral, 2),
+                        'percentual_previsto': 100.00,
+                        'percentual_trabalho': 100.00
                     },
                     'metadados': {
                         'quantidade_analises_total': sum(r['quantidade_analises'] for r in resultados),
