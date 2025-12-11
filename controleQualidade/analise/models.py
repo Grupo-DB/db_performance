@@ -34,6 +34,7 @@ class Analise(models.Model):
     tracao_tempo_aberto = models.JSONField(null=True, blank=True)
     modulo_elasticidade = models.JSONField(null=True, blank=True)
     deslizamento = models.JSONField(null=True, blank=True)
+    classificacao = models.CharField(max_length=255, null=True, blank=True)
 
     class Meta:
         verbose_name = 'Análise'
