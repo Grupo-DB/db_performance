@@ -297,29 +297,30 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
             colaborador.user = user
             colaborador.save()
         
-        # Adicionando verificações de depuração
-        print(f"tornar_avaliado: {tornar_avaliado}, tornar_avaliador: {tornar_avaliador}, tornar_gestor: {tornar_gestor}")
-        
         if tornar_avaliado and not Avaliado.objects.filter(colaborador_ptr=colaborador).exists():
-            print("Criando Avaliado")
             Avaliado.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
 
         if tornar_avaliador and not Avaliador.objects.filter(colaborador_ptr=colaborador).exists():
-            print("Criando Avaliador")
             Avaliador.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
 
         if tornar_gestor and not Gestor.objects.filter(colaborador_ptr=colaborador).exists():
-            print("Criando Gestor")
             Gestor.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
+
+    @action(detail=False, methods=['get'], url_path='byAmbiente')
+    def byAmbiente(self, request):
+        ambiente_id = request.query_params.get('ambiente_id')
+        colaboradores = Colaborador.objects.filter(ambiente_id=ambiente_id)
+        serializer = self.get_serializer(colaboradores, many=True)
+        return Response(serializer.data)
 
     @action(detail=False, methods=['get'])
     def meInfo(self, request):
@@ -353,32 +354,26 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
                 user = User.objects.create_user(username=username, password=password)
                 colaborador.user = user
                 colaborador.save()
-
-        print(f"tornar_avaliado: {tornar_avaliado}, tornar_avaliador: {tornar_avaliador}, tornar_gestor: {tornar_gestor}")
         
         if tornar_avaliado and not Avaliado.objects.filter(colaborador_ptr=colaborador).exists():
-            print("Criando Avaliado")
             Avaliado.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
 
         if tornar_avaliador and not Avaliador.objects.filter(colaborador_ptr=colaborador).exists():
-            print("Criando Avaliador")
             Avaliador.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
 
         if tornar_gestor and not Gestor.objects.filter(colaborador_ptr=colaborador).exists():
-            print("Criando Gestor")
             Gestor.objects.create(
                 colaborador_ptr=colaborador,
                 **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
             )
                 
         
-    
 class AvaliadorViewSet(viewsets.ModelViewSet):
     queryset = Avaliador.objects.all()
     serializer_class = AvaliadorSerializer
