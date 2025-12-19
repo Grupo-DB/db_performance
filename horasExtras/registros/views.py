@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework import status, viewsets
 from django.db.models import Sum
 import pandas as pd
+from avaliacoes.management.models import Colaborador
 
 class RegistroHoraExtraViewSet(viewsets.ModelViewSet):
     queryset = RegistroHoraExtra.objects.all()
@@ -20,6 +21,18 @@ class RegistroHoraExtraViewSet(viewsets.ModelViewSet):
         colaborador = self.request.query_params.get('colaborador', None)
         if colaborador:
             queryset = queryset.filter(colaborador__icontains=colaborador)
+        
+        # Filtro por filial do colaborador
+        filial_id = self.request.query_params.get('filial', None)
+        if filial_id:
+            colaboradores_filial = Colaborador.objects.filter(filial_id=filial_id).values_list('nome', flat=True)
+            queryset = queryset.filter(colaborador__in=colaboradores_filial)
+        
+        # Filtro por ambiente do colaborador
+        ambiente_id = self.request.query_params.get('ambiente', None)
+        if ambiente_id:
+            colaboradores_ambiente = Colaborador.objects.filter(ambiente_id=ambiente_id).values_list('nome', flat=True)
+            queryset = queryset.filter(colaborador__in=colaboradores_ambiente)
         
         # Filtro por responsável
         responsavel = self.request.query_params.get('responsavel', None)
