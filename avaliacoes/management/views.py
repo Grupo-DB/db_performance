@@ -565,6 +565,13 @@ class AmbienteViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'],url_path='byFilial')
+    def byFilial(self, request):
+        filial_id = request.query_params.get('filial_id')
+        ambientes = Ambiente.objects.filter(filial_id=filial_id)
+        serializer = self.get_serializer(ambientes, many=True)
         return Response(serializer.data) 
     
     @action(detail=False, methods=['get'],url_path='bySetor')
