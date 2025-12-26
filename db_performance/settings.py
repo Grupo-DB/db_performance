@@ -28,7 +28,8 @@ CORS_ALLOW_CREDENTIALS = True
 #AUTH_USER_MODEL = 'management.CustomUser'
 # Application definition
 
-load_dotenv()
+
+load_dotenv(dotenv_path=Path('.') / '.env')
 #VARIAVEIS DE AMBIENTE DA OPENAI
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 AZURE_OPENAI_ENDPOINT = os.environ.get('AZURE_OPENAI_ENDPOINT')
