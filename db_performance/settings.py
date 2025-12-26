@@ -84,6 +84,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -91,7 +92,10 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    "corsheaders.middleware.CorsMiddleware",
+]
+
+CORS_ALLOWED_ORIGINS = [
+    "https://managerdb.com.br",
 ]
 
 ROOT_URLCONF = 'db_performance.urls'
@@ -136,7 +140,7 @@ DATABASES = {
         'NAME': 'db_performance',
         'USER':'grupodb',
         'PASSWORD': '!@#123qweQWE',
-        'HOST': '172.50.10.79',
+        'HOST': 'localhost',
         'PORT': '3306',
         'OPTIONS': {
             'charset': 'utf8mb4',  # para MySQL
@@ -235,7 +239,7 @@ STATICFILES_DIRS = [
 ]
 
 
-FRONTEND_URL = 'http://172.50.10.79:80'
+FRONTEND_URL = 'http://localhost:80'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -247,8 +251,8 @@ EMAIL_HOST_PASSWORD = 'zrwehfczwugpsssp'  # Sua senha de e-mail
 
 
 
-CELERY_BROKER_URL = 'redis://172.50.10.79:6379/0'
-CELERY_RESULT_BACKEND = 'redis://172.50.10.79:6379/0'
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'

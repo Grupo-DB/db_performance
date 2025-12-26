@@ -160,7 +160,7 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
             data['meses'] = [periodo] if isinstance(periodo, int) else periodo
             data['ccs'] = centros_custo_list  # Adiciona a lista de centros de custo
 
-            new_request = factory.post('http://172.50.10.79:8008/realizado/realizado/', data=data, content_type='application/json')
+            new_request = factory.post('https://managerdb.com.br/api/realizado/realizado/', data=data, content_type='application/json')
             response = calculos_realizado(new_request)
 
             if response.status_code == 200:
@@ -196,7 +196,7 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
                 data['fabrica'] = fabrica  # Adiciona o nome da fábrica aos dados
 
                 # Faz a requisição ao endpoint correspondente
-                url = f'http://172.50.10.79:8008{endpoint}'
+                url = f'https://managerdb.com.br/api{endpoint}'
                 response = requests.post(url, json=data)  # Usa requests para fazer a requisição
                 #print(request.data)
                 #print(response.text)
@@ -210,7 +210,7 @@ class CustoProducaoViewSet(viewsets.ModelViewSet):
                             "ano": ano,  # Inclui o ano
                             "periodo": periodo  # Inclui o período
                         }
-                        pedras_response = requests.post('http://172.50.10.79:8008/britagem/calcular_pedras/', json=pedras_data)
+                        pedras_response = requests.post('https://managerdb.com.br/api/britagem/calcular_pedras/', json=pedras_data)
                         if pedras_response.status_code == 200:
                             pedras_result = pedras_response.json()
                             total_pedras = pedras_result.get('total', 0)
