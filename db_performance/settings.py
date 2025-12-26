@@ -258,6 +258,7 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 
+CSRF_TRUSTED_ORIGINS = ["https://managerdb.com.br"]
 
 CORS_ALLOW_HEADERS = [
     'accept',
