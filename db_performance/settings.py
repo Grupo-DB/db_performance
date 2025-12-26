@@ -138,7 +138,7 @@ DATABASES = {
 
     'default':{
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'db_performance',
+        'NAME': 'db_manager',
         'USER':'grupodb',
         'PASSWORD': '!@#123qweQWE',
         'HOST': 'localhost',
