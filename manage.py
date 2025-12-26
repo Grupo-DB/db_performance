@@ -2,10 +2,12 @@
 """Django's command-line utility for administrative tasks."""
 import os
 import sys
-
-
+from dotenv import load_dotenv
+from pathlib import Path
 def main():
     """Run administrative tasks."""
+    base_dir = Path(__file__).resolve().parent
+    load_dotenv(os.path.join(base_dir, '.env'))
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'db_performance.settings')
     try:
         from django.core.management import execute_from_command_line
