@@ -21,7 +21,7 @@ SECRET_KEY_JWT = 'lkshdgkhjgfçhsdçgjkhskjdfghlshjgçlfs'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['managerdb.com.br', 'www.managerdb.com.br', 'localhost',]
+ALLOWED_HOSTS = ['managerdb.com.br', 'www.managerdb.com.br', '127.0.0.1', 'localhost', '45.6.118.52']
 CORS_ORIGIN_ALLOW_ALL = True
 CORS_ALLOW_CREDENTIALS = True
 
