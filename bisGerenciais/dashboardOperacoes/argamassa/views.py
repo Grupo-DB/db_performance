@@ -12,7 +12,7 @@ locale.setlocale(locale.LC_ALL,'pt_BR.UTF-8')
 
 pd.set_option('future.no_silent_downcasting', True)
 
-connection_string = 'mssql+pyodbc://DBCONSULTA:%21%40%23123qweQWE@45.6.118.50:65530/DB?driver=ODBC+Driver+17+for+SQL+Server'
+connection_string = 'mssql+pyodbc://DBCONSULTA:%21%40%23123qweQWE@172.10.27.51:1433/DB?driver=ODBC+Driver+17+for+SQL+Server'
 engine = create_engine(connection_string)
 
 #-------------------------------------INDICADORES-----------------------------------------""
