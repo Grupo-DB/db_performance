@@ -632,6 +632,7 @@ def calculos_equipamentos_detalhes(request):
     fcmi_mg02_producao_val = fcmi_mg02_producao_int.item() if not fcmi_mg02_producao_int.empty else 0
     fcmi_mg02_producao = locale.format_string("%.1f",fcmi_mg02_producao_val, grouping=True) if fcmi_mg02_producao_val >0 else 0
 
+    fcmi_mg02_produtividade_val = 0
     if fcmi_mg02_hora_producao_val > 0:
         fcmi_mg02_produtividade_val = fcmi_mg02_producao_val / fcmi_mg02_hora_producao_val
         fcmi_mg02_produtividade = locale.format_string("%.1f", fcmi_mg02_produtividade_val, grouping=True)

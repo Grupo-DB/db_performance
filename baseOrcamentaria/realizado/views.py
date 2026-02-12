@@ -53,27 +53,31 @@ def calculos_realizado(request):
         raise ValueError("O parâmetro 'meses' deve ser uma lista de inteiros entre 1 e 12.")
     
     # Verifica se há meses futuros
-    mes_atual = datetime.date.today().month
+    #mes_atual = datetime.date.today().month
     #if any(mes > mes_atual for mes in meses):
         #raise ValueError("O parâmetro 'periodo' contém meses futuros, o que não é permitido.")
     
-     # Determina a data de início e fim
+    data_inicio = None
+    data_fim = None
+
     if ano:
         mes_inicio = min(meses)
         mes_fim = max(meses)
-
-        data_inicio = datetime.date(ano, mes_inicio, 1)
-
-        if mes_fim >= mes_atual:
-            data_fim = datetime.date.today()
-        else:
-            ultimo_dia = calendar.monthrange(ano, mes_fim)[1]
-            data_fim = datetime.date(ano, mes_fim, ultimo_dia)
-    else:
-        raise ValueError("O parâmetro 'ano' é obrigatório.")
     
-    #print(f"Data de início: {data_inicio}")
-    #print(f"Data de fim: {data_fim}")
+        # Certifique-se de que estas variáveis tenham exatamente estes nomes:
+        data_inicio = datetime.date(ano, mes_inicio, 1)
+    
+        hoje = datetime.date.today()
+        ultimo_dia_selecionado = calendar.monthrange(ano, mes_fim)[1]
+        data_fim_selecionada = datetime.date(ano, mes_fim, ultimo_dia_selecionado)
+
+        if data_fim_selecionada > hoje:
+            data_fim = hoje
+        else:
+            data_fim = data_fim_selecionada
+
+    # 2. Agora o print vai funcionar e a Query também
+    print(f">>> DATA INICIO: {data_inicio} | DATA FIM: {data_fim}", flush=True)
 
     # Converte listas para strings no formato esperado pelo SQL
     filiais_string = ", ".join(map(str, filiais_list))

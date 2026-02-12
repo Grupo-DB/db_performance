@@ -35,6 +35,7 @@ class Analise(models.Model):
     modulo_elasticidade = models.JSONField(null=True, blank=True)
     deslizamento = models.JSONField(null=True, blank=True)
     classificacao = models.CharField(max_length=255, null=True, blank=True)
+    capilaridade = models.JSONField(null=True, blank=True)
 
     class Meta:
         verbose_name = 'Análise'

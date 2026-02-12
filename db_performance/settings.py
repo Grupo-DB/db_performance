@@ -240,7 +240,7 @@ STATICFILES_DIRS = [
 ]
 
 
-FRONTEND_URL = 'http://localhost:80'
+FRONTEND_URL = 'https://managerdb.com.br:443'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
