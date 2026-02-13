@@ -8,6 +8,7 @@ from rest_framework.decorators import action
 from .serializer import AnaliseSerializer, AnaliseEnsaioSerializer, AnaliseCalculoSerializer
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from datetime import datetime
 from django.utils import timezone
 from django.conf import settings
 from openai import AzureOpenAI
@@ -30,6 +31,22 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='porData')
+    def porData(self, request):
+        data_inicial = request.data.get('data_inicial')
+        data_final = request.data.get('data_final')
+        if not data_inicial or not data_final:
+            return Response({"error": "Parâmetros 'data_inicial' e 'data_final' são obrigatórios"}, status=http_status.HTTP_400_BAD_REQUEST)
+        # Converte para date (YYYY-MM-DD)
+        data_inicial = datetime.fromisoformat(data_inicial.replace('Z', '+00:00')).date()
+        data_final = datetime.fromisoformat(data_final.replace('Z', '+00:00')).date()
+        diario = Analise.objects.filter(
+            data__range=[data_inicial, data_final], finalizada=False,
+        )        
+        serializer = self.get_serializer(diario, many=True)
+        return Response(serializer.data, status=http_status.HTTP_200_OK
+    )
 
     @action(detail=False, methods=['get'], url_path='abertas')
     def abertas(self, request):

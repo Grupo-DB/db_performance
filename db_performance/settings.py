@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+#BASE_DIR = Path(__file__).resolve().parent.parent #Usado no local env
 DEFAULT_CHARSET = 'utf-8'
 
 # Quick-start development settings - unsuitable for production
@@ -30,13 +31,17 @@ CORS_ALLOW_CREDENTIALS = True
 
 
 load_dotenv(dotenv_path=Path('.') / '.env')
+#load_dotenv(dotenv_path=BASE_DIR / '.env') #Usado no local env
 #VARIAVEIS DE AMBIENTE DA OPENAI
+
+#AZURE_OPENAI_KEY = os.environ.get('AZURE_OPENAI_KEY')  #for local env
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 AZURE_OPENAI_ENDPOINT = os.environ.get('AZURE_OPENAI_ENDPOINT')
 AZURE_OPENAI_DEPLOYMENT = os.environ.get('AZURE_OPENAI_DEPLOYMENT')
 AZURE_OPENAI_API_VERSION = os.environ.get('AZURE_OPENAI_API_VERSION')
 # Verifique se as variáveis existem antes de usar
-if not OPENAI_API_KEY or not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_DEPLOYMENT or not AZURE_OPENAI_API_VERSION:
+#if not AZURE_OPENAI_KEY or not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_DEPLOYMENT or not AZURE_OPENAI_API_VERSION: #for local env 
+if not OPENAI_API_KEY or not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_DEPLOYMENT or not AZURE_OPENAI_API_VERSION:   
     raise ValueError("Variáveis de ambiente do Azure OpenAI não configuradas.")
 
 CELERY_RESULT_BACKEND = 'django-db'
@@ -141,6 +146,7 @@ DATABASES = {
         'NAME': 'db_manager',
         'USER':'grupodb',
         'PASSWORD': '!@#123qweQWE',
+        #'HOST': '45.6.118.52', for local env
         'HOST': 'localhost',
         'PORT': '3306',
         'OPTIONS': {
