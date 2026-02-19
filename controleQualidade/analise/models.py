@@ -36,6 +36,7 @@ class Analise(models.Model):
     deslizamento = models.JSONField(null=True, blank=True)
     classificacao = models.CharField(max_length=255, null=True, blank=True)
     capilaridade = models.JSONField(null=True, blank=True)
+    cal_completo = models.JSONField(null=True, blank=True)
 
     class Meta:
         verbose_name = 'Análise'
