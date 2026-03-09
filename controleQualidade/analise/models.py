@@ -37,6 +37,7 @@ class Analise(models.Model):
     classificacao = models.CharField(max_length=255, null=True, blank=True)
     capilaridade = models.JSONField(null=True, blank=True)
     cal_completo = models.JSONField(null=True, blank=True)
+    usada_laudo = models.BooleanField(default=False, blank=True)
 
     class Meta:
         verbose_name = 'Análise'
