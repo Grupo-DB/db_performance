@@ -70,16 +70,14 @@ class AnaliseViewSet(viewsets.ModelViewSet):
     def resultados_anteriores(self, request):
         """
         Busca resultados anteriores de análises com o mesmo cálculo e ensaios,
-        retornando apenas uma ocorrência por análise (últimas 5 análises).
+        retornando apenas uma ocorrência por análise (últimas 20 análises).
         """
         if request.method == 'POST':
             data = request.data
             calculo_descricao = data.get('calculo')
             ensaio_ids = data.get('ensaioIds', [])
             ensaio_nome = data.get('ensaio_nome', None)
-            limit = int(data.get('limit', 5))
-
-            print(f"✅ POST - Parâmetros recebidos: calculo={calculo_descricao}, ensaio_ids={ensaio_ids}, ensaio_nome={ensaio_nome}, limit={limit}")
+            limit = int(data.get('limit', 20))
 
             if not calculo_descricao and not ensaio_ids and not ensaio_nome:
                 return Response({
@@ -94,7 +92,6 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                 # Converter IDs para inteiros se existirem
                 if ensaio_ids:
                     ensaio_ids = [int(id) for id in ensaio_ids]
-                    print(f"✅ Buscando análises com ensaios IDs: {ensaio_ids}")
 
                 # Inicializar queryset
                 analises_filtradas = Analise.objects.all()
@@ -105,7 +102,6 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                         calculos=calculo_descricao
                     ).values_list('analise_id', flat=True)
                     analises_filtradas = analises_filtradas.filter(id__in=analise_ids_com_calculo)
-                    print(f"✅ Análises com cálculo encontradas: {analises_filtradas.count()}")
 
                 # Filtrar por ensaios se fornecido
                 if ensaio_ids or ensaio_nome:
@@ -120,12 +116,9 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                     
                     analises_com_ensaios = AnaliseEnsaio.objects.filter(filtros_ensaio).values_list('analise_id', flat=True)
                     analises_filtradas = analises_filtradas.filter(id__in=analises_com_ensaios)
-                    print(f"✅ Análises com ensaios encontradas: {analises_filtradas.count()}")
 
                 # Aplicar distinct, ordenação e limite
                 analises_filtradas = analises_filtradas.distinct().order_by('-id')[:limit]
-                print(f"✅ Análises filtradas final: {analises_filtradas.count()}")
-
                 resultados = []
                 analises_processadas = set()  # Para evitar duplicatas
 
@@ -134,7 +127,6 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                         continue
                     
                     analises_processadas.add(analise.id)
-                    print(f"✅ Processando análise ID: {analise.id}")
                     
                     # Dados básicos da análise
                     analise_data = {
@@ -156,7 +148,6 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                         ).order_by('-id').first()  # ← MAIS RECENTE
                         
                         if calculo_analise:
-                            print(f"🔍 Cálculo encontrado para análise {analise.id}")
                             resultados.append({
                                 **analise_data,
                                 'tipo': 'CALCULO',
@@ -211,7 +202,6 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                                         break  # Pega o primeiro (que é o mais recente devido ao reversed)
                                 
                                 if ensaio_match:
-                                    print(f"🔍 Ensaio encontrado: ID {ensaio_match.get('id')} - {ensaio_match.get('descricao')}")
                                     resultados.append({
                                         **analise_data,
                                         'tipo': 'ENSAIO',
@@ -232,7 +222,6 @@ class AnaliseViewSet(viewsets.ModelViewSet):
 
                     # Se não encontrou nenhum resultado, mas a análise passou pelos filtros, adicionar um registro básico
                     if not resultado_encontrado:
-                        print(f"🔍 Nenhum resultado específico encontrado para análise {analise.id}")
                         resultados.append({
                             **analise_data,
                             'tipo': 'ANALISE',
@@ -244,7 +233,6 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                             'ensaio_digitador': None
                         })
 
-                print(f"✅ Total de resultados retornados: {len(resultados)}")
                 return Response(resultados, status=200)
 
             except ValueError as e:
