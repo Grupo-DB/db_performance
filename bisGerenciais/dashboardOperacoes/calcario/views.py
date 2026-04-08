@@ -650,8 +650,7 @@ def calculos_equipamentos_detalhes(request):
             return 0
 
     fcmi_produtividade_geral_val = 0  # inicializando a variável
-    fcmi_mg01_produtividade_val = 0
-    if to_float(fcmi_mg01_produtividade) > 0 or to_float(fcmi_mg02_produtividade) > 0:
+    if fcmi_mg01_produtividade_val or fcmi_mg02_produtividade_val > 0 :
         fcmi_produtividade_geral_val = fcmi_mg01_produtividade_val + fcmi_mg02_produtividade_val
         fcmi_produtividade_geral = locale.format_string("%.1f",fcmi_produtividade_geral_val, grouping=True)
     else:      

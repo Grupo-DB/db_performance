@@ -501,7 +501,8 @@ def filtrar_avaliacoes_logado(request):
     if request.method == 'POST':
         data = json.loads(request.body)
         selected_avaliadores = data.get('avaliadorSelecionadoId', [])
-        selected_avaliados = data.get('avaliadoSelecionadoId', [])
+        selected_avaliados = data.get('avaliadoSelecionadoId',[])
+        selected_avaliado = data.get('avaliadoSelHistId',[])
         selected_areas = data.get('selectedAreas', [])
         selected_cargos = data.get('selectedCargos', [])
         selected_ambientes = data.get('selectedAmbientes', [])
@@ -523,6 +524,8 @@ def filtrar_avaliacoes_logado(request):
             queryset = queryset.filter(avaliador_id__in=selected_avaliadores)
         if selected_avaliados:
             queryset = queryset.filter(avaliado_id__in=selected_avaliados)
+        if selected_avaliado:
+            queryset = queryset.filter(avaliado_id__in=selected_avaliado)
         if selected_areas:
             queryset = queryset.filter(area_id__in=selected_areas)
         if selected_cargos:

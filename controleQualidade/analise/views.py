@@ -2,7 +2,7 @@ from django.shortcuts import render
 import requests
 from django.http import JsonResponse
 from rest_framework.response import Response
-from rest_framework import viewsets, status as http_status
+from rest_framework import permissions, viewsets, status as http_status
 from .models import Analise, AnaliseEnsaio, AnaliseCalculo
 from rest_framework.decorators import action
 from .serializer import AnaliseSerializer, AnaliseEnsaioSerializer, AnaliseCalculoSerializer
@@ -21,7 +21,15 @@ AZURE_OPENAI_DEPLOYMENT = "o4-mini-labDb"
 AZURE_OPENAI_API_VERSION = "2024-04-01-preview"
 
 @method_decorator(csrf_exempt, name='dispatch')
-class AnaliseViewSet(viewsets.ModelViewSet):
+class PublicAnaliseViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Analise.objects.all()
+    serializer_class = AnaliseSerializer
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class AnaliseViewSet(viewsets.ModelViewSet):  
     queryset = Analise.objects.all()
     serializer_class = AnaliseSerializer
 

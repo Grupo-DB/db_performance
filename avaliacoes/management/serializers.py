@@ -60,6 +60,9 @@ class AvaliadoSerializer(serializers.ModelSerializer):
     setor = serializers.CharField(source='setor.nome', read_only=True)
     ambiente = serializers.CharField(source='ambiente.nome', read_only=True)
     cargo = serializers.CharField(source='cargo.nome', read_only=True)
+    empresa = serializers.CharField(source='empresa.nome',read_only=True)
+    filial = serializers.CharField(source='filial.nome',read_only=True)
+    area = serializers.CharField(source='area.nome',read_only=True)
 
     class Meta:
         model = Avaliado
