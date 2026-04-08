@@ -322,6 +322,12 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(colaboradores, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['get'], url_path='comUsername')
+    def com_username(self, request):
+        colaboradores = Colaborador.objects.filter(user__isnull=False)
+        serializer = self.get_serializer(colaboradores, many=True)
+        return Response(serializer.data)
+
     @action(detail=False, methods=['get'])
     def meInfo(self, request):
         try:
