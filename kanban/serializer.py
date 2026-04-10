@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import KanbanColumn, KanbanTask
+from .models import KanbanColumn, KanbanTask, KanbanAnexo
 
 class UserMinSerializer(serializers.ModelSerializer):
     class Meta:
@@ -26,7 +26,8 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
             'id', 'coluna_id', 'dono', 'responsavel', 'responsavel_id',
             'titulo', 'descricao', 'prioridade', 'tags',
             'data_inicio', 'prazo', 'concluido_em',
-            'esta_atrasada', 'criado_em', 'atualizado_em',
+            'esta_atrasada', 'criado_em', 'atualizado_em','recorrente', 'recorrencia',
+            'anexos',
         ]
         read_only_fields = ['dono', 'criado_em', 'atualizado_em']
 
@@ -51,3 +52,13 @@ class KanbanColumnSerializer(serializers.ModelSerializer):
         model = KanbanColumn
         fields = ['id', 'titulo', 'cor', 'ordem', 'tasks', 'criado_em']
         read_only_fields = ['criado_em']
+
+
+class KanbanAnexoSerializer(serializers.ModelSerializer):
+    arquivo = serializers.FileField(use_url=True)
+
+    class Meta:
+        model  = KanbanAnexo
+        fields = ['id', 'nome', 'arquivo', 'tamanho', 'criado_em']
+        read_only_fields = ['id', 'nome', 'tamanho', 'criado_em']
+

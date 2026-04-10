@@ -23,6 +23,13 @@ class KanbanTask(models.Model):
         ('alta', 'Alta'),
     ]
 
+    RECORRENCIA_CHOICES = [
+        ('diaria',  'Diária'),
+        ('semanal', 'Semanal'),
+        ('mensal',  'Mensal'),
+        ('anual',   'Anual'),
+    ]
+
     coluna = models.ForeignKey(KanbanColumn, on_delete=models.CASCADE, related_name='tasks')
     dono = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tasks_criadas')
     responsavel = models.ForeignKey(
@@ -38,9 +45,32 @@ class KanbanTask(models.Model):
     concluido_em = models.DateTimeField(null=True, blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
+    recorrente  = models.BooleanField(default=False)
+    recorrencia_dia_semana = models.PositiveSmallIntegerField(null=True, blank=True)  # 0=Dom ... 6=Sáb
+    recorrencia_dia = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-31
+    recorrencia_mes = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-12
+    recorrencia = models.CharField(
+        max_length=10,
+        choices=RECORRENCIA_CHOICES,
+        null=True, blank=True
+    )
 
     class Meta:
         ordering = ['criado_em']
 
     def __str__(self):
         return self.titulo
+    
+class KanbanAnexo(models.Model):
+    tarefa    = models.ForeignKey(KanbanTask, on_delete=models.CASCADE, related_name='anexos')
+    nome      = models.CharField(max_length=255)
+    arquivo   = models.FileField(upload_to='kanban/anexos/%Y/%m/')
+    tamanho   = models.PositiveIntegerField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self.nome:
+            self.nome = self.arquivo.name
+        if self.arquivo and not self.tamanho:
+            self.tamanho = self.arquivo.size
+        super().save(*args, **kwargs)

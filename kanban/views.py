@@ -1,14 +1,15 @@
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
 from django.db.models import Q
 # Create your views here.
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
 from django.contrib.auth.models import User
 from django.utils import timezone
-from .models import KanbanColumn, KanbanTask
-from .serializer import KanbanColumnSerializer, KanbanTaskSerializer, UserMinSerializer
+from .models import KanbanColumn, KanbanTask, KanbanAnexo
+from .serializer import KanbanAnexoSerializer, KanbanColumnSerializer, KanbanTaskSerializer, UserMinSerializer
 
 
 class KanbanColumnViewSet(viewsets.ModelViewSet):
@@ -83,3 +84,24 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
             coluna__usuario=request.user
         ).select_related('dono', 'responsavel', 'coluna')
         return Response(KanbanTaskSerializer(tasks, many=True, context={'request': request}).data)
+    
+class KanbanAnexoViewSet(viewsets.ModelViewSet):
+    serializer_class = KanbanAnexoSerializer
+    parser_classes   = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        return KanbanAnexo.objects.filter(
+            tarefa_id=self.kwargs['tarefa_pk'],
+            tarefa__dono=self.request.user   # segurança
+        )
+
+    def perform_create(self, serializer):
+        tarefa = get_object_or_404(
+            KanbanTask, pk=self.kwargs['tarefa_pk'], dono=self.request.user
+        )
+        f = self.request.FILES.get('arquivo')
+        serializer.save(
+            tarefa=tarefa,
+            nome=f.name if f else '',
+            tamanho=f.size if f else None
+        )
