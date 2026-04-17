@@ -14,6 +14,7 @@ class Contrato(models.Model):
     id = models.AutoField(primary_key=True)
     numero = models.CharField(max_length=255, null=True, blank=True)
     contratado = models.CharField(max_length=400, null=True, blank=True)
+    contratante = models.CharField(max_length=400, null=True, blank=True)
     objeto_contrato = models.CharField(max_length=400, null=True, blank=True)
     valor_contrato = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     data_inicio = models.DateField(null=True, blank=True)

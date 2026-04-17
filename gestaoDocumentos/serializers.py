@@ -13,7 +13,7 @@ class ContratoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Contrato
         fields = [
-            'id', 'numero', 'contratado', 'objeto_contrato', 'valor_contrato',
+            'id', 'numero','contratante','contratado', 'objeto_contrato', 'valor_contrato',
             'data_inicio', 'data_fim', 'vigencia', 'setor_interessado',
             'responsavel_contratante', 'responsavel_contratado', 'multa_recisao',
             'reajuste', 'observacoes', 'status', 'anexo',
