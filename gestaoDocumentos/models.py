@@ -3,6 +3,8 @@ from django.db import models
 class Diretorio(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=255, null=True, blank=True)
+    tipo = models.CharField(max_length=255, null=True, blank=True)
+    descricao = models.TextField(null=True, blank=True)
     
     class Meta:
         verbose_name = 'Diretório'
