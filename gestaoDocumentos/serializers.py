@@ -13,11 +13,31 @@ class ContratoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Contrato
         fields = [
-            'id', 'numero','contratante','contratado', 'objeto_contrato', 'valor_contrato',
-            'data_inicio', 'data_fim', 'vigencia', 'setor_interessado',
-            'responsavel_contratante', 'responsavel_contratado', 'multa_recisao',
-            'reajuste', 'observacoes', 'status', 'anexo',
-            'diretorio', 'diretorio_detalhes',
+            'id',
+            'tipo', 
+            'numero',
+            'contratante',
+            'contratado',
+            'empresa_grupo', 
+            'objeto_contrato', 
+            'valor_contrato',
+            'data_inicio', 
+            'data_fim', 
+            'prazo_aviso',
+            'responsave_interno',
+            'vigencia', 
+            'setor_interessado',
+            'responsavel_contratante', 
+            'responsavel_contratado', 
+            'multa_recisao',
+            'reajuste', 
+            'forma_pagamento',
+            'observacoes', 
+            'status', 
+            'anexo',
+            'diretorio', 
+            'diretorio_detalhes',
+            'renovacao',
         ]
 
 class ProcessoSerializer(serializers.ModelSerializer):
