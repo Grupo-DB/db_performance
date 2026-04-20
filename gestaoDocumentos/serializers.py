@@ -1,10 +1,95 @@
 from rest_framework import serializers
-from gestaoDocumentos.models import Acao, Alvara, Diretorio, Contrato, Patrimonial, Processo, Procuracao
+from gestaoDocumentos.models import Acao, Alvara, Atas, Diretorio, Contrato, Patrimonial,  ProcessoInterno, ProcessoExterno, Procuracao, Seguro, Societario, Veiculo
 
 class DiretorioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Diretorio
         fields = '__all__'
+
+class AtasSerializer(serializers.ModelSerializer):
+    diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
+    diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+
+    class Meta:
+        model = Atas
+        fields = [
+            'id',
+            'tipo',
+            'data_reuniao',
+            'participantes',
+            'pauta',
+            'deliberacoes',
+            'observacoes',
+            'status',
+            'anexo',
+            'diretorio',
+            'diretorio_detalhes',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'
+        ]        
+
+class SocietarioSerializer(serializers.ModelSerializer):
+    diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
+    diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    class Meta:
+        model = Societario
+        fields = [
+            'id',
+            'tipo',
+            'data_assinatura',
+            'orgao_registro',
+            'administadores',
+            'status',
+            'observacoes',
+            'anexo',
+            'diretorio',
+            'diretorio_detalhes',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'
+        ]
+
+class SeguroSerializer(serializers.ModelSerializer):
+    diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
+    diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    class Meta:
+        model = Seguro
+        fields = [
+            'id',
+            'tipo',
+            'seguradora',
+            'numero_apolice',
+            'empresa_segurada',
+            'bem_segurado',
+            'valor_seguro',
+            'data_inicio',
+            'data_fim',
+            'vigencia',
+            'status',
+            'observacoes',
+            'anexo',
+            'diretorio',
+            'diretorio_detalhes',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'
+        ]
 
 class ContratoSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
@@ -18,18 +103,16 @@ class ContratoSerializer(serializers.ModelSerializer):
             'numero',
             'contratante',
             'contratado',
-            'empresa_grupo', 
             'objeto_contrato', 
             'valor_contrato',
             'data_inicio', 
             'data_fim', 
             'prazo_aviso',
-            'responsave_interno',
             'vigencia', 
-            'setor_interessado',
             'responsavel_contratante', 
             'responsavel_contratado', 
             'multa_recisao',
+            'renovacao',
             'reajuste', 
             'forma_pagamento',
             'observacoes', 
@@ -37,21 +120,26 @@ class ContratoSerializer(serializers.ModelSerializer):
             'anexo',
             'diretorio', 
             'diretorio_detalhes',
-            'renovacao',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'
         ]
 
-class ProcessoSerializer(serializers.ModelSerializer):
+class ProcessoInternoSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
 
     class Meta:
-        model = Processo
+        model = ProcessoInterno
         fields = [
             'id', 
             'tag', 
             'titulo', 
-            'setor_interessado', 
-            'responsavel_setor',
             'versao', 
             'data_versao', 
             'documento_citado', 
@@ -61,10 +149,88 @@ class ProcessoSerializer(serializers.ModelSerializer):
             'ultima_auditoria',
             'periodicidade_reciclagem', 
             'ultimo_treinamento', 
-            'status', 
+            'status',
+            'observacoes', 
             'anexo',
             'diretorio', 
             'diretorio_detalhes',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'
+        ]
+
+class ProcessoExternoSerializer(serializers.ModelSerializer):
+    diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
+    diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+
+    class Meta:
+        model = ProcessoExterno
+        fields = [
+            'id', 
+            'tipo', 
+            'numero', 
+            'empresa_envolvida', 
+            'parte_contraria', 
+            'orgao_foro', 
+            'vara_instancia',
+            'objeto_processo', 
+            'valor_causa', 
+            'escritorio_juridico',
+            'advogado_responsavel', 
+            'andamento', 
+            'status',
+            'observacoes', 
+            'anexo',
+            'diretorio', 
+            'diretorio_detalhes',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'
+        ]        
+
+class VeiculoSerializer(serializers.ModelSerializer):
+    diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
+    diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+
+    class Meta:
+        model = Veiculo
+        fields = [
+            'id', 
+            'placa', 
+            'modelo_veiculo', 
+            'tipo_documento', 
+            'situacao_veiculo', 
+            'data_emissao', 
+            'data_vencimento', 
+            'vigencia',
+            'ano_exercicio', 
+            'valor_ipva', 
+            'situacao_pagamento', 
+            'data_pagamento',
+            'responsavel',
+            'status',
+            'observacoes',
+            'anexo',
+            'diretorio',
+            'diretorio_detalhes',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'
         ]
 
 class AcaoSerializer(serializers.ModelSerializer):
@@ -85,6 +251,14 @@ class AcaoSerializer(serializers.ModelSerializer):
             'anexo', 
             'diretorio', 
             'diretorio_detalhes',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'    
         ]
 
 class AlvaraSerializer(serializers.ModelSerializer):
@@ -96,17 +270,29 @@ class AlvaraSerializer(serializers.ModelSerializer):
         fields = [
             'id', 
             'empresa_titular', 
-            'tipo_alvara', 
-            'setor_interessado', 
-            'responsavel_setor',
-            'responsavel_alvara',
+            'tipo_alvara',
+            'numero_alvara', 
+            'orgao_emissor',
+            'responsavel_alvara', 
             'data_inicio', 
             'data_fim', 
             'vigencia', 
+            'ultima_atualizacao', 
+            'renovavel',
+            'prazo_renovacao', 
+            'observacoes',
             'status', 
             'anexo',
             'diretorio', 
             'diretorio_detalhes',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'
         ]
 
 class ProcuracaoSerializer(serializers.ModelSerializer):
@@ -118,8 +304,12 @@ class ProcuracaoSerializer(serializers.ModelSerializer):
         fields = [
             'id', 
             'outorgante', 
-            'outorgado', 
-            'poderes', 
+            'outorgado',
+            'tipo', 
+            'finalidade', 
+            'substabelecer', 
+            'substabelecimento_vinculado', 
+            'observacoes',
             'data_inicio', 
             'data_fim', 
             'vigencia',
@@ -127,6 +317,14 @@ class ProcuracaoSerializer(serializers.ModelSerializer):
             'anexo', 
             'diretorio', 
             'diretorio_detalhes',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'    
         ]
 
 class PatrimonialSerializer(serializers.ModelSerializer):
@@ -139,7 +337,13 @@ class PatrimonialSerializer(serializers.ModelSerializer):
             'id', 
             'titular', 
             'tipo_bem', 
-            'descricao_bem', 
+            'descricao_bem',
+            'cod_interno', 
+            'situacao_bem', 
+            'data_aquisicao', 
+            'forma_aquisicao',
+            'responsavel_bem',
+            # 'localizacao', 
             'localizacao_tipo',
             'endereco', 
             'bairro', 
@@ -149,19 +353,36 @@ class PatrimonialSerializer(serializers.ModelSerializer):
             'distrito',
             'coordenadas', 
             'codigo_cartorio', 
+            # 'registro',
             'matricula', 
             'comarca', 
             'zona',
-            'valor_contabil', 
-            'bemfeitoria', 
+            'cartorio',
+            'insc_municipal',
+            'insc_estadual',
+            # 'benfeitorias
+            'valor_contabil',
+            'valor_venal',
+            'valor_avaliado',
+            'benfeitoria', 
             'area_privativa', 
             'area_total',
             'tipo_construcao', 
             'estado_conservacao', 
             'padrao_construtivo', 
             'idade',
+            # 'status',
+            'observacoes',
             'status', 
             'anexo', 
             'diretorio', 
             'diretorio_detalhes',
+            'empresa_grupo',
+            'setor_interessado',
+            'responsavel_interno',
+            'data_cadastro',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'    
         ]
