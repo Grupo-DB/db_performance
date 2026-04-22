@@ -113,11 +113,15 @@ class AreaSerializer(serializers.ModelSerializer):
         fields = '__all__'           
 
 class SetorSerializer(serializers.ModelSerializer):
+    filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all(), write_only=True)
+    filial_detalhes = FilialSerializer(source='filial', read_only=True)
     class Meta:
         model = Setor
         fields = '__all__'           
 
 class AmbienteSerializer(serializers.ModelSerializer):
+    filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all(), write_only=True)
+    filial_detalhes = FilialSerializer(source='filial', read_only=True)
     class Meta:
         model = Ambiente
         fields = '__all__'
