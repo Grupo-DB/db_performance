@@ -1,4 +1,6 @@
 from django.db import models
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.contenttypes.models import ContentType
 
 class Diretorio(models.Model):
     id = models.AutoField(primary_key=True)
@@ -20,6 +22,7 @@ class Atas(models.Model):
     observacoes = models.TextField(null=True, blank=True)
     status = models.CharField(max_length=255, null=True, blank=True)
     anexo = models.FileField(upload_to='atas/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='atas')
     # Campos gerais:
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
@@ -43,6 +46,7 @@ class Societario(models.Model):
     status = models.CharField(max_length=255, null=True, blank=True)
     observacoes = models.TextField(null=True, blank=True)
     anexo = models.FileField(upload_to='societarios/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='contratos.diretorio+')
      # Campos gerais:
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
@@ -72,6 +76,7 @@ class Seguro(models.Model):
     observacoes = models.TextField(null=True, blank=True)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='seguros')
     anexo = models.FileField(upload_to='seguros/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
     # Campos gerais:    
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
     setor_interessado = models.CharField(max_length=255, null=True, blank=True)
@@ -108,6 +113,7 @@ class Contrato(models.Model):
     renovacao = models.BooleanField(default=False)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='contratos.diretorio+')
     anexo = models.FileField(upload_to='contratos/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
     # Campos gerais:    
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
     setor_interessado = models.CharField(max_length=255, null=True, blank=True)
@@ -138,6 +144,7 @@ class ProcessoInterno(models.Model):
     observacoes = models.TextField(null=True, blank=True)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='processos')
     anexo = models.FileField(upload_to='processos_internos/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
      # Campos gerais:
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
     setor_interessado = models.CharField(max_length=255, null=True, blank=True)
@@ -170,6 +177,7 @@ class ProcessoExterno(models.Model):
     observacoes = models.TextField(null=True, blank=True)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='processos_externos')
     anexo = models.FileField(upload_to='processos_externos/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
     # Campos gerais:
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
     setor_interessado = models.CharField(max_length=255, null=True, blank=True)
@@ -201,6 +209,7 @@ class Veiculo(models.Model):
     status = models.CharField(max_length=255, null=True, blank=True)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='veiculos')
     anexo = models.FileField(upload_to='veiculos/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
     # Campos gerais:
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
     setor_interessado = models.CharField(max_length=255, null=True, blank=True)
@@ -225,6 +234,7 @@ class Acao(models.Model):
     status = models.BooleanField(default=True)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='acoes')
     anexo = models.FileField(upload_to='acoes/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
     # Campos gerais:
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
     setor_interessado = models.CharField(max_length=255, null=True, blank=True)
@@ -255,6 +265,7 @@ class Alvara(models.Model):
     status = models.CharField(max_length=255, null=True, blank=True)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='alvaras')
     anexo = models.FileField(upload_to='alvaras/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
     # Campos gerais:
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
     setor_interessado = models.CharField(max_length=255, null=True, blank=True)
@@ -284,6 +295,7 @@ class Procuracao(models.Model):
     status = models.BooleanField(default=True)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='procuracoes')
     anexo = models.FileField(upload_to='procuracoes/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
     # Campos gerais:
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
     setor_interessado = models.CharField(max_length=255, null=True, blank=True)
@@ -340,6 +352,7 @@ class Patrimonial(models.Model):
     status = models.BooleanField(default=True)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='patrimoniais')
     anexo = models.FileField(upload_to='patrimoniais/', null=True, blank=True)
+    anexos = GenericRelation('DocumentoAnexo')
     # Campos gerais:
     empresa_grupo = models.CharField(max_length=400, null=True, blank=True)
     setor_interessado = models.CharField(max_length=255, null=True, blank=True)
@@ -352,3 +365,20 @@ class Patrimonial(models.Model):
     class Meta:
         verbose_name = 'Patrimonial'
         verbose_name_plural = 'Patrimoniais'
+
+
+class DocumentoAnexo(models.Model):
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField()
+    documento = GenericForeignKey('content_type', 'object_id')
+    arquivo = models.FileField(upload_to='anexos/')
+    nome_original = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Anexo'
+        verbose_name_plural = 'Anexos'
+        indexes = [
+            models.Index(fields=['content_type', 'object_id']),
+        ]

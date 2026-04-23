@@ -1,5 +1,12 @@
 from rest_framework import serializers
-from gestaoDocumentos.models import Acao, Alvara, Atas, Diretorio, Contrato, Patrimonial,  ProcessoInterno, ProcessoExterno, Procuracao, Seguro, Societario, Veiculo
+from gestaoDocumentos.models import Acao, Alvara, Atas, Diretorio, Contrato, DocumentoAnexo, Patrimonial, ProcessoInterno, ProcessoExterno, Procuracao, Seguro, Societario, Veiculo
+
+
+class DocumentoAnexoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DocumentoAnexo
+        fields = ['id', 'arquivo', 'nome_original', 'created_at', 'created_by']
+
 
 class DiretorioSerializer(serializers.ModelSerializer):
     class Meta:
@@ -9,6 +16,7 @@ class DiretorioSerializer(serializers.ModelSerializer):
 class AtasSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
 
     class Meta:
         model = Atas
@@ -22,6 +30,7 @@ class AtasSerializer(serializers.ModelSerializer):
             'observacoes',
             'status',
             'anexo',
+            'anexos',
             'diretorio',
             'diretorio_detalhes',
             'empresa_grupo',
@@ -37,6 +46,8 @@ class AtasSerializer(serializers.ModelSerializer):
 class SocietarioSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
+
     class Meta:
         model = Societario
         fields = [
@@ -48,6 +59,7 @@ class SocietarioSerializer(serializers.ModelSerializer):
             'status',
             'observacoes',
             'anexo',
+            'anexos',
             'diretorio',
             'diretorio_detalhes',
             'empresa_grupo',
@@ -63,6 +75,8 @@ class SocietarioSerializer(serializers.ModelSerializer):
 class SeguroSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
+
     class Meta:
         model = Seguro
         fields = [
@@ -79,6 +93,7 @@ class SeguroSerializer(serializers.ModelSerializer):
             'status',
             'observacoes',
             'anexo',
+            'anexos',
             'diretorio',
             'diretorio_detalhes',
             'empresa_grupo',
@@ -94,6 +109,7 @@ class SeguroSerializer(serializers.ModelSerializer):
 class ContratoSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
 
     class Meta:
         model = Contrato
@@ -118,6 +134,7 @@ class ContratoSerializer(serializers.ModelSerializer):
             'observacoes', 
             'status', 
             'anexo',
+            'anexos',
             'diretorio', 
             'diretorio_detalhes',
             'empresa_grupo',
@@ -133,6 +150,7 @@ class ContratoSerializer(serializers.ModelSerializer):
 class ProcessoInternoSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
 
     class Meta:
         model = ProcessoInterno
@@ -152,6 +170,7 @@ class ProcessoInternoSerializer(serializers.ModelSerializer):
             'status',
             'observacoes', 
             'anexo',
+            'anexos',
             'diretorio', 
             'diretorio_detalhes',
             'empresa_grupo',
@@ -167,6 +186,7 @@ class ProcessoInternoSerializer(serializers.ModelSerializer):
 class ProcessoExternoSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
 
     class Meta:
         model = ProcessoExterno
@@ -186,6 +206,7 @@ class ProcessoExternoSerializer(serializers.ModelSerializer):
             'status',
             'observacoes', 
             'anexo',
+            'anexos',
             'diretorio', 
             'diretorio_detalhes',
             'empresa_grupo',
@@ -201,6 +222,7 @@ class ProcessoExternoSerializer(serializers.ModelSerializer):
 class VeiculoSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
 
     class Meta:
         model = Veiculo
@@ -221,6 +243,7 @@ class VeiculoSerializer(serializers.ModelSerializer):
             'status',
             'observacoes',
             'anexo',
+            'anexos',
             'diretorio',
             'diretorio_detalhes',
             'empresa_grupo',
@@ -236,6 +259,7 @@ class VeiculoSerializer(serializers.ModelSerializer):
 class AcaoSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
 
     class Meta:
         model = Acao
@@ -248,7 +272,8 @@ class AcaoSerializer(serializers.ModelSerializer):
             'participacao', 
             'observacoes',
             'status', 
-            'anexo', 
+            'anexo',
+            'anexos',
             'diretorio', 
             'diretorio_detalhes',
             'empresa_grupo',
@@ -264,6 +289,7 @@ class AcaoSerializer(serializers.ModelSerializer):
 class AlvaraSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
 
     class Meta:
         model = Alvara
@@ -283,6 +309,7 @@ class AlvaraSerializer(serializers.ModelSerializer):
             'observacoes',
             'status', 
             'anexo',
+            'anexos',
             'diretorio', 
             'diretorio_detalhes',
             'empresa_grupo',
@@ -298,6 +325,7 @@ class AlvaraSerializer(serializers.ModelSerializer):
 class ProcuracaoSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
 
     class Meta:
         model = Procuracao
@@ -314,7 +342,8 @@ class ProcuracaoSerializer(serializers.ModelSerializer):
             'data_fim', 
             'vigencia',
             'status', 
-            'anexo', 
+            'anexo',
+            'anexos',
             'diretorio', 
             'diretorio_detalhes',
             'empresa_grupo',
@@ -330,6 +359,7 @@ class ProcuracaoSerializer(serializers.ModelSerializer):
 class PatrimonialSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
 
     class Meta:
         model = Patrimonial
@@ -375,6 +405,7 @@ class PatrimonialSerializer(serializers.ModelSerializer):
             'observacoes',
             'status', 
             'anexo', 
+            'anexos',
             'diretorio', 
             'diretorio_detalhes',
             'empresa_grupo',
