@@ -1,4 +1,5 @@
 from rest_framework import viewsets
+from django.contrib.contenttypes.models import ContentType
 from gestaoDocumentos.models import Atas, Diretorio, Contrato, DocumentoAnexo, ProcessoExterno, Acao, Alvara, ProcessoInterno, Procuracao, Patrimonial, Seguro, Societario, Veiculo
 from gestaoDocumentos.serializers import (
     AtasSerializer,
@@ -19,9 +20,11 @@ from gestaoDocumentos.serializers import (
 
 def _salvar_anexos(request, instance):
     """Salva os arquivos enviados como 'novos_anexos' vinculando ao objeto."""
+    ct = ContentType.objects.get_for_model(instance)
     for arquivo in request.FILES.getlist('novos_anexos'):
         DocumentoAnexo.objects.create(
-            content_object=instance,
+            content_type=ct,
+            object_id=instance.pk,
             arquivo=arquivo,
             nome_original=arquivo.name,
             created_by=request.data.get('created_by') or request.data.get('updated_by', '')
