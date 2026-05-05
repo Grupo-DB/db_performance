@@ -22,7 +22,7 @@ class KanbanColumnViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return KanbanColumn.objects.filter(
             usuario=self.request.user
-        ).prefetch_related('tasks__responsavel', 'tasks__dono')
+        ).prefetch_related('tasks','tasks__responsavel', 'tasks__dono','tasks__anexos')
 
     def perform_create(self, serializer):
         serializer.save(usuario=self.request.user)
@@ -82,7 +82,11 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
             responsavel=request.user
         ).exclude(
             coluna__usuario=request.user
-        ).select_related('dono', 'responsavel', 'coluna')
+        ).select_related(
+        'dono', 'responsavel', 'coluna'
+        ).prefetch_related(
+        'anexos',  # ← iarantir este
+        )
         return Response(KanbanTaskSerializer(tasks, many=True, context={'request': request}).data)
     
 class KanbanAnexoViewSet(viewsets.ModelViewSet):

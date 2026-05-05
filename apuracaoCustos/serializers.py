@@ -13,7 +13,7 @@ class LocalSerializer(serializers.ModelSerializer):
             'consumo', 
             'producao', 
             'produtividade', 
-            'custo'
+            #'custo'
         ]
 
 class RoyaltySerializer(serializers.ModelSerializer):
@@ -37,7 +37,8 @@ class FaturaSerializer(serializers.ModelSerializer):
         fields = [
             'id', 
             'periodo', 
-            'fornecedor', 
+            #'fornecedor', 
             'total_servico', 
-            'total_produto'
+            'total_produto',
+            'total_geral'
         ]   

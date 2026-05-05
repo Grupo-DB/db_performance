@@ -7,6 +7,13 @@ class UserMinSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'first_name', 'last_name']
 
+class KanbanAnexoSerializer(serializers.ModelSerializer):
+    arquivo = serializers.FileField(use_url=True)
+
+    class Meta:
+        model  = KanbanAnexo
+        fields = ['id', 'nome', 'arquivo', 'tamanho', 'criado_em']
+        read_only_fields = ['id', 'nome', 'tamanho', 'criado_em']
 
 class KanbanTaskSerializer(serializers.ModelSerializer):
     dono = UserMinSerializer(read_only=True)
@@ -19,15 +26,15 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
         queryset=KanbanColumn.objects.all(), source='coluna', write_only=True
     )
     esta_atrasada = serializers.SerializerMethodField()
-
+    anexos = KanbanAnexoSerializer(many=True, read_only=True)
     class Meta:
         model = KanbanTask
         fields = [
             'id', 'coluna_id', 'dono', 'responsavel', 'responsavel_id',
             'titulo', 'descricao', 'prioridade', 'tags',
-            'data_inicio', 'prazo', 'concluido_em',
+            'data_inicio', 'prazo', 'concluido_em','anexos',
             'esta_atrasada', 'criado_em', 'atualizado_em','recorrente', 'recorrencia',
-            'anexos',
+            
         ]
         read_only_fields = ['dono', 'criado_em', 'atualizado_em']
 
@@ -54,11 +61,4 @@ class KanbanColumnSerializer(serializers.ModelSerializer):
         read_only_fields = ['criado_em']
 
 
-class KanbanAnexoSerializer(serializers.ModelSerializer):
-    arquivo = serializers.FileField(use_url=True)
-
-    class Meta:
-        model  = KanbanAnexo
-        fields = ['id', 'nome', 'arquivo', 'tamanho', 'criado_em']
-        read_only_fields = ['id', 'nome', 'tamanho', 'criado_em']
 
