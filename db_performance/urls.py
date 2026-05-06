@@ -34,6 +34,7 @@ urlpatterns = [
     path('kanban/', include('kanban.urls')),
     path('gestaoDocumentos/', include('gestaoDocumentos.urls')),
     path('apuracaoCustos/', include('apuracaoCustos.urls')),
+    path('reservas/', include('reservas.urls')),
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

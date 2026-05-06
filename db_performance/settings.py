@@ -89,7 +89,8 @@ INSTALLED_APPS = [
     'horasExtras.registros',
     'kanban',
     'apuracaoCustos',
-    'gestaoDocumentos'
+    'gestaoDocumentos',
+    'reservas'
 ]
 
 MIDDLEWARE = [
