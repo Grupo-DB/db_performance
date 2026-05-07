@@ -9,4 +9,14 @@ class ObjetoSerializer(serializers.ModelSerializer):
 class ReservaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Reserva
-        fields = ['id', 'objeto', 'data_inicio', 'hora_inicio', 'data_fim', 'hora_fim', 'responsavel', 'observacoes']  
+        fields = [
+            'id', 
+            'objeto', 
+            'data_inicio', 
+            'hora_inicio', 
+            'data_fim', 
+            'hora_fim', 
+            'tempo_total',
+            'responsavel', 
+            'observacoes'
+        ]  

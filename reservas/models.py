@@ -18,6 +18,7 @@ class Reserva(models.Model):
     hora_inicio = models.TimeField(null=False, blank=False)
     data_fim = models.DateField(null=False, blank=False)
     hora_fim = models.TimeField(null=False, blank=False)
+    tempo_total = models.CharField(max_length=455, null=True, blank=True)
     responsavel = models.CharField(max_length=455, null=False, blank=False)
     observacoes = models.TextField(null=True, blank=True)
     class Meta:
