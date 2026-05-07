@@ -7,6 +7,7 @@ class DocumentoAnexoSerializer(serializers.ModelSerializer):
         fields = ['id', 'arquivo', 'nome_original', 'created_at', 'created_by']
 
 class DespesaSerializer(serializers.ModelSerializer):
+    anexos = DocumentoAnexoSerializer(many=True, read_only=True)
     class Meta:
         model = Despesa
         fields = [
