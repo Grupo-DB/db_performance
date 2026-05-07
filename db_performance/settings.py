@@ -90,7 +90,8 @@ INSTALLED_APPS = [
     'kanban',
     'apuracaoCustos',
     'gestaoDocumentos',
-    'reservas'
+    'reservas',
+    'despesas'
 ]
 
 MIDDLEWARE = [
