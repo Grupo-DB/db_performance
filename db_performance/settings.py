@@ -91,7 +91,8 @@ INSTALLED_APPS = [
     'apuracaoCustos',
     'gestaoDocumentos',
     'reservas',
-    'despesas'
+    'despesas',
+    'comissoes'
 ]
 
 MIDDLEWARE = [
