@@ -31,6 +31,7 @@ class Meta(models.Model):
     regiao = models.ForeignKey(Regiao, on_delete=models.RESTRICT, related_name='regiao_meta', null=True, blank=True)
     representante = models.ForeignKey(Representante, on_delete=models.RESTRICT, related_name='representante_meta', null=True, blank=True)
     segmento = models.CharField(max_length=455, null=True, blank=True)
+    grupo = models.CharField(max_length=50, null=True, blank=True)
     valor = models.DecimalField(max_digits=10, decimal_places=2)
     periodo = models.CharField(max_length=455, null=True, blank=True)
     data_meta = models.DateField(null=True, blank=True)
