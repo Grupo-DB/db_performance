@@ -41,6 +41,25 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(dono=self.request.user)
 
+    def perform_update(self, serializer):
+        # dono nunca deve mudar após a criação
+        serializer.save(dono=serializer.instance.dono)
+
+    def update(self, request, *args, **kwargs):
+        kwargs['partial'] = True  # aceita PATCH parcial
+        task = self.get_object()
+
+        # Responsável (não-dono) não pode alterar a coluna da tarefa
+        if task.dono != request.user:
+            data = request.data.copy()
+            data.pop('coluna_id', None)
+            serializer = self.get_serializer(task, data=data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            return Response(serializer.data)
+
+        return super().update(request, *args, **kwargs)
+
     @action(detail=True, methods=['patch'], url_path='mover')
     def mover_coluna(self, request, pk=None):
         """Move a tarefa para outra coluna (drag & drop)."""
@@ -70,7 +89,6 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
         except User.DoesNotExist:
             return Response({'detail': 'Usuário não encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        #task.responsavel = responsavel
         task.responsavel = User.objects.get(pk=responsavel_id) if responsavel_id else None
         task.save()
         return Response(KanbanTaskSerializer(task, context={'request': request}).data)
