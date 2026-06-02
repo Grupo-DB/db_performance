@@ -38,6 +38,39 @@ connection_string = 'mssql+pyodbc://DBCONSULTA:%21%40%23123qweQWE@172.10.27.51:1
 
 # Cria a engine
 engine = create_engine(connection_string)
+@csrf_exempt
+@api_view(['POST'])
+def consulta_canceladas(request):
+    dataInicio = request.data.get('dataInicio')
+    dataFim = request.data.get('dataFim')
+    consulta_canceladas = pd.read_sql(f"""
+        SELECT CASE
+            WHEN NFFIL = 0 THEN EMPSIGLA
+            ELSE (SELECT FILSIGLA FROM FILIAL WHERE FILCOD = NFFIL)
+            END EMPRESA, NFEMP + NFFIL CODEMP, 
+            NFCOD, NFDATA, NFNUM, SDSSERIE, CLINOME, DECHAVE, DEDATAPROCCANC, DEPROTOCOLOCANC, CLICOD,
+            CASE
+            WHEN DESIT = 4 THEN 'DENEGADO'
+            WHEN DESIT = 5 THEN 'CANCELADO'
+            END SIT,
+
+            (SELECT REPNOME FROM REPRESENTANTE WHERE REPCOD = NF.NFREP) REPRESENTANTE,
+            (SELECT NOPNOME FROM NATUREZAOPERACAO WHERE NOPCOD = NF.NFNOP) NATUREZA
+
+            FROM NOTAFISCAL NF
+            JOIN ITEMNOTAFISCAL ON INFNFCOD = NFCOD
+            LEFT JOIN CLIENTE ON CLICOD = NFCLI 
+            LEFT JOIN DOCUMENTOELETRONICO ON DEREF = NFCOD 
+            LEFT JOIN SERIEDOCSAIDA ON SDSCOD = NFSNF
+            LEFT JOIN EMPRESA ON EMPCOD = NFEMP
+
+            WHERE NFSIT = 2 
+            AND SDSNFPROD = 'S' AND SDSELETRONICO = 'S'
+            AND DESIT IN (4, 5)
+            AND CAST(NFDATA AS DATE) BETWEEN '{dataInicio}' AND '{dataFim}'
+        ORDER BY EMPRESA, SDSSERIE, NFDATA, NFNUM
+    """, engine)                                      
+
 
 @csrf_exempt
 @api_view(['POST'])
@@ -349,7 +382,32 @@ def calculos_comissoes(request):
 
     ORDER BY 2, 3, 4
                                 """, engine)
-    
+
+    # ── Filtragem de notas canceladas/denegadas do mês anterior ─────────────
+    import datetime as _dt_mod
+    _dt_inicio_canc = _dt_mod.datetime.strptime(dataInicio, '%Y-%m-%d').date()
+    _ultimo_dia_mes_ant = _dt_inicio_canc.replace(day=1) - _dt_mod.timedelta(days=1)
+    _canc_inicio = _ultimo_dia_mes_ant.replace(day=1).strftime('%Y-%m-%d')
+    _canc_fim    = _ultimo_dia_mes_ant.strftime('%Y-%m-%d')
+
+    df_canceladas_mes_ant = pd.read_sql(f"""
+        SELECT DISTINCT NFNUM
+        FROM NOTAFISCAL NF
+        JOIN ITEMNOTAFISCAL ON INFNFCOD = NFCOD
+        LEFT JOIN DOCUMENTOELETRONICO ON DEREF = NFCOD
+        LEFT JOIN SERIEDOCSAIDA ON SDSCOD = NFSNF
+        WHERE NFSIT = 2
+          AND SDSNFPROD = 'S' AND SDSELETRONICO = 'S'
+          AND DESIT IN (4, 5)
+          AND CAST(NFDATA AS DATE) BETWEEN '{_canc_inicio}' AND '{_canc_fim}'
+    """, engine)
+
+    _nfnum_cancelados = set(df_canceladas_mes_ant['NFNUM'].dropna())
+    _mask_canc = consulta_vendas['NOTA_FISCAL'].isin(_nfnum_cancelados)
+    _notas_removidas = consulta_vendas[_mask_canc].copy()
+    consulta_vendas  = consulta_vendas[~_mask_canc].copy()
+    # ─────────────────────────────────────────────────────────────────────────
+
     df = consulta_vendas.copy()
 
     import logging
@@ -1551,6 +1609,18 @@ def calculos_comissoes(request):
 
     _total_geral = round(sum(_resumo.values()), 2)
 
+    # Serializa as notas removidas (converte tipos não-JSON-nativos para string)
+    _cols_removidas = ['NOTA_FISCAL', 'EMPRESAFILIAL', 'DATA_EMISSAO',
+                       'REPRESENTANTE', 'CLIENTE_NOME', 'VALOR_PRODUTO']
+    _cols_removidas_ok = [c for c in _cols_removidas if c in _notas_removidas.columns]
+    _notas_removidas_lista = (
+        _notas_removidas[_cols_removidas_ok]
+        .fillna('')
+        .astype(str)
+        .to_dict(orient='records')
+        if not _notas_removidas.empty else []
+    )
+
     return JsonResponse({
         'comissoes': resultado,
         'resumo_por_vendedor': dict(sorted(_resumo.items())),
@@ -1561,4 +1631,7 @@ def calculos_comissoes(request):
         'total_agro_excl_yara': round(float(df_agro[~_mask_yara_agro]['VALOR_PRODUTO'].sum()), 2),
         'total_agro_vendas_diretas': round(float(_total_agro_vendas_diretas), 2),
         'yara_agro_liquido': round(float(df_agro[_mask_yara_agro]['VALOR_PRODUTO'].sum()), 2),
+        'notas_removidas_por_cancelamento': _notas_removidas_lista,
+        'periodo_canceladas_verificado': f"{_canc_inicio} a {_canc_fim}",
+        'qtd_notas_removidas': len(_notas_removidas_lista),
     }, safe=False)
