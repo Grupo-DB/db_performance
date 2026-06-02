@@ -2,8 +2,19 @@
 from django.db import models
 from django.contrib.auth.models import User
 
+
+class KanbanBoard(models.Model):
+    nome = models.CharField(max_length=150)
+    criado_por = models.ForeignKey(User, on_delete=models.CASCADE, related_name='quadros_criados')
+    membros = models.ManyToManyField(User, related_name='quadros_compartilhados', blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.nome
+
+
 class KanbanColumn(models.Model):
-    usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name='kanban_columns')
+    quadro = models.ForeignKey(KanbanBoard, on_delete=models.CASCADE, related_name='colunas')
     titulo = models.CharField(max_length=100)
     cor = models.CharField(max_length=20, default='#6366f1')
     ordem = models.PositiveIntegerField(default=0)
@@ -13,7 +24,7 @@ class KanbanColumn(models.Model):
         ordering = ['ordem', 'criado_em']
 
     def __str__(self):
-        return f"{self.usuario.username} - {self.titulo}"
+        return f"{self.quadro} - {self.titulo}"
 
 
 class KanbanTask(models.Model):

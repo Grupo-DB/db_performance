@@ -1,11 +1,22 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import KanbanColumn, KanbanTask, KanbanAnexo
+from .models import KanbanBoard, KanbanColumn, KanbanTask, KanbanAnexo
 
 class UserMinSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'username', 'first_name', 'last_name']
+
+
+class KanbanBoardSerializer(serializers.ModelSerializer):
+    criado_por = UserMinSerializer(read_only=True)
+    membros = UserMinSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = KanbanBoard
+        fields = ['id', 'nome', 'criado_por', 'membros', 'criado_em']
+        read_only_fields = ['criado_por', 'criado_em']
+
 
 class KanbanAnexoSerializer(serializers.ModelSerializer):
     arquivo = serializers.FileField(use_url=True)
@@ -46,19 +57,29 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
 
     def validate_coluna_id(self, coluna):
         request = self.context['request']
-        # garante que a coluna pertence ao usuário logado
-        if coluna.usuario != request.user:
-            raise serializers.ValidationError("Coluna não pertence ao usuário.")
+        board = coluna.quadro
+        # garante que o usuário é membro ou criador do board da coluna
+        if request.user != board.criado_por and not board.membros.filter(pk=request.user.pk).exists():
+            raise serializers.ValidationError("Você não é membro deste quadro.")
         return coluna
 
 
 class KanbanColumnSerializer(serializers.ModelSerializer):
     tasks = KanbanTaskSerializer(many=True, read_only=True)
+    quadro_id = serializers.PrimaryKeyRelatedField(
+        queryset=KanbanBoard.objects.all(), source='quadro', write_only=True
+    )
 
     class Meta:
         model = KanbanColumn
-        fields = ['id', 'titulo', 'cor', 'ordem', 'tasks', 'criado_em']
+        fields = ['id', 'quadro_id', 'titulo', 'cor', 'ordem', 'tasks', 'criado_em']
         read_only_fields = ['criado_em']
+
+    def validate_quadro_id(self, board):
+        request = self.context['request']
+        if request.user != board.criado_por and not board.membros.filter(pk=request.user.pk).exists():
+            raise serializers.ValidationError("Você não é membro deste quadro.")
+        return board
 
 
 

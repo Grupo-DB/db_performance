@@ -8,24 +8,68 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.contrib.auth.models import User
 from django.utils import timezone
-from .models import KanbanColumn, KanbanTask, KanbanAnexo
-from .serializer import KanbanAnexoSerializer, KanbanColumnSerializer, KanbanTaskSerializer, UserMinSerializer
+from .models import KanbanBoard, KanbanColumn, KanbanTask, KanbanAnexo
+from .serializer import (
+    KanbanBoardSerializer, KanbanAnexoSerializer,
+    KanbanColumnSerializer, KanbanTaskSerializer, UserMinSerializer,
+)
+
+
+class KanbanBoardViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = KanbanBoardSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        return KanbanBoard.objects.filter(
+            Q(criado_por=user) | Q(membros=user)
+        ).distinct().prefetch_related('membros', 'colunas__tasks')
+
+    def perform_create(self, serializer):
+        board = serializer.save(criado_por=self.request.user)
+        board.membros.add(self.request.user)
+
+    @action(detail=True, methods=['post'], url_path='adicionar-membro')
+    def adicionar_membro(self, request, pk=None):
+        board = self.get_object()
+        if board.criado_por != request.user:
+            return Response({'detail': 'Apenas o criador pode gerenciar membros.'}, status=status.HTTP_403_FORBIDDEN)
+        user_id = request.data.get('user_id')
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return Response({'detail': 'Usuário não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        board.membros.add(user)
+        return Response(KanbanBoardSerializer(board, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='remover-membro')
+    def remover_membro(self, request, pk=None):
+        board = self.get_object()
+        if board.criado_por != request.user:
+            return Response({'detail': 'Apenas o criador pode gerenciar membros.'}, status=status.HTTP_403_FORBIDDEN)
+        user_id = request.data.get('user_id')
+        if str(user_id) == str(board.criado_por.pk):
+            return Response({'detail': 'O criador não pode ser removido.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return Response({'detail': 'Usuário não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        board.membros.remove(user)
+        return Response(KanbanBoardSerializer(board, context={'request': request}).data)
 
 
 class KanbanColumnViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = KanbanColumnSerializer
 
-    # def get_queryset(self):
-    #     return KanbanColumn.objects.filter(usuario=self.request.user).prefetch_related('tasks')
-
     def get_queryset(self):
+        user = self.request.user
         return KanbanColumn.objects.filter(
-            usuario=self.request.user
-        ).prefetch_related('tasks','tasks__responsavel', 'tasks__dono','tasks__anexos')
+            Q(quadro__criado_por=user) | Q(quadro__membros=user)
+        ).distinct().prefetch_related('tasks', 'tasks__responsavel', 'tasks__dono', 'tasks__anexos')
 
     def perform_create(self, serializer):
-        serializer.save(usuario=self.request.user)
+        serializer.save()
 
 
 class KanbanTaskViewSet(viewsets.ModelViewSet):
@@ -35,8 +79,10 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         return KanbanTask.objects.filter(
-            Q(coluna__usuario=user) | Q(responsavel=user)
-        ).select_related('dono', 'responsavel', 'coluna')
+            Q(coluna__quadro__criado_por=user) |
+            Q(coluna__quadro__membros=user) |
+            Q(responsavel=user)
+        ).distinct().select_related('dono', 'responsavel', 'coluna', 'coluna__quadro')
 
     def perform_create(self, serializer):
         serializer.save(dono=self.request.user)
@@ -66,7 +112,10 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
         task = self.get_object()
         coluna_id = request.data.get('coluna_id')
         try:
-            coluna = KanbanColumn.objects.get(pk=coluna_id, usuario=request.user)
+            coluna = KanbanColumn.objects.get(pk=coluna_id)
+            board = coluna.quadro
+            if request.user != board.criado_por and not board.membros.filter(pk=request.user.pk).exists():
+                raise KanbanColumn.DoesNotExist
         except KanbanColumn.DoesNotExist:
             return Response({'detail': 'Coluna inválida.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -95,15 +144,15 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='recebidas')
     def recebidas(self, request):
-        """Tarefas transferidas para o usuário atual (não são de suas próprias colunas)."""
+        """Tarefas transferidas para o usuário atual (não são de quadros onde ele é criador)."""
         tasks = KanbanTask.objects.filter(
             responsavel=request.user
         ).exclude(
-            coluna__usuario=request.user
+            Q(coluna__quadro__criado_por=request.user)
         ).select_related(
         'dono', 'responsavel', 'coluna'
         ).prefetch_related(
-        'anexos',  # ← iarantir este
+        'anexos',
         )
         return Response(KanbanTaskSerializer(tasks, many=True, context={'request': request}).data)
     
@@ -114,13 +163,17 @@ class KanbanAnexoViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return KanbanAnexo.objects.filter(
             tarefa_id=self.kwargs['tarefa_pk'],
-            tarefa__dono=self.request.user   # segurança
-        )
+        ).filter(
+            Q(tarefa__coluna__quadro__criado_por=self.request.user) |
+            Q(tarefa__coluna__quadro__membros=self.request.user)
+        ).distinct()
 
     def perform_create(self, serializer):
-        tarefa = get_object_or_404(
-            KanbanTask, pk=self.kwargs['tarefa_pk'], dono=self.request.user
-        )
+        tarefa = get_object_or_404(KanbanTask, pk=self.kwargs['tarefa_pk'])
+        board = tarefa.coluna.quadro
+        if self.request.user != board.criado_por and not board.membros.filter(pk=self.request.user.pk).exists():
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Você não é membro deste quadro.")
         f = self.request.FILES.get('arquivo')
         serializer.save(
             tarefa=tarefa,
