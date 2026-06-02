@@ -64,9 +64,13 @@ class KanbanColumnViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        return KanbanColumn.objects.filter(
+        qs = KanbanColumn.objects.filter(
             Q(quadro__criado_por=user) | Q(quadro__membros=user)
         ).distinct().prefetch_related('tasks', 'tasks__responsavel', 'tasks__dono', 'tasks__anexos')
+        quadro_id = self.request.query_params.get('quadro_id')
+        if quadro_id:
+            qs = qs.filter(quadro_id=quadro_id)
+        return qs
 
     def perform_create(self, serializer):
         serializer.save()
