@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404
 from django.db.models import Q
 # Create your views here.
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -184,3 +184,11 @@ class KanbanAnexoViewSet(viewsets.ModelViewSet):
             nome=f.name if f else '',
             tamanho=f.size if f else None
         )
+
+@api_view(['POST'])
+def reordenar_listas(request):
+    quadro_id = request.data.get('quadro_id')
+    ordem = request.data.get('ordem', [])  # [{ id, ordem }]
+    for item in ordem:
+        KanbanColumn.objects.filter(pk=item['id'], quadro_id=quadro_id).update(ordem=item['ordem'])
+    return Response({'ok': True})
