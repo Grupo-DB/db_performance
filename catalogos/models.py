@@ -92,25 +92,32 @@ class Secao(models.Model):
         return self.nome
 
 
-class Produto(models.Model):
+class Item(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=455, null=False, blank=False)
+    apelido = models.CharField(max_length=255, blank=True, null=True)
     descricao = models.TextField(blank=True, null=True)
-    veiculo = models.ForeignKey(Veiculo, on_delete=models.CASCADE, related_name='produtos', null=True, blank=True)
-    secao = models.ForeignKey(Secao, on_delete=models.RESTRICT, related_name='produtos', null=True, blank=True)
+    veiculo = models.ForeignKey(Veiculo, on_delete=models.CASCADE, related_name='itens', null=True, blank=True)
+    secao = models.ForeignKey(Secao, on_delete=models.RESTRICT, related_name='itens', null=True, blank=True)
     preco = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    cod_catalogo = models.CharField(max_length=100, blank=True, null=True, unique=True)
+    cod_minerion = models.CharField(max_length=100, blank=True, null=True, unique=True)
+    referencia = models.CharField(max_length=255, blank=True, null=True)
+    localizacao = models.CharField(max_length=255, blank=True, null=True)
     image = models.FileField(upload_to=upload_image_produto, blank=True, null=True)
     ativo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = 'Produto'
-        verbose_name_plural = 'Produtos'
+        verbose_name = 'Item'
+        verbose_name_plural = 'Itens'
         ordering = ['nome']
         indexes = [
             models.Index(fields=['veiculo', 'ativo']),
             models.Index(fields=['secao', 'ativo']),
+            models.Index(fields=['cod_catalogo']),
+            models.Index(fields=['cod_minerion']),
         ]
 
     def __str__(self):
@@ -159,8 +166,8 @@ class Pedido(models.Model):
 
 class ItemPedido(models.Model):
     id = models.AutoField(primary_key=True)
-    pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE, related_name='itens')
-    produto = models.ForeignKey(Produto, on_delete=models.RESTRICT)
+    pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE, related_name='itens_pedido')
+    item = models.ForeignKey(Item, on_delete=models.RESTRICT, null=True, blank=True)
     quantidade = models.PositiveIntegerField(validators=[MinValueValidator(1)])
     preco_unitario = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     created_at = models.DateTimeField(auto_now_add=True)
@@ -169,13 +176,13 @@ class ItemPedido(models.Model):
     class Meta:
         verbose_name = 'Item do Pedido'
         verbose_name_plural = 'Itens do Pedido'
-        unique_together = [['pedido', 'produto']]
+        unique_together = [['pedido', 'item']]
         indexes = [
-            models.Index(fields=['pedido', 'produto']),
+            models.Index(fields=['pedido', 'item']),
         ]
 
     def __str__(self):
-        return f"{self.produto.nome} x{self.quantidade}"
+        return f"{self.item.nome} x{self.quantidade}"
 
     @property
     def subtotal(self):

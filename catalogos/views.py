@@ -5,11 +5,11 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import Fabricante, Equipamento, Veiculo, Secao, Produto, Pedido, ItemPedido, PedidoNotificacao
+from .models import Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, PedidoNotificacao
 from .serializers import (
     FabricanteSerializer, EquipamentoSerializer, VeiculoListSerializer, VeiculoDetailSerializer,
     VeiculoCreateUpdateSerializer, SecaoSerializer, SecaoCreateUpdateSerializer,
-    ProdutoListSerializer, ProdutoDetailSerializer, ProdutoCreateUpdateSerializer,
+    ItemListSerializer, ItemDetailSerializer, ItemCreateUpdateSerializer,
     PedidoListSerializer, PedidoDetailSerializer, PedidoCreateSerializer,
     PedidoUpdateStatusSerializer, PedidoNotificacaoSerializer
 )
@@ -62,20 +62,20 @@ class SecaoViewSet(viewsets.ModelViewSet):
         return SecaoSerializer
 
 
-class ProdutoViewSet(viewsets.ModelViewSet):
-    queryset = Produto.objects.all()
+class ItemViewSet(viewsets.ModelViewSet):
+    queryset = Item.objects.all()
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['veiculo', 'secao', 'ativo']
-    search_fields = ['nome', 'descricao']
+    search_fields = ['nome', 'apelido', 'descricao', 'cod_catalogo', 'cod_minerion', 'referencia']
     ordering_fields = ['nome', 'preco', 'created_at']
     ordering = ['nome']
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
-            return ProdutoDetailSerializer
+            return ItemDetailSerializer
         elif self.action in ['create', 'update', 'partial_update']:
-            return ProdutoCreateUpdateSerializer
-        return ProdutoListSerializer
+            return ItemCreateUpdateSerializer
+        return ItemListSerializer
 
 
 class PedidoViewSet(viewsets.ModelViewSet):

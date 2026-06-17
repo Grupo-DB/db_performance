@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Fabricante, Equipamento, Veiculo, Secao, Produto, Pedido, ItemPedido, PedidoNotificacao
+from .models import Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, PedidoNotificacao
 
 
 @admin.register(Fabricante)
@@ -32,11 +32,11 @@ class SecaoAdmin(admin.ModelAdmin):
     ordering = ('-created_at',)
 
 
-@admin.register(Produto)
-class ProdutoAdmin(admin.ModelAdmin):
-    list_display = ('nome', 'veiculo', 'secao', 'preco', 'ativo', 'created_at')
+@admin.register(Item)
+class ItemAdmin(admin.ModelAdmin):
+    list_display = ('nome', 'apelido', 'cod_catalogo', 'cod_minerion', 'veiculo', 'secao', 'preco', 'ativo', 'created_at')
     list_filter = ('veiculo', 'secao', 'ativo', 'created_at')
-    search_fields = ('nome', 'descricao')
+    search_fields = ('nome', 'apelido', 'descricao', 'cod_catalogo', 'cod_minerion', 'referencia')
     ordering = ('-created_at',)
 
 
@@ -50,9 +50,9 @@ class PedidoAdmin(admin.ModelAdmin):
 
 @admin.register(ItemPedido)
 class ItemPedidoAdmin(admin.ModelAdmin):
-    list_display = ('pedido', 'produto', 'quantidade', 'preco_unitario', 'subtotal', 'created_at')
+    list_display = ('pedido', 'item', 'quantidade', 'preco_unitario', 'subtotal', 'created_at')
     list_filter = ('pedido', 'created_at')
-    search_fields = ('pedido__numero_referencia', 'produto__nome')
+    search_fields = ('pedido__numero_referencia', 'item__nome')
     ordering = ('-created_at',)
 
 

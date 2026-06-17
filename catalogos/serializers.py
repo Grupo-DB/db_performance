@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from decimal import Decimal
 
-from .models import Fabricante, Equipamento, Veiculo, Secao, Produto, Pedido, ItemPedido, PedidoNotificacao
+from .models import Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, PedidoNotificacao
 
 
 class FabricanteSerializer(serializers.ModelSerializer):
@@ -60,38 +60,38 @@ class SecaoCreateUpdateSerializer(serializers.ModelSerializer):
         fields = ['nome', 'veiculo', 'descricao', 'ativo']
 
 
-class ProdutoListSerializer(serializers.ModelSerializer):
+class ItemListSerializer(serializers.ModelSerializer):
     veiculo = VeiculoListSerializer(read_only=True)
     secao = SecaoSerializer(read_only=True)
 
     class Meta:
-        model = Produto
-        fields = ['id', 'nome', 'descricao', 'veiculo', 'secao', 'preco', 'image', 'ativo']
+        model = Item
+        fields = ['id', 'nome', 'apelido', 'descricao', 'veiculo', 'secao', 'preco', 'cod_catalogo', 'cod_minerion', 'referencia', 'localizacao', 'image', 'ativo']
 
 
-class ProdutoDetailSerializer(serializers.ModelSerializer):
+class ItemDetailSerializer(serializers.ModelSerializer):
     veiculo = VeiculoDetailSerializer(read_only=True)
     secao = SecaoSerializer(read_only=True)
 
     class Meta:
-        model = Produto
-        fields = ['id', 'nome', 'descricao', 'veiculo', 'secao', 'preco', 'image', 'ativo', 'created_at', 'updated_at']
+        model = Item
+        fields = ['id', 'nome', 'apelido', 'descricao', 'veiculo', 'secao', 'preco', 'cod_catalogo', 'cod_minerion', 'referencia', 'localizacao', 'image', 'ativo', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
 
-class ProdutoCreateUpdateSerializer(serializers.ModelSerializer):
+class ItemCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Produto
-        fields = ['nome', 'descricao', 'veiculo', 'secao', 'preco', 'image', 'ativo']
+        model = Item
+        fields = ['nome', 'apelido', 'descricao', 'veiculo', 'secao', 'preco', 'cod_catalogo', 'cod_minerion', 'referencia', 'localizacao', 'image', 'ativo']
 
 
 class ItemPedidoDetailSerializer(serializers.ModelSerializer):
-    produto = ProdutoListSerializer(read_only=True)
+    item = ItemListSerializer(read_only=True)
     subtotal = serializers.SerializerMethodField()
 
     class Meta:
         model = ItemPedido
-        fields = ['id', 'produto', 'quantidade', 'preco_unitario', 'subtotal', 'created_at', 'updated_at']
+        fields = ['id', 'item', 'quantidade', 'preco_unitario', 'subtotal', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
     def get_subtotal(self, obj):
@@ -101,7 +101,7 @@ class ItemPedidoDetailSerializer(serializers.ModelSerializer):
 class ItemPedidoWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = ItemPedido
-        fields = ['produto', 'quantidade', 'preco_unitario']
+        fields = ['item', 'quantidade', 'preco_unitario']
 
     def validate_quantidade(self, value):
         if value < 1:
