@@ -158,7 +158,7 @@ class Pedido(models.Model):
         return f"Pedido {self.numero_referencia} - {self.usuario.username}"
 
     def calcular_total(self):
-        total = sum(item.subtotal for item in self.itens.all())
+        total = sum(item.subtotal for item in self.itens_pedido.all())
         self.total = total
         self.save(update_fields=['total'])
         return total
