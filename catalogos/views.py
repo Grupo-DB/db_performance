@@ -15,7 +15,7 @@ from .serializers import (
 )
 
 
-class FabricanteViewSet(viewsets.ReadOnlyModelViewSet):
+class FabricanteViewSet(viewsets.ModelViewSet):
     queryset = Fabricante.objects.all()
     serializer_class = FabricanteSerializer
     filter_backends = [SearchFilter, OrderingFilter]
