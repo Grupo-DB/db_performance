@@ -11,7 +11,7 @@ Fabricante (ex: Ford, Mercedes, Volvo)
   └─ Veículo (ex: Ranger, Sprinter, FH)
        ├─ Equipamento (ex: Caminhão, Carro, Máquina)
        └─ Seção (ex: Motor, Transmissão, Suspensão)
-            └─ Produto (ex: Amortecedor, Rolamento, Corrente)
+            └─ Item (ex: Amortecedor, Rolamento, Corrente)
 ```
 
 ---
@@ -24,9 +24,9 @@ Fabricante (ex: Ford, Mercedes, Volvo)
 | `Equipamento` | id, nome, descricao, ativo, created_at, updated_at | 1:N com Veículo |
 | `Veículo` | id, nome, modelo, descricao, ativo, created_at, updated_at | FK: Fabricante, Equipamento |
 | `Seção` | id, nome, descricao, ativo, created_at, updated_at | FK: Veículo |
-| `Produto` | id, nome, descricao, preco, image, ativo, created_at, updated_at | FK: Veículo, Seção |
+| `Item` | id, nome, apelido, descricao, preco, cod_catalogo, cod_minerion, referencia, localizacao, image, ativo, created_at, updated_at | FK: Veículo, Seção |
 | `Pedido` | id, numero_referencia, status, total, observacoes, created_at, updated_at | FK: User |
-| `ItemPedido` | id, quantidade, preco_unitario, created_at, updated_at | FK: Pedido, Produto |
+| `ItemPedido` | id, quantidade, preco_unitario, created_at, updated_at | FK: Pedido, Item |
 | `PedidoNotificacao` | id, tipo, mensagem, lido, created_at | FK: Pedido, User |
 
 ---
@@ -130,31 +130,36 @@ DELETE /api/secoes/{id}/                    # Deletar
 
 ---
 
-### 5. Produtos (CRUD)
+### 5. Itens (CRUD)
 ```
-GET    /api/produtos/                       # Listar
-POST   /api/produtos/                       # Criar
-GET    /api/produtos/{id}/                  # Detalhe
-PUT    /api/produtos/{id}/                  # Atualizar
-PATCH  /api/produtos/{id}/                  # Parcial
-DELETE /api/produtos/{id}/                  # Deletar
+GET    /api/itens/                          # Listar
+POST   /api/itens/                          # Criar
+GET    /api/itens/{id}/                     # Detalhe
+PUT    /api/itens/{id}/                     # Atualizar
+PATCH  /api/itens/{id}/                     # Parcial
+DELETE /api/itens/{id}/                     # Deletar
 ```
 
 **Filtros:**
 - `veiculo={id}`
 - `secao={id}`
 - `ativo=true` ou `ativo=false`
-- `search=Amortecedor`
+- `search=Amortecedor` (busca em nome, apelido, descricao, cod_catalogo, cod_minerion, referencia)
 - `ordering=nome` ou `ordering=preco` ou `ordering=-created_at`
 
 **Payload:**
 ```json
 {
   "nome": "Amortecedor Dianteiro",
+  "apelido": "Amort Diant",
   "descricao": "Amortecedor original",
   "veiculo": 1,
   "secao": 1,
   "preco": "450.00",
+  "cod_catalogo": "AMD-001",
+  "cod_minerion": "MIN-001",
+  "referencia": "REF-MD-001",
+  "localizacao": "Prateleira A1",
   "image": "arquivo.jpg",
   "ativo": true
 }
@@ -237,9 +242,9 @@ GET    /api/notificacoes/nao_lidas/        # Contar não lidas
 
 ## 📊 Exemplo de Fluxo Completo
 
-### 1. Cliente busca produtos
+### 1. Cliente busca itens
 ```bash
-GET /api/produtos/?veiculo=1&secao=1
+GET /api/itens/?veiculo=1&secao=1
 ```
 
 ### 2. Cliente cria pedido
@@ -248,7 +253,7 @@ POST /api/pedidos/
 {
   "observacoes": "Urgente",
   "itens": [
-    {"produto": 1, "quantidade": 2, "preco_unitario": "450.00"}
+    {"item": 1, "quantidade": 2, "preco_unitario": "450.00"}
   ]
 }
 ```
@@ -262,10 +267,10 @@ POST /api/pedidos/
   "status": "RASCUNHO",
   "total": "900.00",
   "observacoes": "Urgente",
-  "itens": [
+  "itens_pedido": [
     {
       "id": 1,
-      "produto": {...},
+      "item": {...},
       "quantidade": 2,
       "preco_unitario": "450.00",
       "subtotal": "900.00"
@@ -335,5 +340,7 @@ Incluir header em endpoints autenticados:
 ---
 
 **Atualizado em:** 2026-06-17  
-**Versão:** 2.0 - Com hierarquia completa
-**Commit:** d3f19f85
+**Versão:** 2.1 - Item com novos campos
+**Commits:**
+- `d3f19f85` - Hierarquia de modelos
+- `a3e62a1a` - Produto → Item + novos campos
