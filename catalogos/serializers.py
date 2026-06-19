@@ -185,14 +185,14 @@ class PedidoDetailSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     solicitante_nome = serializers.SerializerMethodField(read_only=True)
     responsavel_nome = serializers.SerializerMethodField(read_only=True)
-    itens = ItemPedidoDetailSerializer(read_only=True, many=True)
+    itens_pedido = ItemPedidoDetailSerializer(read_only=True, many=True)
 
     class Meta:
         model = Pedido
         fields = [
             'id', 'numero_referencia', 'status', 'status_display',
             'solicitante_nome', 'responsavel', 'responsavel_nome',
-            'total', 'observacoes', 'motivo_rejeicao', 'itens',
+            'total', 'observacoes', 'motivo_rejeicao', 'itens_pedido',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['numero_referencia', 'total', 'created_at', 'updated_at']
