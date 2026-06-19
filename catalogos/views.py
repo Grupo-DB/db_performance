@@ -1,6 +1,7 @@
 import base64
 from io import BytesIO
 
+import django_filters
 import pandas as pd
 from sqlalchemy import create_engine, text
 
@@ -308,9 +309,17 @@ def _processar_notificacoes(pedido, novo_status, motivo=None):
 # ViewSets de Pedido
 # ---------------------------------------------------------------------------
 
+class PedidoFilter(django_filters.FilterSet):
+    usuario = django_filters.NumberFilter(field_name='usuario__id')
+
+    class Meta:
+        model = Pedido
+        fields = ['status', 'usuario']
+
+
 class PedidoViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['status', 'usuario', 'created_at']
+    filterset_class = PedidoFilter
     ordering_fields = ['created_at', 'numero_referencia', 'status']
     ordering = ['-created_at']
     permission_classes = [IsAuthenticated]
