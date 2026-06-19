@@ -72,8 +72,8 @@ class KanbanColumnSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = KanbanColumn
-        fields = ['id', 'quadro_id', 'titulo', 'cor', 'ordem', 'tasks', 'criado_em']
-        read_only_fields = ['criado_em']
+        fields = ['id', 'quadro_id', 'titulo', 'cor', 'ordem', 'is_concluida', 'tasks', 'criado_em']
+        read_only_fields = ['criado_em', 'is_concluida']
 
     def validate_quadro_id(self, board):
         request = self.context['request']

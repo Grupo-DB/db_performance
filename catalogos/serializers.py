@@ -2,7 +2,10 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from decimal import Decimal
 
-from .models import Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, PedidoNotificacao
+from .models import (
+    Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, PedidoNotificacao,
+    CatalogoPDF, ItemErpCatalogo,
+)
 
 
 class FabricanteSerializer(serializers.ModelSerializer):
@@ -88,20 +91,36 @@ class ItemCreateUpdateSerializer(serializers.ModelSerializer):
 class ItemPedidoDetailSerializer(serializers.ModelSerializer):
     item = ItemListSerializer(read_only=True)
     subtotal = serializers.SerializerMethodField()
+    nome_exibicao = serializers.SerializerMethodField()
 
     class Meta:
         model = ItemPedido
-        fields = ['id', 'item', 'quantidade', 'preco_unitario', 'subtotal', 'created_at', 'updated_at']
+        fields = [
+            'id', 'item', 'cod_erp', 'nome_produto', 'nome_exibicao',
+            'quantidade', 'preco_unitario', 'subtotal', 'created_at', 'updated_at',
+        ]
         read_only_fields = ['created_at', 'updated_at']
 
     def get_subtotal(self, obj):
         return float(obj.subtotal)
 
+    def get_nome_exibicao(self, obj):
+        if obj.nome_produto:
+            return obj.nome_produto
+        if obj.item:
+            return obj.item.nome
+        return obj.cod_erp or ''
+
 
 class ItemPedidoWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = ItemPedido
-        fields = ['item', 'quantidade', 'preco_unitario']
+        fields = ['item', 'cod_erp', 'nome_produto', 'quantidade', 'preco_unitario']
+
+    def validate(self, attrs):
+        if not attrs.get('item') and not attrs.get('cod_erp'):
+            raise serializers.ValidationError("Informe 'item' (local) ou 'cod_erp' (ERP).")
+        return attrs
 
     def validate_quantidade(self, value):
         if value < 1:
@@ -112,6 +131,29 @@ class ItemPedidoWriteSerializer(serializers.ModelSerializer):
         if value < Decimal('0.01'):
             raise serializers.ValidationError("Preço deve ser maior que 0")
         return value
+
+
+class CatalogoPDFSerializer(serializers.ModelSerializer):
+    veiculo_nome = serializers.CharField(source='veiculo.__str__', read_only=True)
+
+    class Meta:
+        model = CatalogoPDF
+        fields = ['id', 'titulo', 'arquivo', 'veiculo', 'veiculo_nome', 'descricao', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class ItemErpCatalogoSerializer(serializers.ModelSerializer):
+    catalogo_titulo = serializers.CharField(source='catalogo.titulo', read_only=True)
+    catalogo_arquivo = serializers.FileField(source='catalogo.arquivo', read_only=True)
+
+    class Meta:
+        model = ItemErpCatalogo
+        fields = [
+            'id', 'cod_erp', 'nome_erp', 'cod_catalogo',
+            'catalogo', 'catalogo_titulo', 'catalogo_arquivo',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at']
 
 
 class PedidoListSerializer(serializers.ModelSerializer):

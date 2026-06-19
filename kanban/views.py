@@ -28,6 +28,13 @@ class KanbanBoardViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         board = serializer.save(criado_por=self.request.user)
         board.membros.add(self.request.user)
+        KanbanColumn.objects.create(
+            quadro=board,
+            titulo='Concluídas',
+            cor='#22c55e',
+            ordem=9999,
+            is_concluida=True,
+        )
 
     @action(detail=True, methods=['post'], url_path='adicionar-membro')
     def adicionar_membro(self, request, pk=None):
@@ -146,6 +153,49 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
         task.save()
         return Response(KanbanTaskSerializer(task, context={'request': request}).data)
     
+    @action(detail=True, methods=['patch'], url_path='concluir')
+    def concluir(self, request, pk=None):
+        """Marca a tarefa como concluída e move para a coluna Concluídas do board."""
+        task = self.get_object()
+        board = task.coluna.quadro
+
+        coluna_concluida = board.colunas.filter(is_concluida=True).first()
+        if not coluna_concluida:
+            coluna_concluida = KanbanColumn.objects.create(
+                quadro=board,
+                titulo='Concluídas',
+                cor='#22c55e',
+                ordem=9999,
+                is_concluida=True,
+            )
+
+        task.coluna = coluna_concluida
+        task.concluido_em = timezone.now()
+        task.save()
+        return Response(KanbanTaskSerializer(task, context={'request': request}).data)
+
+    @action(detail=True, methods=['patch'], url_path='reabrir')
+    def reabrir(self, request, pk=None):
+        """Remove conclusão e move a tarefa de volta para a coluna informada (ou a primeira do board)."""
+        task = self.get_object()
+        board = task.coluna.quadro
+
+        coluna_id = request.data.get('coluna_id')
+        if coluna_id:
+            try:
+                coluna = board.colunas.filter(is_concluida=False).get(pk=coluna_id)
+            except KanbanColumn.DoesNotExist:
+                return Response({'detail': 'Coluna inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            coluna = board.colunas.filter(is_concluida=False).order_by('ordem', 'criado_em').first()
+            if not coluna:
+                return Response({'detail': 'Nenhuma coluna disponível no quadro.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        task.coluna = coluna
+        task.concluido_em = None
+        task.save()
+        return Response(KanbanTaskSerializer(task, context={'request': request}).data)
+
     @action(detail=False, methods=['get'], url_path='recebidas')
     def recebidas(self, request):
         """Tarefas transferidas para o usuário atual (não são de quadros onde ele é criador)."""

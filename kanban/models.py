@@ -18,6 +18,7 @@ class KanbanColumn(models.Model):
     titulo = models.CharField(max_length=100)
     cor = models.CharField(max_length=20, default='#6366f1')
     ordem = models.PositiveIntegerField(default=0)
+    is_concluida = models.BooleanField(default=False)
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:

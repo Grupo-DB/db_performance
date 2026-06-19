@@ -326,7 +326,321 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             'total_status': total_status
         }
         return JsonResponse(response_data, safe=False)
-                
+
+    @action(detail=False, methods=['post'], url_path='filtrar-e-calcular')
+    def filtrar_e_calcular(self, request):
+        """
+        Filtra análises dinamicamente e, opcionalmente, calcula estatísticas
+        (média, máximo, mínimo) de um ensaio específico dentro das análises filtradas.
+
+        Parâmetros (POST):
+        Filtros de Analise:
+          - data_inicio / data_fim: range de datas (YYYY-MM-DD)
+          - finalizada_inicio / finalizada_fim: range de finalizada_at
+          - aprovada_inicio / aprovada_fim: range de aprovada_at
+          - finalizada: true | false
+          - aprovada: true | false
+          - laudo: true | false
+          - usada_laudo: true | false
+          - estado: string ou lista de strings
+          - laboratorio_atual: string ou lista
+          - classificacao: string
+        Filtros de Amostra (via amostra__):
+          - laboratorio: string ou lista
+          - local_coleta: string ou lista
+          - tipo_amostra: string ou lista
+          - produto_ids: lista de IDs de ProdutoAmostra
+          - material: string ou lista
+          - fornecedor: string ou lista
+          - finalidade: string ou lista
+        Estatísticas (opcionais):
+          - ensaio_id: int — filtra por ID do ensaio
+          - ensaio_nome: string — filtra por nome/descrição do ensaio (icontains)
+          - analises_excluidas: lista de IDs de análises a ignorar no cálculo
+        """
+        from django.db.models import Q
+        import json
+
+        data = request.data
+
+        # ── 1. CONSTRUÇÃO DO QUERYSET FILTRADO ──────────────────────────────
+        qs = Analise.objects.select_related('amostra', 'amostra__produto_amostra')
+
+        # Datas da análise
+        data_inicio = data.get('data_inicio')
+        data_fim = data.get('data_fim')
+        if data_inicio:
+            qs = qs.filter(data__date__gte=data_inicio)
+        if data_fim:
+            qs = qs.filter(data__date__lte=data_fim)
+
+        # Datas de finalização
+        finalizada_inicio = data.get('finalizada_inicio')
+        finalizada_fim = data.get('finalizada_fim')
+        if finalizada_inicio:
+            qs = qs.filter(finalizada_at__gte=finalizada_inicio)
+        if finalizada_fim:
+            qs = qs.filter(finalizada_at__lte=finalizada_fim)
+
+        # Datas de aprovação
+        aprovada_inicio = data.get('aprovada_inicio')
+        aprovada_fim = data.get('aprovada_fim')
+        if aprovada_inicio:
+            qs = qs.filter(aprovada_at__gte=aprovada_inicio)
+        if aprovada_fim:
+            qs = qs.filter(aprovada_at__lte=aprovada_fim)
+
+        # Booleanos
+        for campo_bool in ('finalizada', 'aprovada', 'laudo', 'usada_laudo'):
+            valor = data.get(campo_bool)
+            if valor is not None:
+                qs = qs.filter(**{campo_bool: valor})
+
+        # estado
+        estado = data.get('estado')
+        if estado:
+            if isinstance(estado, list):
+                qs = qs.filter(estado__in=estado)
+            else:
+                qs = qs.filter(estado__icontains=estado)
+
+        # laboratorio_atual
+        laboratorio_atual = data.get('laboratorio_atual')
+        if laboratorio_atual:
+            if isinstance(laboratorio_atual, list):
+                q = Q()
+                for lab in laboratorio_atual:
+                    q |= Q(laboratorio_atual__icontains=lab)
+                qs = qs.filter(q)
+            else:
+                qs = qs.filter(laboratorio_atual__icontains=laboratorio_atual)
+
+        # classificacao
+        classificacao = data.get('classificacao')
+        if classificacao:
+            qs = qs.filter(classificacao__icontains=classificacao)
+
+        # Filtros via Amostra
+        laboratorio = data.get('laboratorio')
+        if laboratorio:
+            if isinstance(laboratorio, list):
+                q = Q()
+                for lab in laboratorio:
+                    q |= Q(amostra__laboratorio__icontains=lab)
+                qs = qs.filter(q)
+            else:
+                qs = qs.filter(amostra__laboratorio__icontains=laboratorio)
+
+        local_coleta = data.get('local_coleta')
+        if local_coleta:
+            if isinstance(local_coleta, list):
+                q = Q()
+                for loc in local_coleta:
+                    q |= Q(amostra__local_coleta__icontains=loc)
+                qs = qs.filter(q)
+            else:
+                qs = qs.filter(amostra__local_coleta__icontains=local_coleta)
+
+        tipo_amostra = data.get('tipo_amostra')
+        if tipo_amostra:
+            if isinstance(tipo_amostra, list):
+                qs = qs.filter(amostra__tipo_amostra__in=tipo_amostra)
+            else:
+                qs = qs.filter(amostra__tipo_amostra__icontains=tipo_amostra)
+
+        produto_ids = data.get('produto_ids')
+        if produto_ids:
+            qs = qs.filter(amostra__produto_amostra_id__in=produto_ids)
+
+        material = data.get('material')
+        if material:
+            if isinstance(material, list):
+                q = Q()
+                for mat in material:
+                    q |= Q(amostra__material__icontains=mat)
+                qs = qs.filter(q)
+            else:
+                qs = qs.filter(amostra__material__icontains=material)
+
+        fornecedor = data.get('fornecedor')
+        if fornecedor:
+            if isinstance(fornecedor, list):
+                q = Q()
+                for f in fornecedor:
+                    q |= Q(amostra__fornecedor__icontains=f)
+                qs = qs.filter(q)
+            else:
+                qs = qs.filter(amostra__fornecedor__icontains=fornecedor)
+
+        finalidade = data.get('finalidade')
+        if finalidade:
+            if isinstance(finalidade, list):
+                qs = qs.filter(amostra__finalidade__in=finalidade)
+            else:
+                qs = qs.filter(amostra__finalidade__icontains=finalidade)
+
+        qs = qs.order_by('-id')
+
+        # ── 2. SERIALIZAÇÃO COMPACTA DA LISTA ───────────────────────────────
+        analises_list = []
+        for analise in qs:
+            amostra = analise.amostra
+            analises_list.append({
+                'id': analise.id,
+                'data': analise.data,
+                'estado': analise.estado,
+                'finalizada': analise.finalizada,
+                'finalizada_at': analise.finalizada_at,
+                'aprovada': analise.aprovada,
+                'aprovada_at': analise.aprovada_at,
+                'laudo': analise.laudo,
+                'usada_laudo': analise.usada_laudo,
+                'laboratorio_atual': analise.laboratorio_atual,
+                'classificacao': analise.classificacao,
+                'amostra': {
+                    'id': amostra.id if amostra else None,
+                    'numero': amostra.numero if amostra else None,
+                    'material': amostra.material if amostra else None,
+                    'laboratorio': amostra.laboratorio if amostra else None,
+                    'local_coleta': amostra.local_coleta if amostra else None,
+                    'tipo_amostra': amostra.tipo_amostra if amostra else None,
+                    'fornecedor': amostra.fornecedor if amostra else None,
+                    'produto_amostra': {
+                        'id': amostra.produto_amostra.id,
+                        'nome': amostra.produto_amostra.nome,
+                    } if amostra and amostra.produto_amostra else None,
+                } if amostra else None,
+            })
+
+        resposta = {
+            'total_analises': len(analises_list),
+            'analises': analises_list,
+            'estatisticas': None,
+        }
+
+        # ── 3. CÁLCULO DE ESTATÍSTICAS (opcional) ───────────────────────────
+        ensaio_id_filtro = data.get('ensaio_id')
+        ensaio_nome_filtro = data.get('ensaio_nome')
+        analises_excluidas = set(data.get('analises_excluidas', []))
+
+        if ensaio_id_filtro or ensaio_nome_filtro:
+            ids_para_calcular = [a['id'] for a in analises_list if a['id'] not in analises_excluidas]
+            amostra_por_analise = {a['id']: (a['amostra'] or {}).get('numero') for a in analises_list}
+
+            valores_por_analise = {}
+
+            # ── 3a. Busca em AnaliseEnsaio.ensaios_utilizados ────────────────
+            ensaios_qs = AnaliseEnsaio.objects.filter(
+                analise_id__in=ids_para_calcular
+            ).select_related('analise__amostra').order_by('analise_id', '-id')
+
+            for ae in ensaios_qs:
+                analise_id = ae.analise_id
+                if analise_id in valores_por_analise:
+                    continue  # já encontrou um valor para esta análise
+
+                try:
+                    if isinstance(ae.ensaios_utilizados, list):
+                        ensaios_json = ae.ensaios_utilizados
+                    elif isinstance(ae.ensaios_utilizados, str):
+                        ensaios_json = json.loads(ae.ensaios_utilizados)
+                    else:
+                        continue
+
+                    for ensaio in reversed(ensaios_json):
+                        match = False
+                        if ensaio_id_filtro and ensaio.get('id') == int(ensaio_id_filtro):
+                            match = True
+                        if ensaio_nome_filtro and ensaio_nome_filtro.lower() in (ensaio.get('descricao') or '').lower():
+                            match = True
+
+                        if not match:
+                            continue
+
+                        valor = ensaio.get('valor')
+                        if valor is None:
+                            continue
+                        try:
+                            valor_float = float(valor)
+                        except (ValueError, TypeError):
+                            continue
+
+                        valores_por_analise[analise_id] = {
+                            'analise_id': analise_id,
+                            'amostra_numero': amostra_por_analise.get(analise_id),
+                            'valor': valor_float,
+                            'ensaio_id': ensaio.get('id'),
+                            'ensaio_descricao': ensaio.get('descricao'),
+                            'unidade': ensaio.get('unidade', ''),
+                            'fonte': 'ensaio',
+                        }
+                        break
+
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+            # ── 3b. Fallback em AnaliseCalculo para IDs ainda sem valor ──────
+            # Usado quando o frontend envia ensaio_nome para um cálculo composto
+            if ensaio_nome_filtro:
+                ids_sem_valor = [i for i in ids_para_calcular if i not in valores_por_analise]
+                if ids_sem_valor:
+                    calculos_qs = AnaliseCalculo.objects.filter(
+                        analise_id__in=ids_sem_valor,
+                        calculos__icontains=ensaio_nome_filtro,
+                    ).order_by('analise_id', '-id')
+
+                    for ac in calculos_qs:
+                        analise_id = ac.analise_id
+                        if analise_id in valores_por_analise:
+                            continue
+                        if ac.resultados is None:
+                            continue
+                        valores_por_analise[analise_id] = {
+                            'analise_id': analise_id,
+                            'amostra_numero': amostra_por_analise.get(analise_id),
+                            'valor': ac.resultados,
+                            'ensaio_id': None,
+                            'ensaio_descricao': ac.calculos,
+                            'unidade': '',
+                            'fonte': 'calculo',
+                        }
+
+            valores = [v['valor'] for v in valores_por_analise.values()]
+            detalhes = sorted(valores_por_analise.values(), key=lambda x: x['analise_id'])
+
+            # Descrição representativa (primeiro detalhe encontrado)
+            descricao_repr = detalhes[0]['ensaio_descricao'] if detalhes else ensaio_nome_filtro
+            unidade_repr = detalhes[0]['unidade'] if detalhes else ''
+
+            if valores:
+                resposta['estatisticas'] = {
+                    'ensaio_id': ensaio_id_filtro,
+                    'ensaio_nome': ensaio_nome_filtro,
+                    'ensaio_descricao': descricao_repr,
+                    'unidade': unidade_repr,
+                    'quantidade_medicoes': len(valores),
+                    'analises_excluidas': list(analises_excluidas),
+                    'media': round(sum(valores) / len(valores), 4),
+                    'valor_minimo': round(min(valores), 4),
+                    'valor_maximo': round(max(valores), 4),
+                    'detalhes': detalhes,
+                }
+            else:
+                resposta['estatisticas'] = {
+                    'ensaio_id': ensaio_id_filtro,
+                    'ensaio_nome': ensaio_nome_filtro,
+                    'ensaio_descricao': ensaio_nome_filtro,
+                    'unidade': '',
+                    'quantidade_medicoes': 0,
+                    'analises_excluidas': list(analises_excluidas),
+                    'media': None,
+                    'valor_minimo': None,
+                    'valor_maximo': None,
+                    'detalhes': [],
+                }
+
+        return Response(resposta)
+
 class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
     queryset = AnaliseEnsaio.objects.all()
     serializer_class = AnaliseEnsaioSerializer

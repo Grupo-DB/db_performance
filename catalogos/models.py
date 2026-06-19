@@ -12,6 +12,10 @@ def upload_image_produto(produto, filename):
     return f"produto_{produto.id}-{filename}"
 
 
+def upload_catalogo_pdf(instance, filename):
+    return f"catalogos/pdf/{instance.veiculo_id or 'geral'}/{filename}"
+
+
 class Fabricante(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=255, null=False, blank=False)
@@ -164,10 +168,58 @@ class Pedido(models.Model):
         return total
 
 
+class CatalogoPDF(models.Model):
+    id = models.AutoField(primary_key=True)
+    titulo = models.CharField(max_length=255)
+    arquivo = models.FileField(upload_to=upload_catalogo_pdf)
+    veiculo = models.ForeignKey(
+        Veiculo, on_delete=models.SET_NULL, null=True, blank=True, related_name='catalogos_pdf'
+    )
+    descricao = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Catálogo PDF'
+        verbose_name_plural = 'Catálogos PDF'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.titulo
+
+
+class ItemErpCatalogo(models.Model):
+    """Mapeamento entre código do item no ERP (ESTQCOD) e código no catálogo PDF."""
+    id = models.AutoField(primary_key=True)
+    cod_erp = models.CharField(max_length=50, unique=True, db_index=True)
+    nome_erp = models.CharField(max_length=455, blank=True, null=True)
+    cod_catalogo = models.CharField(max_length=100, blank=True, null=True)
+    catalogo = models.ForeignKey(
+        CatalogoPDF, on_delete=models.SET_NULL, null=True, blank=True, related_name='itens_mapeados'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Mapeamento Item ERP → Catálogo'
+        verbose_name_plural = 'Mapeamentos Item ERP → Catálogo'
+        indexes = [
+            models.Index(fields=['cod_erp']),
+            models.Index(fields=['cod_catalogo']),
+        ]
+
+    def __str__(self):
+        return f"ERP:{self.cod_erp} → Catálogo:{self.cod_catalogo or '-'}"
+
+
 class ItemPedido(models.Model):
     id = models.AutoField(primary_key=True)
     pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE, related_name='itens_pedido')
+    # Item local (legado) — pode ser nulo quando o item vem do ERP
     item = models.ForeignKey(Item, on_delete=models.RESTRICT, null=True, blank=True)
+    # Item do ERP — preenchido quando o produto vem da consulta ERP
+    cod_erp = models.CharField(max_length=50, blank=True, null=True, db_index=True)
+    nome_produto = models.CharField(max_length=455, blank=True, null=True)
     quantidade = models.PositiveIntegerField(validators=[MinValueValidator(1)])
     preco_unitario = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     created_at = models.DateTimeField(auto_now_add=True)
@@ -176,13 +228,14 @@ class ItemPedido(models.Model):
     class Meta:
         verbose_name = 'Item do Pedido'
         verbose_name_plural = 'Itens do Pedido'
-        unique_together = [['pedido', 'item']]
         indexes = [
             models.Index(fields=['pedido', 'item']),
+            models.Index(fields=['pedido', 'cod_erp']),
         ]
 
     def __str__(self):
-        return f"{self.item.nome} x{self.quantidade}"
+        nome = self.nome_produto or (self.item.nome if self.item else self.cod_erp or '?')
+        return f"{nome} x{self.quantidade}"
 
     @property
     def subtotal(self):
