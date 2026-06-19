@@ -157,27 +157,55 @@ class ItemErpCatalogoSerializer(serializers.ModelSerializer):
 
 
 class PedidoListSerializer(serializers.ModelSerializer):
-    usuario = serializers.CharField(source='usuario.username', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    solicitante_nome = serializers.SerializerMethodField(read_only=True)
+    responsavel_nome = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Pedido
-        fields = ['id', 'numero_referencia', 'usuario', 'status', 'status_display', 'total', 'created_at', 'updated_at']
+        fields = [
+            'id', 'numero_referencia', 'status', 'status_display',
+            'solicitante_nome', 'responsavel', 'responsavel_nome',
+            'total', 'motivo_rejeicao', 'created_at', 'updated_at',
+        ]
         read_only_fields = ['numero_referencia', 'created_at', 'updated_at']
+
+    def get_solicitante_nome(self, obj):
+        if not obj.usuario:
+            return None
+        return obj.usuario.get_full_name() or obj.usuario.username
+
+    def get_responsavel_nome(self, obj):
+        if not obj.responsavel:
+            return None
+        return obj.responsavel.get_full_name() or obj.responsavel.username
 
 
 class PedidoDetailSerializer(serializers.ModelSerializer):
-    usuario = serializers.CharField(source='usuario.username', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    solicitante_nome = serializers.SerializerMethodField(read_only=True)
+    responsavel_nome = serializers.SerializerMethodField(read_only=True)
     itens = ItemPedidoDetailSerializer(read_only=True, many=True)
 
     class Meta:
         model = Pedido
         fields = [
-            'id', 'numero_referencia', 'usuario', 'status', 'status_display',
-            'total', 'observacoes', 'itens', 'created_at', 'updated_at'
+            'id', 'numero_referencia', 'status', 'status_display',
+            'solicitante_nome', 'responsavel', 'responsavel_nome',
+            'total', 'observacoes', 'motivo_rejeicao', 'itens',
+            'created_at', 'updated_at',
         ]
         read_only_fields = ['numero_referencia', 'total', 'created_at', 'updated_at']
+
+    def get_solicitante_nome(self, obj):
+        if not obj.usuario:
+            return None
+        return obj.usuario.get_full_name() or obj.usuario.username
+
+    def get_responsavel_nome(self, obj):
+        if not obj.responsavel:
+            return None
+        return obj.responsavel.get_full_name() or obj.responsavel.username
 
 
 class PedidoCreateSerializer(serializers.ModelSerializer):
@@ -212,27 +240,32 @@ class PedidoUpdateStatusSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Pedido
-        fields = ['status', 'status_display', 'observacoes']
+        fields = ['status', 'status_display', 'observacoes', 'motivo_rejeicao']
+
+    def validate(self, attrs):
+        novo_status = attrs.get('status')
+        if novo_status == 'REJEITADO' and not attrs.get('motivo_rejeicao', '').strip():
+            raise serializers.ValidationError(
+                {'motivo_rejeicao': 'Informe o motivo da rejeição.'}
+            )
+        return attrs
 
     def validate_status(self, value):
-        """Validar transição de status permitida"""
         instance = self.instance
         if instance:
             current_status = instance.status
             allowed_transitions = {
-                'RASCUNHO': ['ENVIADO', 'CANCELADO'],
-                'ENVIADO': ['RECEBIDO', 'CANCELADO'],
-                'RECEBIDO': ['EM_COTACAO', 'REJEITADO', 'CANCELADO'],
-                'EM_COTACAO': ['APROVADO', 'REJEITADO', 'CANCELADO'],
-                'APROVADO': ['REALIZADO', 'CANCELADO'],
-                'REJEITADO': ['RASCUNHO', 'CANCELADO'],
-                'REALIZADO': ['CANCELADO'],
-                'CANCELADO': [],
+                'SOLICITADO':    ['ACEITO', 'REJEITADO'],
+                'ACEITO':        ['COTACAO', 'REJEITADO'],
+                'COTACAO':       ['REALIZADO', 'REJEITADO'],
+                'REALIZADO':     ['EM_TRANSPORTE'],
+                'EM_TRANSPORTE': ['FINALIZADO'],
+                'REJEITADO':     ['SOLICITADO'],
+                'FINALIZADO':    [],
             }
-
             if value not in allowed_transitions.get(current_status, []):
                 raise serializers.ValidationError(
-                    f"Não é possível mudar de {current_status} para {value}"
+                    f"Não é possível mudar de {current_status} para {value}."
                 )
         return value
 

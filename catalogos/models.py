@@ -130,20 +130,23 @@ class Item(models.Model):
 
 class Pedido(models.Model):
     STATUS_CHOICES = [
-        ('RASCUNHO', 'Rascunho'),
-        ('ENVIADO', 'Enviado'),
-        ('RECEBIDO', 'Recebido'),
-        ('EM_COTACAO', 'Em Cotação'),
-        ('APROVADO', 'Aprovado'),
+        ('SOLICITADO', 'Solicitado'),
+        ('ACEITO', 'Aceito'),
         ('REJEITADO', 'Rejeitado'),
+        ('COTACAO', 'Em Cotação'),
         ('REALIZADO', 'Realizado'),
-        ('CANCELADO', 'Cancelado'),
+        ('EM_TRANSPORTE', 'Em Transporte'),
+        ('FINALIZADO', 'Finalizado'),
     ]
 
     id = models.AutoField(primary_key=True)
     usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name='pedidos')
+    responsavel = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='pedidos_responsavel'
+    )
     numero_referencia = models.CharField(max_length=50, unique=True, db_index=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='RASCUNHO')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='SOLICITADO')
+    motivo_rejeicao = models.TextField(blank=True, null=True)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
     observacoes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -248,13 +251,13 @@ class ItemPedido(models.Model):
 
 class PedidoNotificacao(models.Model):
     TIPO_CHOICES = [
-        ('CRIACAO', 'Pedido Criado'),
-        ('STATUS_RECEBIDO', 'Pedido Recebido'),
-        ('STATUS_COTACAO', 'Pedido em Cotação'),
-        ('STATUS_APROVADO', 'Pedido Aprovado'),
+        ('CRIACAO',          'Pedido Solicitado'),
+        ('STATUS_RECEBIDO',  'Pedido Aceito'),
+        ('STATUS_COTACAO',   'Pedido em Cotação'),
+        ('STATUS_APROVADO',  'Pedido Aprovado'),
         ('STATUS_REJEITADO', 'Pedido Rejeitado'),
-        ('STATUS_REALIZADO', 'Pedido Realizado'),
-        ('CANCELAMENTO', 'Pedido Cancelado'),
+        ('STATUS_REALIZADO', 'Pedido Realizado/Transporte/Finalizado'),
+        ('CANCELAMENTO',     'Pedido Cancelado'),
     ]
 
     id = models.AutoField(primary_key=True)

@@ -260,13 +260,13 @@ class ItemViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 _STATUS_NOTIFICACAO = {
-    'ENVIADO':    ('CRIACAO',          'Pedido {ref} foi enviado para o setor de compras.'),
-    'RECEBIDO':   ('STATUS_RECEBIDO',  'Pedido {ref} foi recebido pelo setor de compras.'),
-    'EM_COTACAO': ('STATUS_COTACAO',   'Pedido {ref} está em cotação.'),
-    'APROVADO':   ('STATUS_APROVADO',  'Pedido {ref} foi aprovado.'),
-    'REJEITADO':  ('STATUS_REJEITADO', 'Pedido {ref} foi rejeitado.'),
-    'REALIZADO':  ('STATUS_REALIZADO', 'Pedido {ref} foi realizado.'),
-    'CANCELADO':  ('CANCELAMENTO',     'Pedido {ref} foi cancelado.'),
+    'SOLICITADO':    ('CRIACAO',          'Pedido {ref} foi reenviado para análise.'),
+    'ACEITO':        ('STATUS_RECEBIDO',  'Pedido {ref} foi aceito pelo setor de compras.'),
+    'REJEITADO':     ('STATUS_REJEITADO', 'Pedido {ref} foi rejeitado.'),
+    'COTACAO':       ('STATUS_COTACAO',   'Pedido {ref} está em cotação.'),
+    'REALIZADO':     ('STATUS_REALIZADO', 'Pedido {ref} foi realizado.'),
+    'EM_TRANSPORTE': ('STATUS_REALIZADO', 'Pedido {ref} está em transporte.'),
+    'FINALIZADO':    ('STATUS_REALIZADO', 'Pedido {ref} foi finalizado.'),
 }
 
 
@@ -289,18 +289,19 @@ def _notificar_compras(pedido, tipo, mensagem):
     PedidoNotificacao.objects.bulk_create(notificacoes)
 
 
-def _processar_notificacoes(pedido, novo_status):
+def _processar_notificacoes(pedido, novo_status, motivo=None):
     if novo_status not in _STATUS_NOTIFICACAO:
         return
     tipo, template = _STATUS_NOTIFICACAO[novo_status]
     mensagem = template.format(ref=pedido.numero_referencia)
+    if novo_status == 'REJEITADO' and motivo:
+        mensagem += f' Motivo: {motivo}'
 
-    if novo_status == 'ENVIADO':
+    # Novo pedido solicitado → avisa compras; demais → avisa solicitante
+    if novo_status == 'SOLICITADO':
         _notificar_compras(pedido, tipo, mensagem)
     else:
         _notificar_usuario(pedido, tipo, mensagem)
-        if novo_status == 'CANCELADO':
-            _notificar_compras(pedido, tipo, mensagem)
 
 
 # ---------------------------------------------------------------------------
@@ -332,19 +333,24 @@ class PedidoViewSet(viewsets.ModelViewSet):
         serializer = PedidoUpdateStatusSerializer(pedido, data=request.data, partial=True)
         if serializer.is_valid():
             novo_status = serializer.validated_data.get('status', pedido.status)
+            motivo = serializer.validated_data.get('motivo_rejeicao')
             serializer.save()
-            _processar_notificacoes(pedido, novo_status)
+            _processar_notificacoes(pedido, novo_status, motivo=motivo)
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'])
-    def cancelar(self, request, pk=None):
+    def assumir(self, request, pk=None):
         pedido = self.get_object()
-        if pedido.status == 'CANCELADO':
-            return Response({'erro': 'Pedido já foi cancelado'}, status=status.HTTP_400_BAD_REQUEST)
-        pedido.status = 'CANCELADO'
-        pedido.save()
-        _processar_notificacoes(pedido, 'CANCELADO')
+        pedido.responsavel = request.user
+        pedido.save(update_fields=['responsavel'])
+        return Response(PedidoDetailSerializer(pedido).data)
+
+    @action(detail=True, methods=['post'])
+    def liberar(self, request, pk=None):
+        pedido = self.get_object()
+        pedido.responsavel = None
+        pedido.save(update_fields=['responsavel'])
         return Response(PedidoDetailSerializer(pedido).data)
 
 
