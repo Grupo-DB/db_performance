@@ -251,22 +251,6 @@ class PedidoUpdateStatusSerializer(serializers.ModelSerializer):
         return attrs
 
     def validate_status(self, value):
-        instance = self.instance
-        if instance:
-            current_status = instance.status
-            allowed_transitions = {
-                'SOLICITADO':    ['ACEITO', 'REJEITADO'],
-                'ACEITO':        ['COTACAO', 'REJEITADO'],
-                'COTACAO':       ['REALIZADO', 'REJEITADO'],
-                'REALIZADO':     ['EM_TRANSPORTE'],
-                'EM_TRANSPORTE': ['FINALIZADO'],
-                'REJEITADO':     ['SOLICITADO'],
-                'FINALIZADO':    [],
-            }
-            if value not in allowed_transitions.get(current_status, []):
-                raise serializers.ValidationError(
-                    f"Não é possível mudar de {current_status} para {value}."
-                )
         return value
 
 
