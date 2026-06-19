@@ -508,6 +508,8 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                     'produto_amostra': {
                         'id': amostra.produto_amostra.id,
                         'nome': amostra.produto_amostra.nome,
+                        'tipo': amostra.produto_amostra.tipo,
+                        'subtipo': amostra.produto_amostra.subtipo,
                     } if amostra and amostra.produto_amostra else None,
                 } if amostra else None,
             })
