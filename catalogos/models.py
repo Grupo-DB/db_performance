@@ -220,12 +220,8 @@ class ItemErpCatalogo(models.Model):
 
 
 class EquipamentoCatalogo(models.Model):
-    """Mapeia uma MARCA do ERP (MESTNOME) a um CatalogoPDF."""
-    marca_erp = models.CharField(max_length=255, unique=True, db_index=True, verbose_name='Marca ERP')
-    equipamento = models.ForeignKey(
-        Equipamento, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='mapeamentos_catalogo', verbose_name='Equipamento'
-    )
+    """Mapeia o campo MARCA do ERP (exibido como 'Equipamento' no front) a um CatalogoPDF."""
+    equipamento = models.CharField(max_length=255, unique=True, db_index=True, verbose_name='Equipamento (MARCA ERP)')
     catalogo = models.ForeignKey(
         CatalogoPDF, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='mapeamentos_equipamento', verbose_name='Catálogo PDF'
@@ -236,10 +232,10 @@ class EquipamentoCatalogo(models.Model):
     class Meta:
         verbose_name = 'Mapeamento Equipamento → Catálogo'
         verbose_name_plural = 'Mapeamentos Equipamento → Catálogo'
-        ordering = ['marca_erp']
+        ordering = ['equipamento']
 
     def __str__(self):
-        return f"{self.marca_erp} → {self.catalogo.titulo if self.catalogo else '-'}"
+        return f"{self.equipamento} → {self.catalogo.titulo if self.catalogo else '-'}"
 
 
 class ItemPedido(models.Model):

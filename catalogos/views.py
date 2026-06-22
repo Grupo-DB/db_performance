@@ -142,18 +142,20 @@ def consultar_produtos(request):
 
     records = _df_to_records(df)
 
-    # Enriquecer com mapeamento por equipamento/marca (em lote, sem N+1)
+    # Enriquecer com mapeamento por MARCA do ERP (campo 'equipamento' no mapeamento)
     marcas = {str(r['MARCA']) for r in records if r.get('MARCA')}
     mapeamentos_eq = {
-        m.marca_erp: m
-        for m in EquipamentoCatalogo.objects.filter(marca_erp__in=marcas).select_related('equipamento', 'catalogo')
+        m.equipamento: m
+        for m in EquipamentoCatalogo.objects.filter(
+            equipamento__in=marcas
+        ).select_related('catalogo')
     }
 
     for record in records:
         marca = str(record.get('MARCA') or '')
         mapa = mapeamentos_eq.get(marca)
         if mapa and mapa.catalogo:
-            record['equipamento_nome'] = mapa.equipamento.nome if mapa.equipamento else marca
+            record['equipamento_nome'] = mapa.equipamento
             record['catalogo_id'] = mapa.catalogo.id
             record['catalogo_titulo'] = mapa.catalogo.titulo
             record['catalogo_arquivo'] = (
@@ -619,13 +621,12 @@ class ItemErpCatalogoViewSet(viewsets.ModelViewSet):
 
 
 class EquipamentoCatalogoViewSet(viewsets.ModelViewSet):
-    queryset = EquipamentoCatalogo.objects.select_related('equipamento', 'catalogo').all()
+    queryset = EquipamentoCatalogo.objects.select_related('catalogo').all()
     serializer_class = EquipamentoCatalogoSerializer
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['equipamento']
-    search_fields = ['marca_erp']
-    ordering_fields = ['marca_erp', 'created_at']
-    ordering = ['marca_erp']
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['equipamento']
+    ordering_fields = ['equipamento', 'created_at']
+    ordering = ['equipamento']
 
 
 class AnexoPedidoViewSet(viewsets.ModelViewSet):

@@ -265,12 +265,11 @@ class PedidoUpdateStatusSerializer(serializers.ModelSerializer):
 
 
 class EquipamentoCatalogoSerializer(serializers.ModelSerializer):
-    equipamento_nome = serializers.CharField(source='equipamento.nome', read_only=True, default=None)
     catalogo_titulo = serializers.CharField(source='catalogo.titulo', read_only=True, default=None)
 
     class Meta:
         model = EquipamentoCatalogo
-        fields = ['id', 'marca_erp', 'equipamento', 'equipamento_nome', 'catalogo', 'catalogo_titulo', 'created_at', 'updated_at']
+        fields = ['id', 'equipamento', 'catalogo', 'catalogo_titulo', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
