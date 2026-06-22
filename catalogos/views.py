@@ -16,6 +16,8 @@ from rest_framework.response import Response
 from django.contrib.auth.models import User
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
+from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -614,3 +616,13 @@ class ItemErpCatalogoViewSet(viewsets.ModelViewSet):
     search_fields = ['cod_erp', 'nome_erp', 'cod_catalogo']
     ordering_fields = ['cod_erp', 'created_at']
     ordering = ['cod_erp']
+
+
+@api_view(['GET'])
+def serve_catalogo_pdf_inline(request, pk):
+    catalogo = get_object_or_404(CatalogoPDF, pk=pk)
+    if not catalogo.arquivo:
+        raise Http404
+    response = FileResponse(catalogo.arquivo.open('rb'), content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="{catalogo.titulo}.pdf"'
+    return response

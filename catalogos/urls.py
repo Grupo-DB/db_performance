@@ -6,6 +6,7 @@ from .views import (
     PedidoViewSet, PedidoNotificacaoViewSet,
     CatalogoPDFViewSet, ItemErpCatalogoViewSet,
     consultar_produtos, consultar_imagem_produto,
+    serve_catalogo_pdf_inline,
 )
 
 router = DefaultRouter()
@@ -23,4 +24,5 @@ urlpatterns = [
     path('', include(router.urls)),
     path('erp/produtos/',       consultar_produtos,       name='erp-produtos'),
     path('erp/produto-imagem/', consultar_imagem_produto, name='erp-produto-imagem'),
+    path('catalogos-pdf/<int:pk>/inline/', serve_catalogo_pdf_inline, name='catalogo-pdf-inline'),
 ]
