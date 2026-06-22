@@ -134,23 +134,24 @@ class ItemPedidoWriteSerializer(serializers.ModelSerializer):
 
 
 class CatalogoPDFSerializer(serializers.ModelSerializer):
-    veiculo_nome = serializers.CharField(source='veiculo.__str__', read_only=True)
+    veiculo_obj = VeiculoListSerializer(source='veiculo', read_only=True)
 
     class Meta:
         model = CatalogoPDF
-        fields = ['id', 'titulo', 'arquivo', 'veiculo', 'veiculo_nome', 'descricao', 'created_at', 'updated_at']
+        fields = ['id', 'titulo', 'arquivo', 'veiculo', 'veiculo_obj', 'descricao', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
 
 class ItemErpCatalogoSerializer(serializers.ModelSerializer):
     catalogo_titulo = serializers.CharField(source='catalogo.titulo', read_only=True)
     catalogo_arquivo = serializers.FileField(source='catalogo.arquivo', read_only=True)
+    catalogo_obj = CatalogoPDFSerializer(source='catalogo', read_only=True)
 
     class Meta:
         model = ItemErpCatalogo
         fields = [
             'id', 'cod_erp', 'nome_erp', 'cod_catalogo',
-            'catalogo', 'catalogo_titulo', 'catalogo_arquivo',
+            'catalogo', 'catalogo_titulo', 'catalogo_arquivo', 'catalogo_obj',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['created_at', 'updated_at']
