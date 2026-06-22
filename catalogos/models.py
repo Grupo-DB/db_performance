@@ -16,6 +16,10 @@ def upload_catalogo_pdf(instance, filename):
     return f"catalogos/pdf/{instance.veiculo_id or 'geral'}/{filename}"
 
 
+def upload_anexo_pedido(instance, filename):
+    return f"pedidos/anexos/{instance.pedido_id}/{filename}"
+
+
 class Fabricante(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=255, null=False, blank=False)
@@ -247,6 +251,22 @@ class ItemPedido(models.Model):
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         self.pedido.calcular_total()
+
+
+class AnexoPedido(models.Model):
+    id = models.AutoField(primary_key=True)
+    pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE, related_name='anexos')
+    arquivo = models.ImageField(upload_to=upload_anexo_pedido)
+    descricao = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Anexo de Pedido'
+        verbose_name_plural = 'Anexos de Pedido'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Anexo {self.id} - Pedido {self.pedido.numero_referencia}"
 
 
 class PedidoNotificacao(models.Model):

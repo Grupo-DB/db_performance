@@ -3,8 +3,8 @@ from django.contrib.auth.models import User
 from decimal import Decimal
 
 from .models import (
-    Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, PedidoNotificacao,
-    CatalogoPDF, ItemErpCatalogo,
+    Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, AnexoPedido,
+    PedidoNotificacao, CatalogoPDF, ItemErpCatalogo,
 )
 
 
@@ -182,11 +182,19 @@ class PedidoListSerializer(serializers.ModelSerializer):
         return obj.responsavel.get_full_name() or obj.responsavel.username
 
 
+class AnexoPedidoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AnexoPedido
+        fields = ['id', 'pedido', 'arquivo', 'descricao', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
 class PedidoDetailSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     solicitante_nome = serializers.SerializerMethodField(read_only=True)
     responsavel_nome = serializers.SerializerMethodField(read_only=True)
     itens_pedido = ItemPedidoDetailSerializer(read_only=True, many=True)
+    anexos = AnexoPedidoSerializer(read_only=True, many=True)
 
     class Meta:
         model = Pedido
@@ -194,7 +202,7 @@ class PedidoDetailSerializer(serializers.ModelSerializer):
             'id', 'numero_referencia', 'status', 'status_display',
             'solicitante_nome', 'responsavel', 'responsavel_nome',
             'total', 'observacoes', 'motivo_rejeicao', 'itens_pedido',
-            'created_at', 'updated_at',
+            'anexos', 'created_at', 'updated_at',
         ]
         read_only_fields = ['numero_referencia', 'total', 'created_at', 'updated_at']
 

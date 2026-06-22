@@ -22,7 +22,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
-    Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido,
+    Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, AnexoPedido,
     PedidoNotificacao, CatalogoPDF, ItemErpCatalogo,
 )
 from .serializers import (
@@ -32,7 +32,7 @@ from .serializers import (
     ItemListSerializer, ItemDetailSerializer, ItemCreateUpdateSerializer,
     PedidoListSerializer, PedidoDetailSerializer, PedidoCreateSerializer,
     PedidoUpdateStatusSerializer, PedidoNotificacaoSerializer,
-    CatalogoPDFSerializer, ItemErpCatalogoSerializer,
+    AnexoPedidoSerializer, CatalogoPDFSerializer, ItemErpCatalogoSerializer,
 )
 
 # ---------------------------------------------------------------------------
@@ -616,6 +616,17 @@ class ItemErpCatalogoViewSet(viewsets.ModelViewSet):
     search_fields = ['cod_erp', 'nome_erp', 'cod_catalogo']
     ordering_fields = ['cod_erp', 'created_at']
     ordering = ['cod_erp']
+
+
+class AnexoPedidoViewSet(viewsets.ModelViewSet):
+    serializer_class = AnexoPedidoSerializer
+    http_method_names = ['get', 'post', 'delete']
+
+    def get_queryset(self):
+        return AnexoPedido.objects.filter(pedido_id=self.kwargs['pedido_pk'])
+
+    def perform_create(self, serializer):
+        serializer.save(pedido_id=self.kwargs['pedido_pk'])
 
 
 @api_view(['GET'])
