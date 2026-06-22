@@ -346,28 +346,37 @@ def _enviar_email_novo_pedido(pedido):
 <table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%">
 
   <!-- ===== HEADER ===== -->
+  <!-- Barra de topo colorida -->
   <tr>
-    <td style="background:{AZUL};border-radius:12px 12px 0 0;padding:24px 32px">
+    <td style="padding:0;line-height:0;font-size:0;border-radius:12px 12px 0 0;overflow:hidden">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td width="33%" style="background:{AZUL};height:6px">&nbsp;</td>
+        <td width="33%" style="background:{LARANJA};height:6px">&nbsp;</td>
+        <td width="34%" style="background:{VERDE};height:6px">&nbsp;</td>
+      </tr></table>
+    </td>
+  </tr>
+  <!-- Logo em fundo branco -->
+  <tr>
+    <td style="background:#ffffff;padding:20px 32px;border-left:1px solid #e8eef5;border-right:1px solid #e8eef5">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td style="vertical-align:middle">
-            <img src="cid:logo_db" alt="Grupo Dagoberto Barcellos" height="70" style="display:block;border:0">
+            <img src="cid:logo_db" alt="Grupo Dagoberto Barcellos" height="72" style="display:block;border:0">
           </td>
           <td align="right" style="vertical-align:middle">
-            <p style="margin:0;color:rgba(255,255,255,0.55);font-size:11px;letter-spacing:1px;text-transform:uppercase">Sistema ManagerDB</p>
+            <p style="margin:0;color:{AZUL};font-size:11px;letter-spacing:1px;text-transform:uppercase;font-weight:700">Sistema ManagerDB</p>
           </td>
         </tr>
       </table>
     </td>
   </tr>
 
-  <!-- Faixa colorida laranja + verde + ciano -->
+  <!-- Faixa separadora azul -->
   <tr>
     <td style="padding:0;line-height:0;font-size:0">
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td width="33%" style="background:{LARANJA};height:5px">&nbsp;</td>
-        <td width="33%" style="background:{VERDE};height:5px">&nbsp;</td>
-        <td width="34%" style="background:{CIANO};height:5px">&nbsp;</td>
+        <td style="background:{AZUL};height:4px">&nbsp;</td>
       </tr></table>
     </td>
   </tr>
