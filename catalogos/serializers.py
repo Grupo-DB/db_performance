@@ -128,8 +128,8 @@ class ItemPedidoWriteSerializer(serializers.ModelSerializer):
         return value
 
     def validate_preco_unitario(self, value):
-        if value < Decimal('0.01'):
-            raise serializers.ValidationError("Preço deve ser maior que 0")
+        if value < Decimal('0.00'):
+            raise serializers.ValidationError("Preço não pode ser negativo")
         return value
 
 

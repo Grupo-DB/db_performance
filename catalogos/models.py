@@ -224,7 +224,7 @@ class ItemPedido(models.Model):
     cod_erp = models.CharField(max_length=50, blank=True, null=True, db_index=True)
     nome_produto = models.CharField(max_length=455, blank=True, null=True)
     quantidade = models.PositiveIntegerField(validators=[MinValueValidator(1)])
-    preco_unitario = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    preco_unitario = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
