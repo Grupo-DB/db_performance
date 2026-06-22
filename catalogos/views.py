@@ -23,7 +23,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
     Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, AnexoPedido,
-    PedidoNotificacao, CatalogoPDF, ItemErpCatalogo,
+    PedidoNotificacao, CatalogoPDF, ItemErpCatalogo, EquipamentoCatalogo,
 )
 from .serializers import (
     FabricanteSerializer, EquipamentoSerializer,
@@ -33,6 +33,7 @@ from .serializers import (
     PedidoListSerializer, PedidoDetailSerializer, PedidoCreateSerializer,
     PedidoUpdateStatusSerializer, PedidoNotificacaoSerializer,
     AnexoPedidoSerializer, CatalogoPDFSerializer, ItemErpCatalogoSerializer,
+    EquipamentoCatalogoSerializer,
 )
 
 # ---------------------------------------------------------------------------
@@ -141,27 +142,26 @@ def consultar_produtos(request):
 
     records = _df_to_records(df)
 
-    # Enriquecer com mapeamento catálogo (em lote, sem N+1)
-    cod_erp_list = [str(r['ESTQCOD']) for r in records if r.get('ESTQCOD') is not None]
-    mapeamentos = {
-        m.cod_erp: m
-        for m in ItemErpCatalogo.objects.filter(cod_erp__in=cod_erp_list).select_related('catalogo')
+    # Enriquecer com mapeamento por equipamento/marca (em lote, sem N+1)
+    marcas = {str(r['MARCA']) for r in records if r.get('MARCA')}
+    mapeamentos_eq = {
+        m.marca_erp: m
+        for m in EquipamentoCatalogo.objects.filter(marca_erp__in=marcas).select_related('equipamento', 'catalogo')
     }
 
     for record in records:
-        cod = str(record.get('ESTQCOD', ''))
-        mapa = mapeamentos.get(cod)
-        if mapa:
-            record['cod_catalogo'] = mapa.cod_catalogo
-            record['catalogo_id'] = mapa.catalogo_id
-            record['catalogo_titulo'] = mapa.catalogo.titulo if mapa.catalogo else None
+        marca = str(record.get('MARCA') or '')
+        mapa = mapeamentos_eq.get(marca)
+        if mapa and mapa.catalogo:
+            record['equipamento_nome'] = mapa.equipamento.nome if mapa.equipamento else marca
+            record['catalogo_id'] = mapa.catalogo.id
+            record['catalogo_titulo'] = mapa.catalogo.titulo
             record['catalogo_arquivo'] = (
                 request.build_absolute_uri(mapa.catalogo.arquivo.url)
-                if mapa.catalogo and mapa.catalogo.arquivo
-                else None
+                if mapa.catalogo.arquivo else None
             )
         else:
-            record['cod_catalogo'] = None
+            record['equipamento_nome'] = marca
             record['catalogo_id'] = None
             record['catalogo_titulo'] = None
             record['catalogo_arquivo'] = None
@@ -616,6 +616,16 @@ class ItemErpCatalogoViewSet(viewsets.ModelViewSet):
     search_fields = ['cod_erp', 'nome_erp', 'cod_catalogo']
     ordering_fields = ['cod_erp', 'created_at']
     ordering = ['cod_erp']
+
+
+class EquipamentoCatalogoViewSet(viewsets.ModelViewSet):
+    queryset = EquipamentoCatalogo.objects.select_related('equipamento', 'catalogo').all()
+    serializer_class = EquipamentoCatalogoSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['equipamento']
+    search_fields = ['marca_erp']
+    ordering_fields = ['marca_erp', 'created_at']
+    ordering = ['marca_erp']
 
 
 class AnexoPedidoViewSet(viewsets.ModelViewSet):

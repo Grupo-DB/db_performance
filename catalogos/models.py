@@ -219,6 +219,29 @@ class ItemErpCatalogo(models.Model):
         return f"ERP:{self.cod_erp} → Catálogo:{self.cod_catalogo or '-'}"
 
 
+class EquipamentoCatalogo(models.Model):
+    """Mapeia uma MARCA do ERP (MESTNOME) a um CatalogoPDF."""
+    marca_erp = models.CharField(max_length=255, unique=True, db_index=True, verbose_name='Marca ERP')
+    equipamento = models.ForeignKey(
+        Equipamento, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='mapeamentos_catalogo', verbose_name='Equipamento'
+    )
+    catalogo = models.ForeignKey(
+        CatalogoPDF, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='mapeamentos_equipamento', verbose_name='Catálogo PDF'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Mapeamento Equipamento → Catálogo'
+        verbose_name_plural = 'Mapeamentos Equipamento → Catálogo'
+        ordering = ['marca_erp']
+
+    def __str__(self):
+        return f"{self.marca_erp} → {self.catalogo.titulo if self.catalogo else '-'}"
+
+
 class ItemPedido(models.Model):
     id = models.AutoField(primary_key=True)
     pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE, related_name='itens_pedido')

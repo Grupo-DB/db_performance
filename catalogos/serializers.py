@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from .models import (
     Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, AnexoPedido,
-    PedidoNotificacao, CatalogoPDF, ItemErpCatalogo,
+    PedidoNotificacao, CatalogoPDF, ItemErpCatalogo, EquipamentoCatalogo,
 )
 
 
@@ -222,7 +222,8 @@ class PedidoCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Pedido
-        fields = ['observacoes', 'itens']
+        fields = ['id', 'numero_referencia', 'observacoes', 'itens']
+        read_only_fields = ['id', 'numero_referencia']
 
     def create(self, validated_data):
         itens_data = validated_data.pop('itens', [])
@@ -261,6 +262,16 @@ class PedidoUpdateStatusSerializer(serializers.ModelSerializer):
 
     def validate_status(self, value):
         return value
+
+
+class EquipamentoCatalogoSerializer(serializers.ModelSerializer):
+    equipamento_nome = serializers.CharField(source='equipamento.nome', read_only=True, default=None)
+    catalogo_titulo = serializers.CharField(source='catalogo.titulo', read_only=True, default=None)
+
+    class Meta:
+        model = EquipamentoCatalogo
+        fields = ['id', 'marca_erp', 'equipamento', 'equipamento_nome', 'catalogo', 'catalogo_titulo', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
 
 class PedidoNotificacaoSerializer(serializers.ModelSerializer):
