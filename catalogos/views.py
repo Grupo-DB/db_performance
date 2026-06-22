@@ -1,4 +1,5 @@
 import base64
+import threading
 from io import BytesIO
 
 import django_filters
@@ -11,6 +12,7 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.contrib.auth.models import User
+from django.core.mail import EmailMultiAlternatives
 from django.views.decorators.csrf import csrf_exempt
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -290,6 +292,86 @@ def _notificar_compras(pedido, tipo, mensagem):
     PedidoNotificacao.objects.bulk_create(notificacoes)
 
 
+_EMAIL_COMPRAS = ['compras@grupodb.com.br']
+_EMAIL_CC      = ['jiangoersch@grupodb.com.br']
+
+
+def _enviar_email_novo_pedido(pedido):
+    itens = list(pedido.itens_pedido.all())
+    solicitante = pedido.usuario.get_full_name() or pedido.usuario.username
+    data_criacao = pedido.created_at.strftime('%d/%m/%Y %H:%M')
+
+    linhas_txt = '\n'.join(
+        f"  - {i.nome_produto or i.cod_erp} | Qtd: {i.quantidade} | "
+        f"R$ {float(i.preco_unitario):.2f} un. | Subtotal: R$ {float(i.subtotal):.2f}"
+        for i in itens
+    )
+    linhas_html = ''.join(
+        f"<tr>"
+        f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{i.cod_erp or '-'}</td>"
+        f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{i.nome_produto or '-'}</td>"
+        f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:center'>{i.quantidade}</td>"
+        f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>R$ {float(i.preco_unitario):.2f}</td>"
+        f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>R$ {float(i.subtotal):.2f}</td>"
+        f"</tr>"
+        for i in itens
+    )
+
+    corpo_txt = (
+        f"Novo pedido de compra criado no sistema ManagerDB.\n\n"
+        f"Número:       {pedido.numero_referencia}\n"
+        f"Solicitante:  {solicitante}\n"
+        f"Data:         {data_criacao}\n"
+        f"Total:        R$ {float(pedido.total):.2f}\n"
+        f"Observações:  {pedido.observacoes or '—'}\n\n"
+        f"Itens:\n{linhas_txt}\n"
+    )
+
+    corpo_html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto">
+      <div style="background:#1e3a5f;padding:20px 24px;border-radius:8px 8px 0 0">
+        <h2 style="color:#fff;margin:0;font-size:18px">Novo Pedido de Compra</h2>
+        <p style="color:#a8c4e0;margin:4px 0 0;font-size:13px">ManagerDB — Setor de Compras</p>
+      </div>
+      <div style="background:#f9f9f9;padding:20px 24px;border:1px solid #e0e0e0;border-top:none">
+        <table style="width:100%;font-size:14px;margin-bottom:20px">
+          <tr><td style="color:#555;padding:4px 0;width:120px"><strong>Número</strong></td><td style="color:#111">{pedido.numero_referencia}</td></tr>
+          <tr><td style="color:#555;padding:4px 0"><strong>Solicitante</strong></td><td style="color:#111">{solicitante}</td></tr>
+          <tr><td style="color:#555;padding:4px 0"><strong>Data</strong></td><td style="color:#111">{data_criacao}</td></tr>
+          <tr><td style="color:#555;padding:4px 0"><strong>Observações</strong></td><td style="color:#111">{pedido.observacoes or '—'}</td></tr>
+        </table>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#1e3a5f;color:#fff">
+              <th style="padding:8px 10px;text-align:left">Código</th>
+              <th style="padding:8px 10px;text-align:left">Produto</th>
+              <th style="padding:8px 10px;text-align:center">Qtd</th>
+              <th style="padding:8px 10px;text-align:right">Unitário</th>
+              <th style="padding:8px 10px;text-align:right">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>{linhas_html}</tbody>
+          <tfoot>
+            <tr style="background:#e8f0f8">
+              <td colspan="4" style="padding:8px 10px;text-align:right;font-weight:bold">Total</td>
+              <td style="padding:8px 10px;text-align:right;font-weight:bold;color:#1e3a5f">R$ {float(pedido.total):.2f}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+    """
+
+    msg = EmailMultiAlternatives(
+        subject=f'[Novo Pedido] {pedido.numero_referencia} — {solicitante}',
+        body=corpo_txt,
+        to=_EMAIL_COMPRAS,
+        cc=_EMAIL_CC,
+    )
+    msg.attach_alternative(corpo_html, 'text/html')
+    msg.send(fail_silently=True)
+
+
 def _processar_notificacoes(pedido, novo_status, motivo=None):
     if novo_status not in _STATUS_NOTIFICACAO:
         return
@@ -335,6 +417,15 @@ class PedidoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Pedido.objects.all()
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        pedido = serializer.instance
+        threading.Thread(
+            target=_enviar_email_novo_pedido,
+            args=(pedido,),
+            daemon=True,
+        ).start()
 
     @action(detail=True, methods=['patch'])
     def update_status(self, request, pk=None):
