@@ -1,5 +1,7 @@
 import base64
+import os
 import threading
+from email.mime.image import MIMEImage
 from io import BytesIO
 
 import django_filters
@@ -12,6 +14,7 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.contrib.auth.models import User
+from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.views.decorators.csrf import csrf_exempt
 from django_filters.rest_framework import DjangoFilterBackend
@@ -297,6 +300,12 @@ _EMAIL_CC      = ['jiangoersch@grupodb.com.br']
 
 
 def _enviar_email_novo_pedido(pedido):
+    # Cores da identidade visual
+    AZUL    = '#004EAE'
+    LARANJA = '#FFB100'
+    VERDE   = '#00B036'
+    CIANO   = '#00CFDD'
+
     itens = list(pedido.itens_pedido.all())
     solicitante = pedido.usuario.get_full_name() or pedido.usuario.username
     data_criacao = pedido.created_at.strftime('%d/%m/%Y %H:%M')
@@ -306,15 +315,16 @@ def _enviar_email_novo_pedido(pedido):
         f"R$ {float(i.preco_unitario):.2f} un. | Subtotal: R$ {float(i.subtotal):.2f}"
         for i in itens
     )
+
     linhas_html = ''.join(
-        f"<tr>"
-        f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{i.cod_erp or '-'}</td>"
-        f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{i.nome_produto or '-'}</td>"
-        f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:center'>{i.quantidade}</td>"
-        f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>R$ {float(i.preco_unitario):.2f}</td>"
-        f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>R$ {float(i.subtotal):.2f}</td>"
+        f"<tr style=\"background:{'#f7fbff' if idx % 2 == 0 else '#fff'}\">"
+        f"<td style='padding:9px 14px;border-bottom:1px solid #e8eef5;color:#444;font-size:13px'>{i.cod_erp or '-'}</td>"
+        f"<td style='padding:9px 14px;border-bottom:1px solid #e8eef5;color:#222;font-size:13px'>{i.nome_produto or '-'}</td>"
+        f"<td style='padding:9px 14px;border-bottom:1px solid #e8eef5;text-align:center;color:#444;font-size:13px'>{i.quantidade}</td>"
+        f"<td style='padding:9px 14px;border-bottom:1px solid #e8eef5;text-align:right;color:#444;font-size:13px'>R$ {float(i.preco_unitario):.2f}</td>"
+        f"<td style='padding:9px 14px;border-bottom:1px solid #e8eef5;text-align:right;font-weight:700;color:{AZUL};font-size:13px'>R$ {float(i.subtotal):.2f}</td>"
         f"</tr>"
-        for i in itens
+        for idx, i in enumerate(itens)
     )
 
     corpo_txt = (
@@ -327,40 +337,121 @@ def _enviar_email_novo_pedido(pedido):
         f"Itens:\n{linhas_txt}\n"
     )
 
-    corpo_html = f"""
-    <div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto">
-      <div style="background:#1e3a5f;padding:20px 24px;border-radius:8px 8px 0 0">
-        <h2 style="color:#fff;margin:0;font-size:18px">Novo Pedido de Compra</h2>
-        <p style="color:#a8c4e0;margin:4px 0 0;font-size:13px">ManagerDB — Setor de Compras</p>
-      </div>
-      <div style="background:#f9f9f9;padding:20px 24px;border:1px solid #e0e0e0;border-top:none">
-        <table style="width:100%;font-size:14px;margin-bottom:20px">
-          <tr><td style="color:#555;padding:4px 0;width:120px"><strong>Número</strong></td><td style="color:#111">{pedido.numero_referencia}</td></tr>
-          <tr><td style="color:#555;padding:4px 0"><strong>Solicitante</strong></td><td style="color:#111">{solicitante}</td></tr>
-          <tr><td style="color:#555;padding:4px 0"><strong>Data</strong></td><td style="color:#111">{data_criacao}</td></tr>
-          <tr><td style="color:#555;padding:4px 0"><strong>Observações</strong></td><td style="color:#111">{pedido.observacoes or '—'}</td></tr>
-        </table>
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead>
-            <tr style="background:#1e3a5f;color:#fff">
-              <th style="padding:8px 10px;text-align:left">Código</th>
-              <th style="padding:8px 10px;text-align:left">Produto</th>
-              <th style="padding:8px 10px;text-align:center">Qtd</th>
-              <th style="padding:8px 10px;text-align:right">Unitário</th>
-              <th style="padding:8px 10px;text-align:right">Subtotal</th>
-            </tr>
-          </thead>
-          <tbody>{linhas_html}</tbody>
-          <tfoot>
-            <tr style="background:#e8f0f8">
-              <td colspan="4" style="padding:8px 10px;text-align:right;font-weight:bold">Total</td>
-              <td style="padding:8px 10px;text-align:right;font-weight:bold;color:#1e3a5f">R$ {float(pedido.total):.2f}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </div>
-    """
+    corpo_html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef2f7;font-family:Arial,Helvetica,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef2f7;padding:32px 16px">
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%">
+
+  <!-- ===== HEADER ===== -->
+  <tr>
+    <td style="background:{AZUL};border-radius:12px 12px 0 0;padding:24px 32px">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="vertical-align:middle">
+            <img src="cid:logo_db" alt="Grupo Dagoberto Barcellos" height="70" style="display:block;border:0">
+          </td>
+          <td align="right" style="vertical-align:middle">
+            <p style="margin:0;color:rgba(255,255,255,0.55);font-size:11px;letter-spacing:1px;text-transform:uppercase">Sistema ManagerDB</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Faixa colorida laranja + verde + ciano -->
+  <tr>
+    <td style="padding:0;line-height:0;font-size:0">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td width="33%" style="background:{LARANJA};height:5px">&nbsp;</td>
+        <td width="33%" style="background:{VERDE};height:5px">&nbsp;</td>
+        <td width="34%" style="background:{CIANO};height:5px">&nbsp;</td>
+      </tr></table>
+    </td>
+  </tr>
+
+  <!-- ===== TÍTULO ===== -->
+  <tr>
+    <td style="background:#fff;padding:28px 32px 20px">
+      <h1 style="margin:0 0 6px;font-size:22px;font-weight:700;color:{AZUL}">Novo Pedido de Compra</h1>
+      <p style="margin:0;font-size:14px;color:#888">Referência: <strong style="color:{CIANO}">{pedido.numero_referencia}</strong></p>
+    </td>
+  </tr>
+
+  <!-- ===== DADOS DO PEDIDO ===== -->
+  <tr>
+    <td style="background:#fff;padding:0 32px 24px">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#f0f7ff;border-radius:8px;border-left:4px solid {CIANO}">
+        <tr>
+          <td style="padding:18px 20px">
+            <table width="100%" cellpadding="5" cellspacing="0" border="0" style="font-size:14px">
+              <tr>
+                <td style="color:#888;width:130px;white-space:nowrap">Solicitante</td>
+                <td style="color:#111;font-weight:700">{solicitante}</td>
+              </tr>
+              <tr>
+                <td style="color:#888">Data / Hora</td>
+                <td style="color:#333">{data_criacao}</td>
+              </tr>
+              <tr>
+                <td style="color:#888;vertical-align:top">Observações</td>
+                <td style="color:#333">{pedido.observacoes or '—'}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- ===== TABELA DE ITENS ===== -->
+  <tr>
+    <td style="background:#fff;padding:0 32px 28px">
+      <p style="margin:0 0 14px;font-size:13px;font-weight:700;color:{AZUL};text-transform:uppercase;letter-spacing:0.8px">
+        Itens do Pedido
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden">
+        <thead>
+          <tr style="background:{AZUL}">
+            <th style="padding:11px 14px;text-align:left;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.3px">Código</th>
+            <th style="padding:11px 14px;text-align:left;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.3px">Produto</th>
+            <th style="padding:11px 14px;text-align:center;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.3px">Qtd</th>
+            <th style="padding:11px 14px;text-align:right;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.3px">Unitário</th>
+            <th style="padding:11px 14px;text-align:right;color:{LARANJA};font-size:12px;font-weight:600;letter-spacing:0.3px">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>{linhas_html}</tbody>
+        <tfoot>
+          <tr style="background:{AZUL}">
+            <td colspan="4" style="padding:12px 14px;text-align:right;color:#fff;font-size:14px;font-weight:700">
+              Total do Pedido
+            </td>
+            <td style="padding:12px 14px;text-align:right;color:{LARANJA};font-size:18px;font-weight:700">
+              R$ {float(pedido.total):.2f}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </td>
+  </tr>
+
+  <!-- ===== FOOTER ===== -->
+  <tr>
+    <td style="background:{AZUL};border-radius:0 0 12px 12px;padding:16px 32px;text-align:center">
+      <p style="margin:0;color:rgba(255,255,255,0.5);font-size:11px;letter-spacing:0.3px">
+        Email automático gerado pelo sistema ManagerDB &mdash; Grupo Dagoberto Barcellos
+      </p>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
 
     msg = EmailMultiAlternatives(
         subject=f'[Novo Pedido] {pedido.numero_referencia} — {solicitante}',
@@ -368,7 +459,17 @@ def _enviar_email_novo_pedido(pedido):
         to=_EMAIL_COMPRAS,
         cc=_EMAIL_CC,
     )
+    msg.mixed_subtype = 'related'
     msg.attach_alternative(corpo_html, 'text/html')
+
+    logo_path = os.path.join(settings.MEDIA_ROOT, 'logoNovoDb.png')
+    if os.path.exists(logo_path):
+        with open(logo_path, 'rb') as f:
+            logo = MIMEImage(f.read())
+        logo.add_header('Content-ID', '<logo_db>')
+        logo.add_header('Content-Disposition', 'inline', filename='logoNovoDb.png')
+        msg.attach(logo)
+
     msg.send(fail_silently=True)
 
 
