@@ -297,7 +297,7 @@ def _notificar_compras(pedido, tipo, mensagem):
     PedidoNotificacao.objects.bulk_create(notificacoes)
 
 
-_EMAIL_COMPRAS = ['compras@grupodb.com.br']
+_EMAIL_COMPRAS = ['suprimentos@grupodb.com.br']
 _EMAIL_CC      = ['jiangoersch@grupodb.com.br']
 
 
