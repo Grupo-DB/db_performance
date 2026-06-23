@@ -482,6 +482,20 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             else:
                 qs = qs.filter(amostra__finalidade__icontains=finalidade)
 
+        tipo = data.get('tipo')
+        if tipo:
+            if isinstance(tipo, list):
+                qs = qs.filter(amostra__produto_amostra__tipo__in=tipo)
+            else:
+                qs = qs.filter(amostra__produto_amostra__tipo__icontains=tipo)
+
+        subtipo = data.get('subtipo')
+        if subtipo:
+            if isinstance(subtipo, list):
+                qs = qs.filter(amostra__produto_amostra__subtipo__in=subtipo)
+            else:
+                qs = qs.filter(amostra__produto_amostra__subtipo__icontains=subtipo)
+
         qs = qs.order_by('-id')
 
         # ── 2. SERIALIZAÇÃO COMPACTA DA LISTA ───────────────────────────────
