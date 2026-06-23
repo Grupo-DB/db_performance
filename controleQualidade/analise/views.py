@@ -306,29 +306,27 @@ class AnaliseViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='remover_ensaio')
     def remover_ensaio(self, request, pk=None):
         analise = self.get_object()
-        ensaio_id = request.data.get('ensaio_id')
-        if not ensaio_id:
-            return Response({"error": "ensaio_id é obrigatório."}, status=400)
+        instance_key = request.data.get('instance_key')
+        if not instance_key:
+            return Response({"error": "instance_key é obrigatório."}, status=400)
         excluded = list(analise.excluded_ensaios or [])
-        if ensaio_id not in excluded:
-            excluded.append(ensaio_id)
+        if instance_key not in excluded:
+            excluded.append(instance_key)
         analise.excluded_ensaios = excluded
         analise.save(update_fields=['excluded_ensaios'])
-        AnaliseEnsaio.objects.filter(analise=analise, ensaios_id=ensaio_id).delete()
         return Response({"status": "Ensaio removido.", "excluded_ensaios": excluded})
 
     @action(detail=True, methods=['post'], url_path='remover_calculo')
     def remover_calculo(self, request, pk=None):
         analise = self.get_object()
-        calculo_id = request.data.get('calculo_id')
-        if not calculo_id:
-            return Response({"error": "calculo_id é obrigatório."}, status=400)
+        instance_key = request.data.get('instance_key')
+        if not instance_key:
+            return Response({"error": "instance_key é obrigatório."}, status=400)
         excluded = list(analise.excluded_calculos or [])
-        if calculo_id not in excluded:
-            excluded.append(calculo_id)
+        if instance_key not in excluded:
+            excluded.append(instance_key)
         analise.excluded_calculos = excluded
         analise.save(update_fields=['excluded_calculos'])
-        AnaliseCalculo.objects.filter(analise=analise, calculos=str(calculo_id)).delete()
         return Response({"status": "Cálculo removido.", "excluded_calculos": excluded})
 
     @action(detail=False, methods=['get'], url_path='calcs')
