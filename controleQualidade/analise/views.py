@@ -367,12 +367,15 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         qs = Analise.objects.select_related('amostra', 'amostra__produto_amostra')
 
         # Datas da análise
+        from datetime import datetime as _dt, timedelta as _td
         data_inicio = data.get('data_inicio')
         data_fim = data.get('data_fim')
         if data_inicio:
-            qs = qs.filter(data__date__gte=data_inicio)
+            qs = qs.filter(data__gte=data_inicio)
         if data_fim:
-            qs = qs.filter(data__date__lte=data_fim)
+            # soma 1 dia para incluir registros de qualquer hora do dia_fim
+            fim_dt = _dt.strptime(data_fim, '%Y-%m-%d') + _td(days=1)
+            qs = qs.filter(data__lt=fim_dt)
 
         # Datas de finalização
         finalizada_inicio = data.get('finalizada_inicio')

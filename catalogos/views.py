@@ -142,18 +142,16 @@ def consultar_produtos(request):
 
     records = _df_to_records(df)
 
-    # Enriquecer com mapeamento por MARCA do ERP (campo 'equipamento' no mapeamento)
-    marcas = {str(r['MARCA']) for r in records if r.get('MARCA')}
+    # Enriquecer com mapeamento por MARCA do ERP — case-insensitive via upper() no Python
+    # Carrega todos os mapeamentos (tabela pequena) e indexa por upper() para evitar mismatches
     mapeamentos_eq = {
-        m.equipamento: m
-        for m in EquipamentoCatalogo.objects.filter(
-            equipamento__in=marcas
-        ).select_related('catalogo')
+        m.equipamento.upper(): m
+        for m in EquipamentoCatalogo.objects.select_related('catalogo').all()
     }
 
     for record in records:
         marca = str(record.get('MARCA') or '')
-        mapa = mapeamentos_eq.get(marca)
+        mapa = mapeamentos_eq.get(marca.upper())
         if mapa and mapa.catalogo:
             record['equipamento_nome'] = mapa.equipamento
             record['catalogo_id'] = mapa.catalogo.id
