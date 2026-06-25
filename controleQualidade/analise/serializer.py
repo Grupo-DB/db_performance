@@ -120,32 +120,33 @@ class AnaliseSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         ensaios_data = validated_data.pop('ensaios', [])
         calculos_data = validated_data.pop('calculos', [])
-        # Atualiza os campos normais da análise
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # Salva ensaios
-        for ensaio in ensaios_data:
-            AnaliseEnsaio.objects.create(
-                analise=instance,
-                ensaios_utilizados=ensaio.get('ensaios_utilizados', []),
-                responsavel=ensaio.get('responsavel'),
-                digitador=ensaio.get('digitador'),
-                ensaios=ensaio.get('ensaios'),
-            )
-            
-        # Salva cálculos
-        for calc in calculos_data:
-            AnaliseCalculo.objects.create(
-                analise=instance,
-                calculos=calc.get('calculos'),
-                resultados=calc.get('resultados'),
-                ensaios_utilizados=calc.get('ensaios_utilizados', []),
-                responsavel=calc.get('responsavel'),
-                digitador=calc.get('digitador'),
-                laboratorio=calc.get('laboratorio'),
-            )
+        if ensaios_data:
+            instance.ensaios.all().delete()
+            for ensaio in ensaios_data:
+                AnaliseEnsaio.objects.create(
+                    analise=instance,
+                    ensaios_utilizados=ensaio.get('ensaios_utilizados', []),
+                    responsavel=ensaio.get('responsavel'),
+                    digitador=ensaio.get('digitador'),
+                    ensaios=ensaio.get('ensaios'),
+                )
+
+        if calculos_data:
+            instance.calculos.all().delete()
+            for calc in calculos_data:
+                AnaliseCalculo.objects.create(
+                    analise=instance,
+                    calculos=calc.get('calculos'),
+                    resultados=calc.get('resultados'),
+                    ensaios_utilizados=calc.get('ensaios_utilizados', []),
+                    responsavel=calc.get('responsavel'),
+                    digitador=calc.get('digitador'),
+                    laboratorio=calc.get('laboratorio'),
+                )
 
         return instance
 
