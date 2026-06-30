@@ -6,8 +6,12 @@ from rest_framework import viewsets
 from sqlalchemy import create_engine
 from django.views.decorators.csrf import csrf_exempt
 from django.db import connections
-from .models import Regiao, Representante, Meta, Comissao
-from .serializers import RegiaoSerializer, RepresentanteSerializer, MetaSerializer, ComissaoSerializer
+from .models import (Regiao, Representante, Meta, Comissao, ParametroComissao,
+                     VinculoRepresentante, MapeamentoMunicipio,
+                     RegraComissao, RegraComissaoGrupo, RegraComissaoFaixa)
+from .serializers import (RegiaoSerializer, RepresentanteSerializer, MetaSerializer, ComissaoSerializer,
+                          ParametroComissaoSerializer, VinculoRepresentanteSerializer, MapeamentoMunicipioSerializer,
+                          RegraComissaoSerializer, RegraComissaoGrupoSerializer, RegraComissaoFaixaSerializer)
 import pandas as pd
 import locale
 
@@ -26,6 +30,149 @@ class MetaViewSet(viewsets.ModelViewSet):
 class ComissaoViewSet(viewsets.ModelViewSet):
     queryset = Comissao.objects.all()
     serializer_class = ComissaoSerializer
+
+class ParametroComissaoViewSet(viewsets.ModelViewSet):
+    queryset = ParametroComissao.objects.all()
+    serializer_class = ParametroComissaoSerializer
+
+
+class VinculoRepresentanteViewSet(viewsets.ModelViewSet):
+    queryset = VinculoRepresentante.objects.all().select_related('representante_externo', 'representante_interno')
+    serializer_class = VinculoRepresentanteSerializer
+
+
+class MapeamentoMunicipioViewSet(viewsets.ModelViewSet):
+    queryset = MapeamentoMunicipio.objects.all().select_related('representante')
+    serializer_class = MapeamentoMunicipioSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        segmento = self.request.query_params.get('segmento')
+        if segmento:
+            qs = qs.filter(segmento=segmento)
+        return qs
+
+
+class RegraComissaoViewSet(viewsets.ModelViewSet):
+    queryset = RegraComissao.objects.all().select_related('representante').prefetch_related('grupos', 'faixas')
+    serializer_class = RegraComissaoSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        rep = self.request.query_params.get('representante')
+        if rep:
+            qs = qs.filter(representante_id=rep)
+        return qs
+
+
+class RegraComissaoGrupoViewSet(viewsets.ModelViewSet):
+    queryset = RegraComissaoGrupo.objects.all()
+    serializer_class = RegraComissaoGrupoSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        regra = self.request.query_params.get('regra')
+        if regra:
+            qs = qs.filter(regra_id=regra)
+        return qs
+
+
+class RegraComissaoFaixaViewSet(viewsets.ModelViewSet):
+    queryset = RegraComissaoFaixa.objects.all()
+    serializer_class = RegraComissaoFaixaSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        regra = self.request.query_params.get('regra')
+        if regra:
+            qs = qs.filter(regra_id=regra)
+        return qs
+
+
+@csrf_exempt
+@api_view(['POST'])
+def popular_mapeamento_agro(request):
+    """Pré-popula MapeamentoMunicipio com o mapa de cidades agro hardcoded.
+    Só insere registros que ainda não existem. Retorna contagem de inseridos/pulados."""
+    _CIDADE_AGRO_REP_POPULAR = {
+        'ALECRIM-RS': 'EVERTON MARQUES DORNELES',
+        'CANDIDO GODOI-RS': 'EVERTON MARQUES DORNELES',
+        'INDEPENDENCIA-RS': 'EVERTON MARQUES DORNELES',
+        'NOVO MACHADO-RS': 'EVERTON MARQUES DORNELES',
+        'PORTO LUCENA-RS': 'EVERTON MARQUES DORNELES',
+        'PORTO MAUA-RS': 'EVERTON MARQUES DORNELES',
+        'PORTO VERA CRUZ-RS': 'EVERTON MARQUES DORNELES',
+        'SANTA ROSA-RS': 'EVERTON MARQUES DORNELES',
+        'SANTO CRISTO-RS': 'EVERTON MARQUES DORNELES',
+        'SAO JOSE DO INHACORA-RS': 'EVERTON MARQUES DORNELES',
+        'TRES DE MAIO-RS': 'EVERTON MARQUES DORNELES',
+        'TUCUNDUVA-RS': 'EVERTON MARQUES DORNELES',
+        'TUPARENDI-RS': 'EVERTON MARQUES DORNELES',
+        'BARRA DO GUARITA-RS': 'EVERTON MARQUES DORNELES',
+        'BOA VISTA DO BURICA-RS': 'EVERTON MARQUES DORNELES',
+        'BOM PROGRESSO-RS': 'EVERTON MARQUES DORNELES',
+        'BRAGA-RS': 'EVERTON MARQUES DORNELES',
+        'CAMPO NOVO-RS': 'EVERTON MARQUES DORNELES',
+        'CRISSIUMAL-RS': 'EVERTON MARQUES DORNELES',
+        'DERRUBADAS-RS': 'EVERTON MARQUES DORNELES',
+        'DOUTOR MAURICIO CARDOSO-RS': 'EVERTON MARQUES DORNELES',
+        'ESPERANCA DO SUL-RS': 'EVERTON MARQUES DORNELES',
+        'HORIZONTINA-RS': 'EVERTON MARQUES DORNELES',
+        'HUMAITA-RS': 'EVERTON MARQUES DORNELES',
+        'MIRAGUAI-RS': 'EVERTON MARQUES DORNELES',
+        'NOVA CANDELARIA-RS': 'EVERTON MARQUES DORNELES',
+        'REDENTORA-RS': 'EVERTON MARQUES DORNELES',
+        'SAO MARTINHO-RS': 'EVERTON MARQUES DORNELES',
+        'SEDE NOVA-RS': 'EVERTON MARQUES DORNELES',
+        'TENENTE PORTELA-RS': 'EVERTON MARQUES DORNELES',
+        'TIRADENTES DO SUL-RS': 'EVERTON MARQUES DORNELES',
+        'TRES PASSOS-RS': 'EVERTON MARQUES DORNELES',
+        'VISTA GAUCHA-RS': 'EVERTON MARQUES DORNELES',
+        'FREDERICO WESTPHALEN-RS': 'EVERTON MARQUES DORNELES',
+        'BOSSOROCA-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'ENTRE-IJUIS-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'EUGENIO DE CASTRO-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'SANTO ANGELO-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'SAO MIGUEL DAS MISSOES-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'AUGUSTO PESTANA-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'CORONEL BARROS-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'IJUI-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'PEJUCARA-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'CARAZINHO-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'PASSO FUNDO-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'SANTA MARIA-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'ERECHIM-RS': 'EVERTON MARQUES DORNELES',
+        'PELOTAS-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'TREINTA Y TRES-EX': 'ILDOMAR DA FONTE CARVALHO',
+    }
+
+    inseridos = 0
+    pulados = 0
+    nao_encontrados = []
+
+    for cidade, rep_nome in _CIDADE_AGRO_REP_POPULAR.items():
+        try:
+            rep = Representante.objects.filter(nome__icontains=rep_nome.split()[0]).first()
+            if not rep:
+                nao_encontrados.append({'cidade': cidade, 'representante': rep_nome})
+                continue
+            _, created = MapeamentoMunicipio.objects.get_or_create(
+                cidade_estado=cidade,
+                segmento='AGRONEGOCIO',
+                defaults={'representante': rep}
+            )
+            if created:
+                inseridos += 1
+            else:
+                pulados += 1
+        except Exception as e:
+            nao_encontrados.append({'cidade': cidade, 'erro': str(e)})
+
+    return JsonResponse({
+        'inseridos': inseridos,
+        'pulados': pulados,
+        'nao_encontrados': nao_encontrados,
+    })
 
 
 #========================   Consulta de vendas para montar cálculos =========================#
@@ -437,6 +584,18 @@ def calculos_comissoes(request):
     data_inicio_dt = datetime.datetime.strptime(dataInicio, '%Y-%m-%d').date()
     periodo_chave = f"{data_inicio_dt.month:02d}/{data_inicio_dt.year}"
 
+    # ── Parâmetros de comissão configuráveis ─────────────────────────────────
+    try:
+        _params_qs = ParametroComissao.objects.filter(ativo=True)
+        _params = {pc.chave: float(pc.taxa) for pc in _params_qs}
+    except Exception:
+        _params = {}
+
+    def p(chave, default):
+        """Retorna o parâmetro do banco ou o valor padrão."""
+        return _params.get(chave, default)
+    # ─────────────────────────────────────────────────────────────────────────
+
     # Busca metas do banco para o período e monta no mesmo formato do metas_request
     # chave: "MM/AAAAREP_NOME" → {"CB": valor, "PRIMOR": valor, ...}
     from .models import Meta as MetaModel
@@ -469,11 +628,21 @@ def calculos_comissoes(request):
     # ===== CONSTRUÇÃO CIVIL =====
     df_cc = df[df['SEGMENTO_PRODUTO'] == 'CONSTRUCAO CIVIL'].copy()
 
-    # Grupos de gestão → taxas base
-    taxas_externo = {'CB': 0.019, 'PRIMOR': 0.005, 'PRIMEX': 0.007, 'FINALIZA': 0.014}
-    taxas_interno = {'CB': 0.002, 'PRIMOR': 0.002, 'PRIMEX': 0.002, 'FINALIZA': 0.002}
-    bonus_externo = 0.001   # +0,10% por grupo atingido
-    bonus_interno = 0.0005  # +0,05% por grupo atingido
+    # Grupos de gestão → taxas base (configuráveis via ParametroComissao)
+    taxas_externo = {
+        'CB':       p('EXTERNO_CC_CB',       0.019),
+        'PRIMOR':   p('EXTERNO_CC_PRIMOR',   0.005),
+        'PRIMEX':   p('EXTERNO_CC_PRIMEX',   0.007),
+        'FINALIZA': p('EXTERNO_CC_FINALIZA', 0.014),
+    }
+    taxas_interno = {
+        'CB':       p('INTERNO_CC_CB',       0.002),
+        'PRIMOR':   p('INTERNO_CC_PRIMOR',   0.002),
+        'PRIMEX':   p('INTERNO_CC_PRIMEX',   0.002),
+        'FINALIZA': p('INTERNO_CC_FINALIZA', 0.002),
+    }
+    bonus_externo = p('BONUS_EXTERNO_CC', 0.001)
+    bonus_interno = p('BONUS_INTERNO_CC', 0.0005)
 
     # GRUPO_COMERCIAL (coluna AA da planilha) é a base do filtro de grupo
     grupo_cb_termos    = ['CB CAL', 'CAL PINTURA', 'CERRO BRANCO', 'CAL CREM', 'CB/CAL']
@@ -647,10 +816,10 @@ def calculos_comissoes(request):
     proporcao_agner_matriz = (total_agner_matriz / total_agner) if total_agner > 0 else 0
     vendas_agner = vendas_por_grupo(df_agner)
     comissao_agner_base, comissao_grupos_agner = comissao_ext_com_bonus(vendas_agner, f"{periodo_chave}AGNER LORETO WALMRATH")
-    # Adicional CARBOMAX: SUMIFS(V:V, K:K, AGNER, AA:AA, "CARBOMAX") * 0,8%
+    # Adicional CARBOMAX: SUMIFS(V:V, K:K, AGNER, AA:AA, "CARBOMAX") * taxa configurável
     venda_agner_carbomax = df_agner[df_agner['GRUPO_COMERCIAL'].str.contains('CARBOMAX', na=False)]['VALOR_PRODUTO'].sum()
-    comissao_agner_base += venda_agner_carbomax * 0.008
-    comissao_agner = comissao_agner_base * 1.05
+    comissao_agner_base += venda_agner_carbomax * p('AGNER_CARBOMAX_TAXA', 0.008)
+    comissao_agner = comissao_agner_base * p('AGNER_MULTIPLICADOR', 1.05)
     total_comissao_primex += comissao_grupos_agner.get('PRIMEX', 0.0)
     comissao_int_agner_total = comissao_int_com_bonus(vendas_agner, f"{periodo_chave}AGNER LORETO WALMRATH")
     comissao_int_agner_proporcional = comissao_int_agner_total * proporcao_agner_matriz
@@ -691,13 +860,13 @@ def calculos_comissoes(request):
         meta_adriano = sum(_metas_adriano_grupos.values()) if _metas_adriano_grupos else 0
     pct_atingido = (venda_adriano / meta_adriano * 100) if meta_adriano > 0 else 0
     if pct_atingido >= 120:
-        taxa_adriano = 0.05
+        taxa_adriano = p('ADRIANO_TAXA_120_MAIS', 0.05)
     elif pct_atingido >= 100:
-        taxa_adriano = 0.04
+        taxa_adriano = p('ADRIANO_TAXA_100_119', 0.04)
     elif pct_atingido >= 50:
-        taxa_adriano = 0.03
+        taxa_adriano = p('ADRIANO_TAXA_50_99', 0.03)
     else:
-        taxa_adriano = 0.02
+        taxa_adriano = p('ADRIANO_TAXA_0_49', 0.02)
     # Comissão interna Vagner via Adriano Born (0,2%/grupo com potencializador)
     vendas_adriano_grupos = vendas_por_grupo_total(df_adriano)
     comissao_int_adriano = comissao_int_com_bonus(vendas_adriano_grupos, chave_adriano)
@@ -743,16 +912,16 @@ def calculos_comissoes(request):
         }
 
     # ---- 4. Jocelaine (Auxiliar de Vendas Matriz) ----
-    comissao_jocelaine = base_jocelaine_vendas * 0.0001 + jocelaine_agner
+    comissao_jocelaine = base_jocelaine_vendas * p('JOCELAINE_BASE', 0.0001) + jocelaine_agner
     resultado['JOCELAINE FARIAS BAHU'] = {
         'comissao': round(comissao_jocelaine, 2),
         'base_vendas': round(float(base_jocelaine_vendas), 2),
         'tipo': 'Auxiliar Vendas Matriz CC'
     }
 
-    # ---- 4b. Marco Alan Lopes — 10% do total de comissões PRIMEX ----
+    # ---- 4b. Marco Alan Lopes — % configurável do total de comissões PRIMEX ----
     resultado['MARCO ALAN LOPES'] = {
-        'comissao': round(total_comissao_primex * 0.10, 2),
+        'comissao': round(total_comissao_primex * p('MARCO_ALAN_PCT_PRIMEX', 0.10), 2),
         'base_primex': round(total_comissao_primex, 2),
         'base_primex_breakdown': {k: round(v['comissao_por_grupo'].get('PRIMEX', 0.0), 2) for k, v in resultado.items() if isinstance(v, dict) and 'comissao_por_grupo' in v},
         'adriano_primex': round(comissao_ext_pg_adriano.get('PRIMEX', 0.0), 2),
@@ -763,7 +932,7 @@ def calculos_comissoes(request):
     df_quero_quero = df[df['CLIENTE_NOME'].str.contains('QUERO', na=False)]
     venda_quero_quero = df_quero_quero['VALOR_PRODUTO'].sum()
     venda_mpa = base_mpa_vendas
-    comissao_marina = venda_quero_quero * 0.001 + venda_mpa * 0.0003
+    comissao_marina = venda_quero_quero * p('MARINA_QUERO_QUERO', 0.001) + venda_mpa * p('MARINA_MPA', 0.0003)
     resultado['MARINA GABRIELLY PEREIRA'] = {
         'comissao': round(float(comissao_marina), 2),
         'venda_quero_quero': round(float(venda_quero_quero), 2),
@@ -814,15 +983,15 @@ def calculos_comissoes(request):
             df_rep_atm = df_atm_fil[df_atm_fil['REPRESENTANTE'].str.contains(rep_ext, na=False, regex=False)]
         else:
             df_rep_atm = df_cc[df_cc['REPRESENTANTE'].str.contains(rep_ext, na=False, regex=False)]
-        atm_internos[int_atm] = atm_internos.get(int_atm, 0) + df_rep_atm['VALOR_PRODUTO'].sum() * 0.0025
+        atm_internos[int_atm] = atm_internos.get(int_atm, 0) + df_rep_atm['VALOR_PRODUTO'].sum() * p('ATM_INTERNO_REPS', 0.0025)
 
-    # Cal Sucro: 0,125% → 100% Mariane (todas as filiais)
+    # Cal Sucro: taxa configurável → 100% Mariane (todas as filiais)
     df_cal_sucro = df_cc[_mask_cal_sucro]
-    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_cal_sucro['VALOR_PRODUTO'].sum() * 0.00125
+    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_cal_sucro['VALOR_PRODUTO'].sum() * p('ATM_CAL_SUCRO', 0.00125)
 
     # KRICAL: cliente tratado como rep ATM de Mariane — filtra por CLIENTE_NOME
     df_krical = df_cc[df_cc['CLIENTE_NOME'].str.contains('KRICAL', na=False)]
-    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_krical['VALOR_PRODUTO'].sum() * 0.0025
+    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_krical['VALOR_PRODUTO'].sum() * p('ATM_KRICAL', 0.0025)
 
     # Termos de externos CC da Matriz (VINCULO_INT_MATRIZ + Adriano Born) — usados para excluir da dolomita
     def is_ext_cc_matriz(r):
@@ -871,10 +1040,11 @@ def calculos_comissoes(request):
         return 'ALEXANDRA'      # Outros estados → Alexandra
 
     df_dolomita_atm['REGIAO_ATM'] = df_dolomita_atm['CIDADE_FATURAMENTO'].apply(classifica_regiao_atm)
-    atm_internos['ALEXANDRA PERUSSI'] += df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum() * 0.005
-    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum() * 0.005
+    _taxa_dolomita = p('ATM_DOLOMITA', 0.005)
+    atm_internos['ALEXANDRA PERUSSI'] += df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum() * _taxa_dolomita
+    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum() * _taxa_dolomita
 
-    # ATM Direto: 0,5% (somente filial ATM, excluindo dolomita, cal sucro, externos CC e KRICAL por CLIENTE_NOME)
+    # ATM Direto: taxa configurável (somente filial ATM, excluindo dolomita, cal sucro, externos CC e KRICAL por CLIENTE_NOME)
     _mask_krical_cliente = df_atm_fil['CLIENTE_NOME'].str.contains('KRICAL', na=False)
     df_atm_direto = df_atm_fil[
         ~_mask_dolomit.reindex(df_atm_fil.index, fill_value=False) &
@@ -883,14 +1053,15 @@ def calculos_comissoes(request):
         ~_mask_krical_cliente
     ].copy()
     df_atm_direto['REGIAO_ATM'] = df_atm_direto['CIDADE_FATURAMENTO'].apply(classifica_regiao_atm)
-    atm_internos['ALEXANDRA PERUSSI'] += df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum() * 0.005
-    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum() * 0.005
+    _taxa_atm_direto = p('ATM_DIRETO', 0.005)
+    atm_internos['ALEXANDRA PERUSSI'] += df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum() * _taxa_atm_direto
+    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum() * _taxa_atm_direto
 
     # Darcilei: 0,04% sobre total ATM filial CC excluindo apenas COFCO
     # (equivalente à fórmula =SUMIFS(V:V,B:B,"F08 - UP ATM",S:S,"CC") - SUMIFS(...,F:F,"*cofco*") da planilha)
     _mask_cofco = df_atm_fil['CLIENTE_NOME'].str.contains('COFCO', case=False, na=False)
     venda_up_atm = df_atm_fil[~_mask_cofco]['VALOR_PRODUTO'].sum()
-    atm_internos['DARCILEI DOS SANTOS'] += venda_up_atm * 0.0004
+    atm_internos['DARCILEI DOS SANTOS'] += venda_up_atm * p('DARCILEI_ATM', 0.0004)
 
     # DEBUG: breakdown por componente
     _atm_debug = {}
@@ -979,8 +1150,8 @@ def calculos_comissoes(request):
     ]
     venda_sc = df_sc['VALOR_PRODUTO'].sum()
     venda_rs = df_rs['VALOR_PRODUTO'].sum()
-    comissao_sc = venda_sc * 0.005 if venda_sc >= 600000 else 3000.0
-    comissao_rs = venda_rs * 0.0005
+    comissao_sc = venda_sc * p('MARCO_CORREA_SC_TAXA', 0.005) if venda_sc >= p('MARCO_CORREA_SC_META', 600000.0) else p('MARCO_CORREA_SC_MINIMO', 3000.0)
+    comissao_rs = venda_rs * p('MARCO_CORREA_RS_TAXA', 0.0005)
     # DEBUG: breakdown RS por filial para identificar discrepância com planilha
     _df_rs_sem_atm = df_rs[~df_rs['EMPRESAFILIAL'].str.contains('ATM', na=False)]
     _rs_debug = {
@@ -995,13 +1166,14 @@ def calculos_comissoes(request):
         'sc_por_filial': df_sc.groupby('EMPRESAFILIAL')['VALOR_PRODUTO'].sum().round(2).to_dict(),
     }
     resultado['_marco_correa_debug'] = _rs_debug
+    _marco_correa_fixo = p('MARCO_CORREA_FIXO', 12500.0)
     resultado['MARCO ANTONIO CORREA'] = {
-        'comissao': round(comissao_sc + comissao_rs + 12500, 2),
+        'comissao': round(comissao_sc + comissao_rs + _marco_correa_fixo, 2),
         'comissao_sc': round(float(comissao_sc), 2),
         'venda_sc': round(float(venda_sc), 2),
         'comissao_rs': round(float(comissao_rs), 2),
         'venda_rs': round(float(venda_rs), 2),
-        'fixo': 12500,
+        'fixo': _marco_correa_fixo,
         'tipo': 'Comissão Marco Correa CC',
     }
 
@@ -1017,7 +1189,7 @@ def calculos_comissoes(request):
     # ---- 1. Vendedor Interno Agro (Felinto Pazinato Neto) ----
     df_agro_oxido     = df_agro[df_agro['GRUPO_COMERCIAL'].str.contains('OXIDO', na=False)]
     df_agro_nao_oxido = df_agro[~df_agro['GRUPO_COMERCIAL'].str.contains('OXIDO', na=False)]
-    comissao_int_agro = df_agro_nao_oxido['VALOR_PRODUTO'].sum() * 0.001 + df_agro_oxido['VALOR_PRODUTO'].sum() * 0.01
+    comissao_int_agro = df_agro_nao_oxido['VALOR_PRODUTO'].sum() * p('FELINTO_AGRO_GERAL', 0.001) + df_agro_oxido['VALOR_PRODUTO'].sum() * p('FELINTO_AGRO_OXIDO', 0.01)
     resultado['FELINTO PAZINATO NETO'] = {
         'comissao': round(float(comissao_int_agro), 2),
         'tipo': 'Vendedor Interno Agronegócio'
@@ -1373,8 +1545,15 @@ def calculos_comissoes(request):
         #'SANTO ANTONIO DA PATRULHA-RS': 'ILDOMAR DA FONTE CARVALHO',
         #'ALMIRANTE TAMANDARE-RS': 'EVERTON MARQUES DORNELES',
     }
-    # Normaliza as chaves removendo acentos para match robusto com nomes do banco
-    _CIDADE_AGRO_REP = {_norm_cidade(k): v for k, v in _CIDADE_AGRO_REP_RAW.items()}
+    # Carrega mapeamento do banco se disponível, senão usa o dict hardcoded como fallback
+    try:
+        _mapa_qs = MapeamentoMunicipio.objects.filter(segmento='AGRONEGOCIO').select_related('representante')
+        if _mapa_qs.exists():
+            _CIDADE_AGRO_REP = {_norm_cidade(m.cidade_estado): m.representante.nome.strip().upper() for m in _mapa_qs}
+        else:
+            _CIDADE_AGRO_REP = {_norm_cidade(k): v for k, v in _CIDADE_AGRO_REP_RAW.items()}
+    except Exception:
+        _CIDADE_AGRO_REP = {_norm_cidade(k): v for k, v in _CIDADE_AGRO_REP_RAW.items()}
 
     # Aplica XLOOKUP: Representante Agro = lookup por CIDADE_FATURAMENTO (excl YARA)
     df_agro_no_yara = df_agro[~_mask_yara_agro].copy()
@@ -1389,30 +1568,59 @@ def calculos_comissoes(request):
     venda_agro_total_geral = df_agro['VALOR_PRODUTO'].sum()
 
     _agro_debug = {}
+    _COLUNAS_LANCAMENTO = {
+        'DATA_EMISSAO': 'data',
+        'NOTA_FISCAL': 'nota_fiscal',
+        'REPRESENTANTE': 'representante',
+        'REPRESENTANTE_MASTER': 'representante_master',
+        'CLIENTE_NOME': 'cliente',
+        'CIDADE_FATURAMENTO': 'cidade',
+        'GRUPO_COMERCIAL': 'grupo_comercial',
+        'QUANTIDADE': 'quantidade',
+        'QUANTIDADE_TN': 'quantidade_tn',
+        'VALOR_TOTAL': 'valor_total',
+        'EMPRESAFILIAL': 'filial',
+    }
     for nome_agro in ('ILDOMAR DA FONTE CARVALHO', 'EVERTON MARQUES DORNELES'):
         mask_rep = df_agro_no_yara['_rep_agro'] == nome_agro
-        total_vendedor = df_agro_no_yara[mask_rep]['VALOR_PRODUTO'].sum()
+        df_rep = df_agro_no_yara[mask_rep].copy()
+        total_vendedor = df_rep['VALOR_PRODUTO'].sum()
         _agro_debug[f'{nome_agro}_total'] = round(float(total_vendedor), 2)
 
-        # comissao = total_vendedor * 0.8% + (total_agro_geral - total_vendedor) * 0.1%
-        #          = total_vendedor * 0.7% + total_agro_geral * 0.1%
+        # Monta lista de lançamentos individuais para o PDF
+        _cols_disp = {k: v for k, v in _COLUNAS_LANCAMENTO.items() if k in df_rep.columns}
+        df_lanc = df_rep[list(_cols_disp.keys())].rename(columns=_cols_disp).copy()
+        for _c in df_lanc.columns:
+            if pd.api.types.is_datetime64_any_dtype(df_lanc[_c]):
+                df_lanc[_c] = df_lanc[_c].dt.strftime('%d/%m/%Y')
+        for _c in ['valor_produto', 'valor_total', 'quantidade_tn']:
+            if _c in df_lanc.columns:
+                df_lanc[_c] = df_lanc[_c].round(2)
+        df_lanc = df_lanc.fillna('').sort_values('data') if 'data' in df_lanc.columns else df_lanc.fillna('')
+        lancamentos = df_lanc.to_dict(orient='records')
+
+        # comissao = total_vendedor * taxa_vendedor + total_agro_geral * taxa_base
         # Nota: $B$54 da planilha é o total agro GERAL (incl. YARA), não apenas excl. YARA
-        comissao_var = total_vendedor * 0.007 + venda_agro_total_geral * 0.001
+        _agro_fixo = p('AGRO_FIXO_REP', 8225.0)
+        comissao_var = total_vendedor * p('AGRO_TAXA_VENDEDOR', 0.007) + venda_agro_total_geral * p('AGRO_TAXA_BASE', 0.001)
         resultado[nome_agro] = {
-            'comissao': round(comissao_var + 8225, 2),
+            'comissao': round(comissao_var + _agro_fixo, 2),
             'comissao_variavel': round(float(comissao_var), 2),
             'total_vendedor': round(float(total_vendedor), 2),
-            'fixo': 8225,
+            'fixo': _agro_fixo,
+            'lancamentos': lancamentos,
             'tipo': 'Vendedor Externo Agronegócio'
         }
 
     # ---- 3. Vergilino Antonio Dutra ----
     _agro_debug['vergilino_base'] = round(float(venda_agro_total_geral), 2)
 
+    _vergilino_fixo = p('VERGILINO_FIXO', 5747.50)
+    _vergilino_taxa = p('VERGILINO_TAXA', 0.0015)
     resultado['VERGILINO ANTONIO DUTRA'] = {
-        'comissao': round(venda_agro_total_geral * 0.0015 + 5747.50, 2),
-        'comissao_variavel': round(float(venda_agro_total_geral * 0.0015), 2),
-        'fixo': 5747.50,
+        'comissao': round(venda_agro_total_geral * _vergilino_taxa + _vergilino_fixo, 2),
+        'comissao_variavel': round(float(venda_agro_total_geral * _vergilino_taxa), 2),
+        'fixo': _vergilino_fixo,
         'tipo': 'Representante Externo Agronegócio'
     }
 
