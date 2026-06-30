@@ -1829,6 +1829,21 @@ def calculos_comissoes(request):
         if not _notas_removidas.empty else []
     )
 
+    # Serializa dataframe bruto (exclui colunas PRAZO_1..PRAZO_10 para reduzir payload)
+    _prazo_cols = {c for c in df.columns if c.startswith('PRAZO_') and c != 'PRAZO_MD_LINEAR'}
+    _cols_export = [c for c in df.columns if c not in _prazo_cols]
+    _df_export = df[_cols_export].copy()
+    for _col in _df_export.columns:
+        if pd.api.types.is_datetime64_any_dtype(_df_export[_col]):
+            _df_export[_col] = _df_export[_col].dt.strftime('%d/%m/%Y')
+    _numeric_export = ['QUANTIDADE', 'QUANTIDADE_TN', 'VALOR_PRODUTO', 'ICMSST',
+                       'FRETE', 'VALOR_TOTAL', 'VLR_DIF_TAB_PRECO', 'INFUNIT',
+                       'VLR_TAB_PRECO', 'PRAZO_MD_LINEAR']
+    for _col in _numeric_export:
+        if _col in _df_export.columns:
+            _df_export[_col] = _df_export[_col].round(2)
+    _dataframe_vendas = _df_export.fillna('').to_dict(orient='records')
+
     return JsonResponse({
         'comissoes': resultado,
         'resumo_por_vendedor': dict(sorted(_resumo.items())),
@@ -1842,4 +1857,5 @@ def calculos_comissoes(request):
         'notas_removidas_por_cancelamento': _notas_removidas_lista,
         'periodo_canceladas_verificado': f"{_canc_inicio} a {_canc_fim}",
         'qtd_notas_removidas': len(_notas_removidas_lista),
+        'dataframe_vendas': _dataframe_vendas,
     }, safe=False)
