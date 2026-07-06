@@ -1,30 +1,127 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <title>Avaliações Pendentes - RH</title>
-</head>
-<body style="font-family: Arial, sans-serif;">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef2f7;font-family:Arial,Helvetica,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef2f7;padding:32px 16px">
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%">
 
-    <h2>Relatório de Avaliações Pendentes - {{ trimestre }}</h2>
+  <!-- ===== HEADER ===== -->
+  <tr>
+    <td style="padding:0;line-height:0;font-size:0;border-radius:12px 12px 0 0;overflow:hidden">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td width="33%" style="background:#004EAE;height:6px">&nbsp;</td>
+        <td width="33%" style="background:#FFB100;height:6px">&nbsp;</td>
+        <td width="34%" style="background:#00B036;height:6px">&nbsp;</td>
+      </tr></table>
+    </td>
+  </tr>
+  <tr>
+    <td style="background:#ffffff;padding:20px 32px;border-left:1px solid #e8eef5;border-right:1px solid #e8eef5">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="vertical-align:middle">
+            <img src="cid:logo_db" alt="Grupo Dagoberto Barcellos" height="72" style="display:block;border:0">
+          </td>
+          <td align="right" style="vertical-align:middle">
+            <p style="margin:0;color:#004EAE;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-weight:700">Sistema ManagerDB</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
 
-    <p>Prezados (as),</p>
-    <p>Segue abaixo a relação de avaliadores com avaliações pendentes neste trimestre:</p>
+  <tr>
+    <td style="padding:0;line-height:0;font-size:0">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="background:#004EAE;height:4px">&nbsp;</td>
+      </tr></table>
+    </td>
+  </tr>
 
-    {% for item in dados_relatorio %}
-        <h3>Avaliador: {{ item.avaliador }}</h3>
-        <ul>
-            {% for avaliado in item.avaliados %}
-                <li>{{ avaliado }}</li>
-            {% endfor %}
-        </ul>
-    {% endfor %}
+  <!-- ===== TÍTULO ===== -->
+  <tr>
+    <td style="background:#fff;padding:28px 32px 20px">
+      <h1 style="margin:0 0 6px;font-size:22px;font-weight:700;color:#004EAE">Relatório de Avaliações Pendentes</h1>
+      <p style="margin:0;font-size:14px;color:#888">Relação de avaliadores com avaliações pendentes no período</p>
+    </td>
+  </tr>
 
-    <p>Período de Avaliação: de {{ data_inicio }} até {{ data_fim }}</p>
-    <p>Esse e-mail foi enviado automaticamente pelo sistema de avaliações.</p>
+  <!-- ===== DADOS DO PERÍODO ===== -->
+  <tr>
+    <td style="background:#fff;padding:0 32px 24px">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#f0f7ff;border-radius:8px;border-left:4px solid #00CFDD">
+        <tr>
+          <td style="padding:18px 20px">
+            <table width="100%" cellpadding="5" cellspacing="0" border="0" style="font-size:14px">
+              <tr>
+                <td style="color:#888;width:130px;white-space:nowrap">Período</td>
+                <td style="color:#111;font-weight:700">{{ data_inicio }} até {{ data_fim }}</td>
+              </tr>
+              <tr>
+                <td style="color:#888;vertical-align:top">Avaliadores pendentes</td>
+                <td style="color:#333">{{ dados_relatorio|length }}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
 
-    <br><br>
-    <img src="https://live.staticflickr.com/65535/54648460354_c56ff83c73_c.jpg"  style="width:250px;">
+  <!-- ===== TABELA POR AVALIADOR ===== -->
+  {% for item in dados_relatorio %}
+  <tr>
+    <td style="background:#fff;padding:0 32px 20px">
+      <p style="margin:0 0 10px;font-size:13px;font-weight:700;color:#004EAE;text-transform:uppercase;letter-spacing:0.8px">
+        Avaliador: {{ item.avaliador }}
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden">
+        <thead>
+          <tr style="background:#004EAE">
+            <th style="padding:11px 14px;text-align:left;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.3px">Colaborador sem avaliação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for avaliado in item.avaliados %}
+          <tr style="background:{% cycle '#f7fbff' '#fff' %}">
+            <td style="padding:9px 14px;border-bottom:1px solid #e8eef5;color:#222;font-size:13px">{{ avaliado }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </td>
+  </tr>
+  {% endfor %}
 
+  <!-- ===== CTA ===== -->
+  <tr>
+    <td style="background:#fff;padding:0 32px 32px">
+      <table cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="border-radius:6px;background:#004EAE">
+            <a href="https://managerdb.com.br" target="_blank"
+               style="display:inline-block;padding:12px 28px;color:#fff;font-size:14px;font-weight:700;text-decoration:none">
+              Acessar o ManagerDB
+            </a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- ===== FOOTER ===== -->
+  <tr>
+    <td style="background:#004EAE;border-radius:0 0 12px 12px;padding:16px 32px;text-align:center">
+      <p style="margin:0;color:rgba(255,255,255,0.5);font-size:11px;letter-spacing:0.3px">
+        Email automático gerado pelo sistema ManagerDB &mdash; Grupo Dagoberto Barcellos
+      </p>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
 </body>
 </html>

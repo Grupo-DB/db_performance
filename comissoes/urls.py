@@ -2,7 +2,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (RegiaoViewSet, RepresentanteViewSet, MetaViewSet, ComissaoViewSet,
                     ParametroComissaoViewSet, VinculoRepresentanteViewSet, MapeamentoMunicipioViewSet,
                     RegraComissaoViewSet, RegraComissaoGrupoViewSet, RegraComissaoFaixaViewSet,
-                    calculos_comissoes, popular_mapeamento_agro)
+                    calculos_comissoes, popular_mapeamento_agro, consulta_canceladas)
+from .conferencia import conferencia_vendedor
 from django.urls import path
 
 router = DefaultRouter()
@@ -19,5 +20,7 @@ router.register(r'regra-faixa', RegraComissaoFaixaViewSet, basename='regra-faixa
 
 urlpatterns = [
     path('calculos_comissoes/', calculos_comissoes, name='calculos_comissoes'),
+    path('consulta_canceladas/', consulta_canceladas, name='consulta_canceladas'),
     path('municipio/popular_agro/', popular_mapeamento_agro, name='popular_mapeamento_agro'),
+    path('conferencia_vendedor/', conferencia_vendedor, name='conferencia_vendedor'),
 ] + router.urls

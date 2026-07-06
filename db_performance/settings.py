@@ -2,7 +2,7 @@ from datetime import timedelta
 from pathlib import Path
 import os
 from celery.schedules import crontab
-#from dotenv import load_dotenv
+from dotenv import load_dotenv
 
 
 
@@ -22,7 +22,7 @@ SECRET_KEY_JWT = 'lkshdgkhjgfçhsdçgjkhskjdfghlshjgçlfs'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['managerdb.com.br', 'www.managerdb.com.br', '127.0.0.1', 'localhost', '45.6.118.52']
+ALLOWED_HOSTS = ['managerdb.com.br', 'www.managerdb.com.br', '127.0.0.1', 'localhost', '45.6.118.52', '.ngrok-free.dev', '.ngrok-free.app', '.ngrok.io']
 CORS_ORIGIN_ALLOW_ALL = True
 CORS_ALLOW_CREDENTIALS = True
 
@@ -30,8 +30,16 @@ CORS_ALLOW_CREDENTIALS = True
 # Application definition
 
 
-#load_dotenv(dotenv_path=Path('.') / '.env')
-#load_dotenv(dotenv_path=BASE_DIR / '.env') #Usado no local env
+load_dotenv(dotenv_path=BASE_DIR / '.env')
+
+# ── Credenciais WhatsApp Cloud API (Meta) ───────────────────────────────────
+WHATSAPP_ACCESS_TOKEN = os.environ.get('WHATSAPP_ACCESS_TOKEN')
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get('WHATSAPP_PHONE_NUMBER_ID')
+WHATSAPP_VERIFY_TOKEN = os.environ.get('WHATSAPP_VERIFY_TOKEN')
+WHATSAPP_APP_SECRET = os.environ.get('WHATSAPP_APP_SECRET')
+WHATSAPP_API_VERSION = os.environ.get('WHATSAPP_API_VERSION', 'v21.0')
+# ─────────────────────────────────────────────────────────────────────────
+
 #VARIAVEIS DE AMBIENTE DA OPENAI
 
 #AZURE_OPENAI_KEY = os.environ.get('AZURE_OPENAI_KEY')  #for local env
@@ -94,6 +102,7 @@ INSTALLED_APPS = [
     'despesas',
     'comissoes',
     'catalogos',
+    'whatsapp',
 ]
 
 MIDDLEWARE = [

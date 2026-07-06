@@ -1,0 +1,203 @@
+import hmac
+import hashlib
+import json
+import logging
+
+from django.conf import settings
+from django.db.models import Q
+from django.http import HttpResponse
+from django.utils import timezone
+
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.exceptions import APIException, PermissionDenied
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from .models import Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
+from .serializers import (
+    FilaSerializer, ConversaListSerializer, ConversaDetailSerializer,
+    MensagemSerializer, WhatsAppNotificacaoSerializer,
+)
+from .tasks import processar_webhook_whatsapp, enviar_mensagem_whatsapp
+
+logger = logging.getLogger(__name__)
+
+
+class WebhookView(APIView):
+    """Endpoint público exigido pela Meta Cloud API — fora do DefaultRouter."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        mode = request.GET.get('hub.mode')
+        token = request.GET.get('hub.verify_token')
+        challenge = request.GET.get('hub.challenge', '')
+        if mode == 'subscribe' and token == settings.WHATSAPP_VERIFY_TOKEN:
+            return HttpResponse(challenge, content_type='text/plain')
+        return HttpResponse(status=403)
+
+    def post(self, request):
+        assinatura = request.headers.get('X-Hub-Signature-256', '')
+        if not self._assinatura_valida(request.body, assinatura):
+            return HttpResponse(status=403)
+        try:
+            payload = json.loads(request.body.decode('utf-8'))
+            processar_webhook_whatsapp.delay(payload)
+        except Exception:
+            logger.exception('Payload de webhook do WhatsApp inválido')
+        # Sempre 200 — a Meta reenvia agressivamente em caso de erro/timeout
+        return Response({'status': 'ok'})
+
+    @staticmethod
+    def _assinatura_valida(body: bytes, assinatura_header: str) -> bool:
+        if not settings.WHATSAPP_APP_SECRET or not assinatura_header.startswith('sha256='):
+            return False
+        esperado = hmac.new(
+            settings.WHATSAPP_APP_SECRET.encode('utf-8'), body, hashlib.sha256
+        ).hexdigest()
+        recebido = assinatura_header.split('sha256=', 1)[1]
+        return hmac.compare_digest(esperado, recebido)
+
+
+class FilaViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = FilaSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Fila.objects.all() if user.is_staff else Fila.objects.filter(membros=user)
+        return qs.distinct()
+
+    def perform_create(self, serializer):
+        serializer.save(criado_por=self.request.user)
+
+
+class ConversaViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    http_method_names = ['get', 'patch', 'head', 'options']
+
+    def get_queryset(self):
+        return Conversa.objects.filter(fila__membros=self.request.user).distinct()
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return ConversaListSerializer
+        return ConversaDetailSerializer
+
+    def filter_queryset(self, queryset):
+        fila_id = self.request.query_params.get('fila')
+        status_param = self.request.query_params.get('status')
+        if fila_id:
+            queryset = queryset.filter(fila_id=fila_id)
+        if status_param:
+            queryset = queryset.filter(status=status_param)
+        return queryset
+
+    @action(detail=True, methods=['post'])
+    def assumir(self, request, pk=None):
+        atualizados = Conversa.objects.filter(pk=pk, responsavel__isnull=True).update(responsavel=request.user)
+        if not atualizados:
+            return Response({'detail': 'Conversa já foi assumida por outro usuário.'}, status=status.HTTP_409_CONFLICT)
+        return Response(ConversaDetailSerializer(self.get_object()).data)
+
+    @action(detail=True, methods=['post'])
+    def liberar(self, request, pk=None):
+        conversa = self.get_object()
+        conversa.responsavel = None
+        conversa.save(update_fields=['responsavel'])
+        return Response(ConversaDetailSerializer(conversa).data)
+
+    @action(detail=True, methods=['post'])
+    def transferir(self, request, pk=None):
+        conversa = self.get_object()
+        fila_id = request.data.get('fila_id')
+        usuario_id = request.data.get('usuario_id')
+        if fila_id:
+            conversa.fila_id = fila_id
+        conversa.responsavel_id = usuario_id or None
+        conversa.save(update_fields=['fila', 'responsavel'])
+        WhatsAppNotificacao.objects.bulk_create([
+            WhatsAppNotificacao(
+                conversa=conversa, usuario_notificado=membro,
+                tipo='CONVERSA_TRANSFERIDA', mensagem=f"Conversa de {conversa.contato_nome or conversa.contato_telefone} transferida para sua fila",
+            )
+            for membro in (conversa.fila.membros.all() if conversa.fila_id else [])
+        ])
+        return Response(ConversaDetailSerializer(conversa).data)
+
+    @action(detail=True, methods=['post'])
+    def encerrar(self, request, pk=None):
+        conversa = self.get_object()
+        conversa.status = 'ENCERRADA'
+        conversa.save(update_fields=['status'])
+        return Response(ConversaDetailSerializer(conversa).data)
+
+    @action(detail=True, methods=['post'])
+    def reabrir(self, request, pk=None):
+        conversa = self.get_object()
+        conversa.status = 'ABERTA'
+        conversa.save(update_fields=['status'])
+        return Response(ConversaDetailSerializer(conversa).data)
+
+    @action(detail=False, methods=['get'])
+    def recebidas(self, request):
+        qs = self.get_queryset().filter(responsavel=request.user)
+        return Response(ConversaListSerializer(qs, many=True).data)
+
+
+class JanelaExpirada(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = 'Janela de 24h expirada — é necessário usar um template aprovado.'
+
+
+class MensagemViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = MensagemSerializer
+    http_method_names = ['get', 'post', 'head', 'options']
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_queryset(self):
+        return Mensagem.objects.filter(
+            conversa_id=self.kwargs['conversa_pk'],
+            conversa__fila__membros=self.request.user,
+        ).distinct()
+
+    def perform_create(self, serializer):
+        conversa = Conversa.objects.get(pk=self.kwargs['conversa_pk'])
+        if not conversa.fila or not conversa.fila.membros.filter(pk=self.request.user.pk).exists():
+            raise PermissionDenied('Você não pertence à fila desta conversa.')
+        if not conversa.dentro_da_janela_24h:
+            raise JanelaExpirada()
+
+        anexo = serializer.validated_data.pop('anexo', None)
+        mensagem = serializer.save(
+            conversa=conversa, direcao='SAIDA', autor=self.request.user,
+            tipo='TEXTO' if not anexo else 'DOCUMENTO', status_entrega='PENDENTE',
+        )
+        if anexo:
+            MensagemAnexo.objects.create(mensagem=mensagem, arquivo=anexo)
+        conversa.ultima_mensagem_em = timezone.now()
+        conversa.save(update_fields=['ultima_mensagem_em'])
+        enviar_mensagem_whatsapp.delay(mensagem.id)
+
+
+class WhatsAppNotificacaoViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = WhatsAppNotificacaoSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return WhatsAppNotificacao.objects.filter(usuario_notificado=self.request.user)
+
+    @action(detail=False, methods=['post'])
+    def marcar_como_lido(self, request):
+        ids = request.data.get('notificacao_ids', [])
+        WhatsAppNotificacao.objects.filter(id__in=ids, usuario_notificado=request.user).update(lido=True)
+        return Response({'status': 'notificacoes marcadas como lidas'})
+
+    @action(detail=False, methods=['get'])
+    def nao_lidas(self, request):
+        count = WhatsAppNotificacao.objects.filter(usuario_notificado=request.user, lido=False).count()
+        return Response({'nao_lidas': count})

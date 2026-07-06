@@ -38,6 +38,7 @@ urlpatterns = [
     path('despesas/', include('despesas.urls')),
     path('comissoes/', include('comissoes.urls')),
     path('catalogos/', include('catalogos.urls')),
+    path('whatsapp/', include('whatsapp.urls')),
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

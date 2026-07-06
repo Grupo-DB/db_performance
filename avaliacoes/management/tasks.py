@@ -1,3 +1,6 @@
+import os
+from email.mime.image import MIMEImage
+from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.contrib.auth.models import Group
@@ -14,7 +17,19 @@ from django.db.models import Q
 from . pdf_utils import gerar_pdf_avaliados
 from .gerar_pdf_rh import gerar_pdf_rh
 
-caminho_logo = "media/logotelalogin.png" 
+caminho_logo = "media/logotelalogin.png"
+
+
+def _anexar_logo(email):
+    """Anexa o logo do Grupo Dagoberto Barcellos inline (cid:logo_db), no mesmo padrão dos e-mails de pedidos."""
+    logo_path = os.path.join(settings.MEDIA_ROOT, 'logoNovoDb.png')
+    if not os.path.exists(logo_path):
+        return
+    with open(logo_path, 'rb') as f:
+        logo = MIMEImage(f.read())
+    logo.add_header('Content-ID', '<logo_db>')
+    logo.add_header('Content-Disposition', 'inline', filename='logoNovoDb.png')
+    email.attach(logo)
 
 @shared_task
 def enviar_notificacoes(usuario_id):
@@ -133,6 +148,7 @@ def notificar_rh_gestor():
         to=emails_rh,
     )
     email.attach_alternative(html_content, "text/html")
+    _anexar_logo(email)
 
     # Gera o PDF consolidado
     pdf_buffer = gerar_pdf_rh(dados_relatorio,caminho_logo, trimestre_atual)
@@ -278,6 +294,7 @@ def enviar_emails_completos_para_todos_avaliadores():
             to=[avaliador.email],
         )
         email.attach_alternative(html_content, "text/html")
+        _anexar_logo(email)
 
         # Gera o PDF para esse avaliador
         pdf_buffer = gerar_pdf_avaliados(avaliador.nome, nomes_avaliados, caminho_logo, trimestre_atual)
@@ -345,6 +362,7 @@ def enviar_email_para_avaliador(avaliador_id):
         to=[avaliador.email],
     )
     email.attach_alternative(html_content, "text/html")
+    _anexar_logo(email)
 
     # Gerar PDF dinâmico (supondo que você tenha uma função para isso)
     pdf_buffer = gerar_pdf_avaliados(avaliador.nome, nomes_avaliados,caminho_logo,trimestre_atual)

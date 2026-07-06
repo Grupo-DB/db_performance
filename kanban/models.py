@@ -43,6 +43,7 @@ class KanbanTask(models.Model):
     ]
 
     coluna = models.ForeignKey(KanbanColumn, on_delete=models.CASCADE, related_name='tasks')
+    ordem = models.PositiveIntegerField(default=0)
     dono = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tasks_criadas')
     responsavel = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
@@ -68,7 +69,7 @@ class KanbanTask(models.Model):
     )
 
     class Meta:
-        ordering = ['criado_em']
+        ordering = ['ordem', 'criado_em']
 
     def __str__(self):
         return self.titulo

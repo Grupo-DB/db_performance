@@ -83,6 +83,11 @@ class KanbanColumnViewSet(viewsets.ModelViewSet):
         serializer.save()
 
 
+def _proxima_ordem(coluna):
+    ultima = coluna.tasks.order_by('-ordem').values_list('ordem', flat=True).first()
+    return (ultima or 0) + 1
+
+
 class KanbanTaskViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = KanbanTaskSerializer
@@ -96,7 +101,26 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
         ).distinct().select_related('dono', 'responsavel', 'coluna', 'coluna__quadro')
 
     def perform_create(self, serializer):
-        serializer.save(dono=self.request.user)
+        coluna = serializer.validated_data['coluna']
+        serializer.save(dono=self.request.user, ordem=_proxima_ordem(coluna))
+
+    @action(detail=False, methods=['post'], url_path='reordenar')
+    def reordenar(self, request):
+        """Reordena as tarefas verticalmente dentro de uma mesma lista (drag & drop)."""
+        coluna_id = request.data.get('coluna_id')
+        ordem = request.data.get('ordem', [])  # [{ id, ordem }]
+        try:
+            coluna = KanbanColumn.objects.get(pk=coluna_id)
+        except KanbanColumn.DoesNotExist:
+            return Response({'detail': 'Coluna inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        board = coluna.quadro
+        if request.user != board.criado_por and not board.membros.filter(pk=request.user.pk).exists():
+            return Response({'detail': 'Você não é membro deste quadro.'}, status=status.HTTP_403_FORBIDDEN)
+
+        for item in ordem:
+            KanbanTask.objects.filter(pk=item['id'], coluna_id=coluna_id).update(ordem=item['ordem'])
+        return Response({'ok': True})
 
     def perform_update(self, serializer):
         # dono nunca deve mudar após a criação
@@ -131,6 +155,7 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Coluna inválida.'}, status=status.HTTP_400_BAD_REQUEST)
 
         task.coluna = coluna
+        task.ordem = _proxima_ordem(coluna)
         # marca concluído_em se moveu para coluna cujo título contém "conclui"
         if 'conclui' in coluna.titulo.lower() and not task.concluido_em:
             task.concluido_em = timezone.now()
@@ -170,6 +195,7 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
             )
 
         task.coluna = coluna_concluida
+        task.ordem = _proxima_ordem(coluna_concluida)
         task.concluido_em = timezone.now()
         task.save()
         return Response(KanbanTaskSerializer(task, context={'request': request}).data)
@@ -192,6 +218,7 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
                 return Response({'detail': 'Nenhuma coluna disponível no quadro.'}, status=status.HTTP_400_BAD_REQUEST)
 
         task.coluna = coluna
+        task.ordem = _proxima_ordem(coluna)
         task.concluido_em = None
         task.save()
         return Response(KanbanTaskSerializer(task, context={'request': request}).data)

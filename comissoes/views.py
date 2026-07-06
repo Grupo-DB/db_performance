@@ -150,7 +150,13 @@ def popular_mapeamento_agro(request):
     pulados = 0
     nao_encontrados = []
 
-    for cidade, rep_nome in _CIDADE_AGRO_REP_POPULAR.items():
+    # Aceita {"mapa": {cidade_estado: nome_representante}} no corpo da requisição
+    # (ex.: mapa extraído da aba Apoio Base da planilha); sem corpo, usa o dict acima.
+    _mapa = request.data.get('mapa') if isinstance(request.data, dict) else None
+    if not isinstance(_mapa, dict) or not _mapa:
+        _mapa = _CIDADE_AGRO_REP_POPULAR
+
+    for cidade, rep_nome in _mapa.items():
         try:
             rep = Representante.objects.filter(nome__icontains=rep_nome.split()[0]).first()
             if not rep:
@@ -190,33 +196,56 @@ engine = create_engine(connection_string)
 def consulta_canceladas(request):
     dataInicio = request.data.get('dataInicio')
     dataFim = request.data.get('dataFim')
-    consulta_canceladas = pd.read_sql(f"""
-        SELECT CASE
-            WHEN NFFIL = 0 THEN EMPSIGLA
-            ELSE (SELECT FILSIGLA FROM FILIAL WHERE FILCOD = NFFIL)
-            END EMPRESA, NFEMP + NFFIL CODEMP, 
-            NFCOD, NFDATA, NFNUM, SDSSERIE, CLINOME, DECHAVE, DEDATAPROCCANC, DEPROTOCOLOCANC, CLICOD,
-            CASE
-            WHEN DESIT = 4 THEN 'DENEGADO'
-            WHEN DESIT = 5 THEN 'CANCELADO'
-            END SIT,
+    if not dataInicio or not dataFim:
+        return JsonResponse({'detail': 'Informe dataInicio e dataFim.'}, status=400)
 
-            (SELECT REPNOME FROM REPRESENTANTE WHERE REPCOD = NF.NFREP) REPRESENTANTE,
-            (SELECT NOPNOME FROM NATUREZAOPERACAO WHERE NOPCOD = NF.NFNOP) NATUREZA
+    try:
+        df = pd.read_sql(f"""
+            SELECT CASE
+                WHEN NFFIL = 0 THEN EMPSIGLA
+                ELSE (SELECT FILSIGLA FROM FILIAL WHERE FILCOD = NFFIL)
+                END EMPRESA, NFEMP + NFFIL CODEMP,
+                NFCOD, NFDATA, NFNUM, SDSSERIE, CLINOME, DECHAVE, DEDATAPROCCANC, DEPROTOCOLOCANC, CLICOD,
+                CASE
+                WHEN DESIT = 4 THEN 'DENEGADO'
+                WHEN DESIT = 5 THEN 'CANCELADO'
+                END SIT,
 
-            FROM NOTAFISCAL NF
-            JOIN ITEMNOTAFISCAL ON INFNFCOD = NFCOD
-            LEFT JOIN CLIENTE ON CLICOD = NFCLI 
-            LEFT JOIN DOCUMENTOELETRONICO ON DEREF = NFCOD 
-            LEFT JOIN SERIEDOCSAIDA ON SDSCOD = NFSNF
-            LEFT JOIN EMPRESA ON EMPCOD = NFEMP
+                (SELECT REPNOME FROM REPRESENTANTE WHERE REPCOD = NF.NFREP) REPRESENTANTE,
+                (SELECT NOPNOME FROM NATUREZAOPERACAO WHERE NOPCOD = NF.NFNOP) NATUREZA
 
-            WHERE NFSIT = 2 
-            AND SDSNFPROD = 'S' AND SDSELETRONICO = 'S'
-            AND DESIT IN (4, 5)
-            AND CAST(NFDATA AS DATE) BETWEEN '{dataInicio}' AND '{dataFim}'
-        ORDER BY EMPRESA, SDSSERIE, NFDATA, NFNUM
-    """, engine)                                      
+                FROM NOTAFISCAL NF
+                JOIN ITEMNOTAFISCAL ON INFNFCOD = NFCOD
+                LEFT JOIN CLIENTE ON CLICOD = NFCLI
+                LEFT JOIN DOCUMENTOELETRONICO ON DEREF = NFCOD
+                LEFT JOIN SERIEDOCSAIDA ON SDSCOD = NFSNF
+                LEFT JOIN EMPRESA ON EMPCOD = NFEMP
+
+                WHERE NFSIT = 2
+                AND SDSNFPROD = 'S' AND SDSELETRONICO = 'S'
+                AND DESIT IN (4, 5)
+                AND CAST(NFDATA AS DATE) BETWEEN '{dataInicio}' AND '{dataFim}'
+            ORDER BY EMPRESA, SDSSERIE, NFDATA, NFNUM
+        """, engine)
+    except Exception as e:
+        return JsonResponse({'detail': f'Erro ao consultar notas canceladas: {e}'}, status=500)
+
+    # Uma nota pode ter múltiplos itens (join com ITEMNOTAFISCAL); mantém 1 linha por nota
+    df = df.drop_duplicates(subset=['NFCOD']).copy()
+
+    for col in ('NFDATA', 'DEDATAPROCCANC'):
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%d/%m/%Y %H:%M')
+
+    notas = df.fillna('').to_dict(orient='records')
+
+    return JsonResponse({
+        'notas': notas,
+        'quantidade': len(notas),
+        'quantidade_por_situacao': df['SIT'].value_counts().to_dict(),
+        'quantidade_por_empresa': df['EMPRESA'].value_counts().to_dict(),
+        'periodo': f"{dataInicio} a {dataFim}",
+    }, safe=False)
 
 
 @csrf_exempt
@@ -418,7 +447,7 @@ def calculos_comissoes(request):
 
     WHERE NFSIT = 1
     AND CAST(NFDATA AS DATE) BETWEEN '{dataInicio}' AND '{dataFim}'
-    AND GALMPRODVENDA = 'S' 
+    AND GALMPRODVENDA = 'S'
     AND (SUBSTRING(NOPFLAGNF, 1, 1) = 'S' AND SUBSTRING(NOPFLAGNF, 25, 1) = 'N') --Flag Operação Finan. 'S' e Não Rep. Receita 'N'
     AND NFSNF NOT IN (8) -- Serie Acerto
 
@@ -523,7 +552,7 @@ def calculos_comissoes(request):
     WHERE NFSIT          = 1
     AND CAST(NFEDATA AS DATE) BETWEEN '{dataInicio}' AND '{dataFim}'
     AND GALMPRODVENDA = 'S'
-    AND (SUBSTRING(NOPFLAGNF, 1, 1) = 'S' 
+    AND (SUBSTRING(NOPFLAGNF, 1, 1) = 'S'
             AND SUBSTRING(NOPFLAGNF, 25, 1) = 'N') --Flag Operação Finan. 'S' e Não Rep. Receita 'N'
     AND NFSNF NOT IN (8) -- Serie Acerto
 
@@ -565,6 +594,7 @@ def calculos_comissoes(request):
     metas_request = request.data.get('metas', {})
     considerar_potencializadores = request.data.get('considerar_potencializadores', True)
     licenca_maternidade_alexandra = request.data.get('licenca_maternidade_alexandra', False)
+    incluir_cotrijal_agro = bool(request.data.get('incluir_cotrijal_agro', False))
 
     # Normaliza campos relevantes
     df.columns = [c.strip() for c in df.columns]
@@ -1581,36 +1611,144 @@ def calculos_comissoes(request):
         'VALOR_TOTAL': 'valor_total',
         'EMPRESAFILIAL': 'filial',
     }
+    def _monta_lancamentos_agro(df_in):
+        """Converte um recorte de df_agro_no_yara na lista de lançamentos usada pelo front (PDF/detalhamento)."""
+        _cols_disp = {k: v for k, v in _COLUNAS_LANCAMENTO.items() if k in df_in.columns}
+        _df_lanc = df_in[list(_cols_disp.keys())].rename(columns=_cols_disp).copy()
+        for _c in _df_lanc.columns:
+            if pd.api.types.is_datetime64_any_dtype(_df_lanc[_c]):
+                _df_lanc[_c] = _df_lanc[_c].dt.strftime('%d/%m/%Y')
+        for _c in ['valor_produto', 'valor_total', 'quantidade_tn']:
+            if _c in _df_lanc.columns:
+                _df_lanc[_c] = _df_lanc[_c].round(2)
+        _df_lanc = _df_lanc.fillna('').sort_values('data') if 'data' in _df_lanc.columns else _df_lanc.fillna('')
+        return _df_lanc.to_dict(orient='records')
+
+    # Linhas da tabela AGRONEGOCIO da planilha (Comissões!A46:G54)
+    _resumo_agro_rows = []
+
     for nome_agro in ('ILDOMAR DA FONTE CARVALHO', 'EVERTON MARQUES DORNELES'):
         mask_rep = df_agro_no_yara['_rep_agro'] == nome_agro
         df_rep = df_agro_no_yara[mask_rep].copy()
-        total_vendedor = df_rep['VALOR_PRODUTO'].sum()
-        _agro_debug[f'{nome_agro}_total'] = round(float(total_vendedor), 2)
+        # Total pela base da planilha (cidades do vendedor) — usado na tabela resumo_agro
+        total_vendedor_planilha = df_rep['VALOR_PRODUTO'].sum()
+        _agro_debug[f'{nome_agro}_total'] = round(float(total_vendedor_planilha), 2)
 
-        # Monta lista de lançamentos individuais para o PDF
-        _cols_disp = {k: v for k, v in _COLUNAS_LANCAMENTO.items() if k in df_rep.columns}
-        df_lanc = df_rep[list(_cols_disp.keys())].rename(columns=_cols_disp).copy()
-        for _c in df_lanc.columns:
-            if pd.api.types.is_datetime64_any_dtype(df_lanc[_c]):
-                df_lanc[_c] = df_lanc[_c].dt.strftime('%d/%m/%Y')
-        for _c in ['valor_produto', 'valor_total', 'quantidade_tn']:
-            if _c in df_lanc.columns:
-                df_lanc[_c] = df_lanc[_c].round(2)
-        df_lanc = df_lanc.fillna('').sort_values('data') if 'data' in df_lanc.columns else df_lanc.fillna('')
-        lancamentos = df_lanc.to_dict(orient='records')
+        # ---- Cards "Vendas Diretas" / "Vendas por Representantes" (modelo MUNICÍPIO):
+        # A cidade do cliente (MapeamentoMunicipio) define de quem é a venda, não importa qual
+        # representante/sub-representante aparece na nota — regra definida pelo usuário em 05/07/2026
+        # (substitui o modelo anterior por REGIAO/VinculoRepresentante, que causava divergências
+        # quando um sub-representante de um vendedor vendia numa cidade do outro).
+        # Direta = master vazio (venda direta/casa, sem rep. externo credenciado) dentro das cidades do vendedor.
+        # Por Representantes = master preenchido (qualquer rep. externo) dentro das cidades do vendedor.
+        _mask_cotrijal_rep = _mask_cotrijal_agro.reindex(df_rep.index, fill_value=False)
+        df_cotrijal = df_rep[_mask_cotrijal_rep]
+        cotrijal_total = float(df_cotrijal['VALOR_PRODUTO'].sum())
+        cotrijal_lancamentos = _monta_lancamentos_agro(df_cotrijal)
 
-        # comissao = total_vendedor * taxa_vendedor + total_agro_geral * taxa_base
+        # COTRIJAL fica de fora da base de comissão por padrão (é conta separada na planilha),
+        # mas o front pode pedir para incluí-la via 'incluir_cotrijal_agro' no POST.
+        df_rep_valido = df_rep if incluir_cotrijal_agro else df_rep[~_mask_cotrijal_rep]
+        df_direta = df_rep_valido[df_rep_valido['REPRESENTANTE_MASTER'] == '']
+        df_outros_validos = df_rep_valido[df_rep_valido['REPRESENTANTE_MASTER'] != '']
+        total_direto = float(df_direta['VALOR_PRODUTO'].sum())
+        total_por_representantes = float(df_outros_validos['VALOR_PRODUTO'].sum())
+
+        # Total Vendedor = Vendas Diretas + Vendas por Representantes (base da comissão e do card)
+        total_vendedor = total_direto + total_por_representantes
+        # Lançamentos do diálogo/PDF seguem a mesma base dos cards (union deduplicado por índice)
+        lancamentos = _monta_lancamentos_agro(df_agro.loc[df_direta.index.union(df_outros_validos.index)])
+
+        # Direta/Rep. Master seguem a mesma base do card (REPRESENTANTE/REGIAO + VinculoRepresentante),
+        # não mais a base por cidade mapeada (MapeamentoMunicipio) — mantém "Totais por Segmento"
+        # consistente com o "Total Vendedor" do card e do PDF.
+        _resumo_agro_rows.append({
+            'vendedor': nome_agro,
+            'total': round(float(total_vendedor), 2),
+            'direta': round(total_direto, 2),
+            'rep_master': round(total_por_representantes, 2),
+        })
+
+        detalhamento_por_representante = []
+        for rep_nome, grupo in df_outros_validos.groupby('REPRESENTANTE'):
+            if not rep_nome:
+                continue
+            detalhamento_por_representante.append({
+                'representante': rep_nome,
+                'total': round(float(grupo['VALOR_PRODUTO'].sum()), 2),
+                'lancamentos': _monta_lancamentos_agro(grupo),
+            })
+        detalhamento_por_representante.sort(key=lambda x: x['total'], reverse=True)
+
+        # comissao = total_vendedor * taxa_vendedor + (total_agro_geral - total_vendedor) * taxa_base
         # Nota: $B$54 da planilha é o total agro GERAL (incl. YARA), não apenas excl. YARA
         _agro_fixo = p('AGRO_FIXO_REP', 8225.0)
-        comissao_var = total_vendedor * p('AGRO_TAXA_VENDEDOR', 0.007) + venda_agro_total_geral * p('AGRO_TAXA_BASE', 0.001)
+        _taxa_vendedor = p('AGRO_TAXA_VENDEDOR', 0.007)
+        _taxa_base = p('AGRO_TAXA_BASE', 0.001)
+        _comissao_var_vendedor = total_vendedor * _taxa_vendedor
+        _base_diferenca = venda_agro_total_geral - total_vendedor
+        _comissao_var_base = _base_diferenca * _taxa_base
+        comissao_var = _comissao_var_vendedor + _comissao_var_base
         resultado[nome_agro] = {
             'comissao': round(comissao_var + _agro_fixo, 2),
             'comissao_variavel': round(float(comissao_var), 2),
+            'taxa_vendedor': _taxa_vendedor,
+            'taxa_base': _taxa_base,
+            'comissao_variavel_vendedor': round(float(_comissao_var_vendedor), 2),
+            'comissao_variavel_base': round(float(_comissao_var_base), 2),
+            'base_agro_geral': round(float(venda_agro_total_geral), 2),
+            'base_agro_diferenca': round(float(_base_diferenca), 2),
             'total_vendedor': round(float(total_vendedor), 2),
+            'total_direto': round(total_direto, 2),
+            'total_por_representantes': round(total_por_representantes, 2),
+            'detalhamento_por_representante': detalhamento_por_representante,
+            'cotrijal_total': round(cotrijal_total, 2),
+            'cotrijal_lancamentos': cotrijal_lancamentos,
+            'incluir_cotrijal': incluir_cotrijal_agro,
             'fixo': _agro_fixo,
             'lancamentos': lancamentos,
             'tipo': 'Vendedor Externo Agronegócio'
         }
+
+    # ---- Resumo Agro: reproduz a tabela AGRONEGOCIO da planilha (Comissões!A46:G54) ----
+    # Zink/Daniel: SUMIFS por REGIAO == nome, menos vendas COTRIJAL/YARA onde REPRESENTANTE == nome.
+    # Exclui linhas já atribuídas a Ildomar/Everton pelo mapeamento de cidade (a REGIAO do ERP
+    # pode ter sido remapeada depois, o que duplicaria a venda em dois vendedores).
+    _idx_agro_atribuidos = df_agro_no_yara[df_agro_no_yara['_rep_agro'].isin(
+        ('ILDOMAR DA FONTE CARVALHO', 'EVERTON MARQUES DORNELES'))].index
+    for _nome_reg in ('JOAO HENRIQUE ZINK', 'DANIEL MARQUES MOREIRA'):
+        _mask_regiao = (df_agro['REGIAO'] == _nome_reg) & ~df_agro.index.isin(_idx_agro_atribuidos)
+        _mask_rep_k = df_agro['REPRESENTANTE'] == _nome_reg
+        _tot_reg = (
+            float(df_agro[_mask_regiao]['VALOR_PRODUTO'].sum())
+            - float(df_agro[_mask_rep_k & _mask_cotrijal_agro]['VALOR_PRODUTO'].sum())
+            - float(df_agro[_mask_rep_k & _mask_yara_agro]['VALOR_PRODUTO'].sum())
+        )
+        _resumo_agro_rows.append({
+            'vendedor': _nome_reg,
+            'total': round(_tot_reg, 2),
+            'direta': None,
+            'rep_master': None,
+        })
+
+    _cotrijal_total = float(df_agro[_mask_cotrijal_agro]['VALOR_PRODUTO'].sum())
+    _yara_total = float(df_agro[_mask_yara_agro]['VALOR_PRODUTO'].sum())
+    # "Outros" é residual: total agro geral menos vendedores e clientes agrupados (pode ser negativo)
+    _outros_agro = (
+        float(venda_agro_total_geral)
+        - sum(r['total'] for r in _resumo_agro_rows)
+        - _cotrijal_total - _yara_total
+    )
+    # Óxidos: todos os segmentos, linha de produtos OXIDO (planilha G54)
+    _oxidos_total = float(df[df['GRUPO_COMERCIAL_LINHA_PRODUTOS'] == 'OXIDO']['VALOR_PRODUTO'].sum())
+    resumo_agro = {
+        'vendedores': _resumo_agro_rows,
+        'cotrijal': round(_cotrijal_total, 2),
+        'yara': round(_yara_total, 2),
+        'outros': round(_outros_agro, 2),
+        'total': round(float(venda_agro_total_geral), 2),
+        'oxidos': round(_oxidos_total, 2),
+    }
 
     # ---- 3. Vergilino Antonio Dutra ----
     _agro_debug['vergilino_base'] = round(float(venda_agro_total_geral), 2)
@@ -1844,6 +1982,13 @@ def calculos_comissoes(request):
             _df_export[_col] = _df_export[_col].round(2)
     _dataframe_vendas = _df_export.fillna('').to_dict(orient='records')
 
+    # Resumo de devoluções (linhas negadas no UNION ALL vindas de NOTAFISCALENTRADA)
+    _mask_devolucao = df['VALOR_TOTAL'] < 0
+    _devolucoes_resumo = {
+        'quantidade': int(_mask_devolucao.sum()),
+        'valor_total': round(float(df.loc[_mask_devolucao, 'VALOR_TOTAL'].sum()), 2),
+    }
+
     return JsonResponse({
         'comissoes': resultado,
         'resumo_por_vendedor': dict(sorted(_resumo.items())),
@@ -1858,4 +2003,6 @@ def calculos_comissoes(request):
         'periodo_canceladas_verificado': f"{_canc_inicio} a {_canc_fim}",
         'qtd_notas_removidas': len(_notas_removidas_lista),
         'dataframe_vendas': _dataframe_vendas,
+        'resumo_agro': resumo_agro,
+        'devolucoes_resumo': _devolucoes_resumo,
     }, safe=False)

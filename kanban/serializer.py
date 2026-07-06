@@ -42,12 +42,12 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
         model = KanbanTask
         fields = [
             'id', 'coluna_id', 'dono', 'responsavel', 'responsavel_id',
-            'titulo', 'descricao', 'prioridade', 'tags',
+            'titulo', 'descricao', 'prioridade', 'tags', 'ordem',
             'data_inicio', 'prazo', 'concluido_em','anexos',
             'esta_atrasada', 'criado_em', 'atualizado_em','recorrente', 'recorrencia',
-            
+
         ]
-        read_only_fields = ['dono', 'criado_em', 'atualizado_em']
+        read_only_fields = ['dono', 'ordem', 'criado_em', 'atualizado_em']
 
     def get_esta_atrasada(self, obj):
         from django.utils import timezone
