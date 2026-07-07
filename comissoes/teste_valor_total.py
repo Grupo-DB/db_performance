@@ -146,6 +146,13 @@ def teste_total_vendedor_valor_total(request):
                 df_devolucao_no_total[['NOTA_FISCAL', 'CLIENTE_NOME', 'VALOR_TOTAL']]
                 .round(2).to_dict(orient='records')
             ),
+
+            # Lista completa das notas que compõem o Total Vendedor (para cruzar manualmente
+            # com os NFs do "Confirmado" da conferência de planilha).
+            'notas_incluidas': (
+                df_rep_valido[['NOTA_FISCAL', 'CLIENTE_NOME', 'CIDADE_FATURAMENTO', 'VALOR_PRODUTO', 'VALOR_TOTAL', 'TIPO']]
+                .round(2).to_dict(orient='records')
+            ),
         }
 
     return Response(resultado)
