@@ -183,6 +183,7 @@ def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
 
     match = None
     valor_nao_verificado = False
+    nome_terceiro = False
     if best_ratio >= 0.55 and abs(best['TOTAL'] - linha['valor']) < 1:
         match = [best]
     else:
@@ -193,6 +194,19 @@ def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
         elif best_ratio >= 0.65:
             match = [best]
             valor_nao_verificado = True
+        else:
+            # Nome não bate com nada (ex.: "notas em nome de terceiros" — a mercadoria é do
+            # cliente anotado, mas a nota fiscal sai em nome de outra pessoa/produtor). Tenta
+            # achar pelo valor puro dentro das notas do MESMO pedido, ignorando o nome.
+            exatos = [c for c in candidatos if abs(c['TOTAL'] - linha['valor']) < 1]
+            if len(exatos) == 1:
+                match = exatos
+                nome_terceiro = True
+            else:
+                soma_todos = sum(c['TOTAL'] for c in candidatos)
+                if abs(soma_todos - linha['valor']) < 1:
+                    match = candidatos
+                    nome_terceiro = True
 
     if not match:
         return {'status': 'PENDENTE', 'is_cotrijal': _is_cotrijal(linha['cliente']),
@@ -231,7 +245,12 @@ def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
     total_bruto = sum(m['TOTAL'] for m in match)
     total_oficial = sum(m['TOTAL_OFICIAL'] or 0 for m in match)
     diverge_filtro_oficial = abs(total_bruto - total_oficial) > 1
-    detalhe = f'Confirmado no sistema (NF {nfs}).'
+    if nome_terceiro:
+        nomes = ', '.join(sorted(set(m['CLINOME'] for m in match)))
+        detalhe = (f'Confirmado no sistema por valor (NF {nfs}) — nota em nome de terceiro: '
+                    f'{nomes}, não "{linha["cliente"]}".')
+    else:
+        detalhe = f'Confirmado no sistema (NF {nfs}).'
     if valor_nao_verificado:
         detalhe += (f' ATENÇÃO: valor não bateu — nota real R$ {total_bruto:.2f} vs '
                     f'planilha R$ {linha["valor"]:.2f} (match só por nome do cliente).')
@@ -239,6 +258,7 @@ def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
         detalhe += f' ATENÇÃO: R$ {valor_fora_da_cidade:.2f} do match somado é de nota(s) fora da cidade do vendedor.'
     return {
         'status': 'OK', 'is_cotrijal': is_cotrijal, 'detalhe': detalhe,
+        'nome_terceiro': nome_terceiro,
         'diverge_filtro_oficial': diverge_filtro_oficial,
         'valor_fora_filtro_oficial': round(float(total_bruto - total_oficial), 2) if diverge_filtro_oficial else 0.0,
         'valor_nao_verificado': valor_nao_verificado,
@@ -331,6 +351,17 @@ def conferencia_vendedor(request):
         ],
     }
 
+    linhas_nome_terceiro = [r for r in resultado if r.get('nome_terceiro')]
+    diagnostico_nome_terceiro = {
+        'valor_total': round(sum(r['valor'] for r in linhas_nome_terceiro), 2),
+        'qtd': len(linhas_nome_terceiro),
+        'linhas': [
+            {'ped': r['ped'], 'cliente_anotado': r['cliente'], 'valor': r['valor'],
+             'arquivo': r['arquivo'], 'detalhe': r['detalhe']}
+            for r in linhas_nome_terceiro
+        ],
+    }
+
     devolucoes = []
     if data_inicio and data_fim:
         try:
@@ -344,6 +375,7 @@ def conferencia_vendedor(request):
         'diagnostico_filtro_oficial': diagnostico_filtro_oficial,
         'diagnostico_valor_nao_verificado': diagnostico_valor_nao_verificado,
         'diagnostico_valor_fora_cidade': diagnostico_valor_fora_cidade,
+        'diagnostico_nome_terceiro': diagnostico_nome_terceiro,
         'devolucoes': devolucoes,
         'devolucoes_total': devolucoes_total,
         'total_anotado': round(sum(l['valor'] for l in todas_linhas), 2),
