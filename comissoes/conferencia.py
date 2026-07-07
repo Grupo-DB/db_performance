@@ -122,6 +122,53 @@ def _is_cotrijal(nome):
     return 'COTRIJAL' in _norm(nome)
 
 
+def _is_yara(nome):
+    return 'YARA' in _norm(nome)
+
+
+def _buscar_devolucoes(data_inicio, data_fim, vendedor_nome, mapa_municipio):
+    """Devoluções (NOTAFISCALENTRADA) do Agronegócio no período, nas cidades do vendedor,
+    já líquidas no 'Total Vendedor' oficial mas que a conferência de planilha nunca vê
+    (ela só olha a nota de venda original, nunca o estorno)."""
+    sql = f"""
+        SELECT NFE.NFEDATA AS DATA, NFE.NFENUMNF AS NOTA_FISCAL, CLINOME,
+        (SELECT CIDNOME + '-' + ESTUF FROM CIDADE JOIN ESTADO ON ESTCOD = CIDEST WHERE CIDCOD = CLICIDADE) AS CIDADE,
+        SUM(-INFETOTAL) AS VALOR
+        FROM NOTAFISCAL NF
+        JOIN CLIENTE ON CLICOD = NF.NFCLI
+        JOIN ITEMNOTAFISCAL INF ON INF.INFNFCOD = NF.NFCOD
+        JOIN ITEMNOTAFISCALENTRADA ON INFEINFNUM = INF.INFNUM
+        JOIN NATUREZAOPERACAOENTRADA ON NOPECOD = INFENOPE
+        JOIN NATUREZAOPERACAO NOP ON NOP.NOPCOD = INF.INFNOP
+        JOIN NOTAFISCALENTRADA NFE ON NFE.NFECOD = INFENFE
+        JOIN ESTOQUE ESTQ ON ESTQ.ESTQCOD = INF.INFESTQ
+        LEFT JOIN GRUPOALMOXARIFADO GALM ON GALM.GALMCOD = ESTQ.ESTQGALM
+        WHERE NF.NFSIT = 1
+        AND CAST(NFE.NFEDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+        AND ESTQ.ESTQGALM IN (1974, 1587, 1828)
+        AND GALM.GALMPRODVENDA = 'S'
+        AND (SUBSTRING(NOP.NOPFLAGNF, 1, 1) = 'S' AND SUBSTRING(NOP.NOPFLAGNF, 25, 1) = 'N')
+        AND NF.NFSNF NOT IN (8)
+        GROUP BY NFE.NFEDATA, NFE.NFENUMNF, CLINOME, CLICIDADE
+        ORDER BY NFE.NFEDATA
+    """
+    with engine.connect() as conn:
+        rows = [dict(r) for r in conn.execute(text(sql)).mappings().all()]
+
+    devolucoes = []
+    for r in rows:
+        if _is_yara(r['CLINOME']):
+            continue
+        cidade = (r['CIDADE'] or '').strip().upper()
+        if mapa_municipio.get(cidade) != vendedor_nome:
+            continue
+        devolucoes.append({
+            'nota_fiscal': r['NOTA_FISCAL'], 'cliente': r['CLINOME'], 'cidade': r['CIDADE'],
+            'valor': round(float(r['VALOR']), 2), 'is_cotrijal': _is_cotrijal(r['CLINOME']),
+        })
+    return devolucoes
+
+
 def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
     if not candidatos:
         return {'status': 'PENDENTE', 'is_cotrijal': _is_cotrijal(linha['cliente']),
@@ -284,11 +331,21 @@ def conferencia_vendedor(request):
         ],
     }
 
+    devolucoes = []
+    if data_inicio and data_fim:
+        try:
+            devolucoes = _buscar_devolucoes(data_inicio, data_fim, vendedor_nome, mapa_municipio)
+        except Exception:
+            devolucoes = []
+    devolucoes_total = round(sum(d['valor'] for d in devolucoes), 2)
+
     return Response({
         'vendedor': vendedor_nome,
         'diagnostico_filtro_oficial': diagnostico_filtro_oficial,
         'diagnostico_valor_nao_verificado': diagnostico_valor_nao_verificado,
         'diagnostico_valor_fora_cidade': diagnostico_valor_fora_cidade,
+        'devolucoes': devolucoes,
+        'devolucoes_total': devolucoes_total,
         'total_anotado': round(sum(l['valor'] for l in todas_linhas), 2),
         'linhas': resultado,
         'resumo': resumo,
