@@ -1,52 +1,43 @@
 from io import BytesIO
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import cm
 
-def gerar_pdf_rh(dados_relatorio,caminho_logo, trimestre_atual):
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.pdfgen import canvas
+
+from .pdf_utils import _cabecalho, _caixa_info, _rodape, _tabela_nomes, _titulo_secao
+
+
+def gerar_pdf_rh(dados_relatorio, caminho_logo, trimestre_atual):
     buffer = BytesIO()
-    p = canvas.Canvas(buffer, pagesize=A4)
+    c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    # Logotipo
-    largura_logo = 4 * cm
-    altura_logo = 4 * cm
-    x_logo = width - largura_logo - 2 * cm
-    y_logo = height - altura_logo - 2 * cm
+    titulo = 'Relatório de Avaliações Pendentes'
+    subtitulo = 'Relação de avaliadores com avaliações pendentes no período'
 
-    p.drawImage(caminho_logo, x_logo, y_logo, width=largura_logo, height=altura_logo, preserveAspectRatio=True)
+    y = _cabecalho(c, width, height, caminho_logo, titulo, subtitulo)
+    y = _caixa_info(c, width, y, [
+        ('Período', trimestre_atual),
+        ('Avaliadores pendentes', str(len(dados_relatorio))),
+    ])
 
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(2 * cm, height - 2 * cm, f"Relatório de Avaliações Pendentes - {trimestre_atual}")
-
-    y = height - 3.5 * cm
-    p.setFont("Helvetica", 12)
+    limite_minimo = 4 * cm
 
     for item in dados_relatorio:
-        if y < 4 * cm:
-            p.showPage()
-            y = height - 3 * cm
-            p.setFont("Helvetica", 12)
+        if y < limite_minimo:
+            _rodape(c, width)
+            c.showPage()
+            y = _cabecalho(c, width, height, caminho_logo, titulo, subtitulo)
 
-        p.setFont("Helvetica-Bold", 12)
-        p.drawString(2 * cm, y, f"Avaliador: {item['avaliador']}")
-        y -= 0.6 * cm
+        y = _titulo_secao(c, width, y, f"Avaliador: {item['avaliador']}")
+        y = _tabela_nomes(
+            c, width, height, y, item['avaliados'], caminho_logo, titulo, subtitulo,
+            cabecalho_coluna='Colaborador sem avaliação',
+        )
+        y -= 0.5 * cm
 
-        p.setFont("Helvetica", 11)
-        for avaliado in item['avaliados']:
-            if y < 3 * cm:
-                p.showPage()
-                y = height - 3 * cm
-                p.setFont("Helvetica", 11)
-
-            p.drawString(3 * cm, y, f"- {avaliado}")
-            y -= 0.5 * cm
-
-        y -= 0.5 * cm  # espaço entre grupos
-
-    p.showPage()
-    p.save()
+    _rodape(c, width)
+    c.showPage()
+    c.save()
     buffer.seek(0)
     return buffer
-
-
