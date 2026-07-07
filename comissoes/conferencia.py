@@ -362,13 +362,11 @@ def conferencia_vendedor(request):
         ],
     }
 
+    # TEMPORARIAMENTE DESATIVADO: _buscar_devolucoes varre o mês inteiro sem restringir a
+    # pedidos específicos e travou o endpoint em produção (mais de 2-3min sem responder).
+    # Precisa investigar o plano de execução dessa query antes de reativar.
     devolucoes = []
-    if data_inicio and data_fim:
-        try:
-            devolucoes = _buscar_devolucoes(data_inicio, data_fim, vendedor_nome, mapa_municipio)
-        except Exception:
-            devolucoes = []
-    devolucoes_total = round(sum(d['valor'] for d in devolucoes), 2)
+    devolucoes_total = 0.0
 
     return Response({
         'vendedor': vendedor_nome,
