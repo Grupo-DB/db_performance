@@ -2,6 +2,7 @@ import re
 import unicodedata
 import difflib
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 import openpyxl
 from django.views.decorators.csrf import csrf_exempt
@@ -362,11 +363,20 @@ def conferencia_vendedor(request):
         ],
     }
 
-    # TEMPORARIAMENTE DESATIVADO: _buscar_devolucoes varre o mês inteiro sem restringir a
-    # pedidos específicos e travou o endpoint em produção (mais de 2-3min sem responder).
-    # Precisa investigar o plano de execução dessa query antes de reativar.
+    # _buscar_devolucoes varre o mês inteiro (sem restringir a pedidos específicos) e já travou
+    # o endpoint uma vez em produção. Roda com timeout duro: se passar de 20s, segue sem
+    # devoluções em vez de travar o "Conferir" inteiro.
     devolucoes = []
-    devolucoes_total = 0.0
+    if data_inicio and data_fim:
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_buscar_devolucoes, data_inicio, data_fim, vendedor_nome, mapa_municipio)
+                devolucoes = future.result(timeout=20)
+        except FutureTimeoutError:
+            devolucoes = []
+        except Exception:
+            devolucoes = []
+    devolucoes_total = round(sum(d['valor'] for d in devolucoes), 2)
 
     return Response({
         'vendedor': vendedor_nome,
