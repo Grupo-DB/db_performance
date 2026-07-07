@@ -88,7 +88,15 @@ def _buscar_notas(peds):
             ELSE (SELECT CIDNOME + '-' + ESTUF FROM CIDADE JOIN ESTADO ON ESTCOD = CIDEST WHERE CIDCOD = CLICIDADE)
         END AS CIDADE,
         CASE WHEN ESTQ.ESTQGALM IN (1974,1587,1828) THEN 'AGRONEGOCIO' ELSE 'CONSTRUCAO CIVIL' END AS SEGMENTO,
-        SUM(INF.INFTOTAL) AS TOTAL
+        SUM(INF.INFTOTAL) AS TOTAL,
+        -- TOTAL_OFICIAL: mesma regra de filtro usada no cálculo real do "Total Vendedor"
+        -- (GALMPRODVENDA='S', NOP financeiro/não-receita, exclui série de acerto). Itens que não
+        -- passam nesse filtro contam em TOTAL (a nota "existe") mas não em TOTAL_OFICIAL.
+        SUM(CASE
+            WHEN GALM.GALMPRODVENDA = 'S'
+             AND SUBSTRING(NOP.NOPFLAGNF, 1, 1) = 'S' AND SUBSTRING(NOP.NOPFLAGNF, 25, 1) = 'N'
+             AND NF.NFSNF NOT IN (8)
+            THEN INF.INFTOTAL ELSE 0 END) AS TOTAL_OFICIAL
         FROM NOTAFISCAL NF
         JOIN CLIENTE ON CLICOD = NF.NFCLI
         LEFT JOIN REPRESENTANTE R ON R.REPCOD = NF.NFREP
@@ -96,6 +104,7 @@ def _buscar_notas(peds):
         JOIN ITEMNOTAFISCAL INF ON INF.INFNFCOD = NF.NFCOD
         JOIN NATUREZAOPERACAO NOP ON NOP.NOPCOD = INF.INFNOP
         JOIN ESTOQUE ESTQ ON ESTQ.ESTQCOD = INF.INFESTQ
+        LEFT JOIN GRUPOALMOXARIFADO GALM ON GALM.GALMCOD = ESTQ.ESTQGALM
         WHERE NF.NFPED IN ({ids_str}) AND NF.NFSIT = 1
         GROUP BY NF.NFPED, NF.NFCOD, NF.NFNUM, NF.NFSIT, NF.NFDATA, CLINOME, R.REPNOME, M.REPNOME, NOP.NOPNOME,
                  NF.NFECLI, NF.NFCLI, CLICIDADE, ESTQ.ESTQGALM
@@ -163,7 +172,14 @@ def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
                             f"{(outro or 'nenhum vendedor').title()}, não para {vendedor_nome.title()}.")}
 
     nfs = ', '.join(str(m['NFNUM']) for m in match)
-    return {'status': 'OK', 'is_cotrijal': is_cotrijal, 'detalhe': f'Confirmado no sistema (NF {nfs}).'}
+    total_bruto = sum(m['TOTAL'] for m in match)
+    total_oficial = sum(m['TOTAL_OFICIAL'] or 0 for m in match)
+    diverge_filtro_oficial = abs(total_bruto - total_oficial) > 1
+    return {
+        'status': 'OK', 'is_cotrijal': is_cotrijal, 'detalhe': f'Confirmado no sistema (NF {nfs}).',
+        'diverge_filtro_oficial': diverge_filtro_oficial,
+        'valor_fora_filtro_oficial': round(float(total_bruto - total_oficial), 2) if diverge_filtro_oficial else 0.0,
+    }
 
 
 @csrf_exempt
@@ -217,8 +233,20 @@ def conferencia_vendedor(request):
     for k in resumo:
         resumo[k]['valor'] = round(resumo[k]['valor'], 2)
 
+    linhas_divergentes = [r for r in resultado if r.get('diverge_filtro_oficial')]
+    diagnostico_filtro_oficial = {
+        'valor_total': round(sum(r['valor_fora_filtro_oficial'] for r in linhas_divergentes), 2),
+        'qtd': len(linhas_divergentes),
+        'linhas': [
+            {'ped': r['ped'], 'cliente': r['cliente'], 'valor': r['valor'],
+             'valor_fora_filtro_oficial': r['valor_fora_filtro_oficial'], 'arquivo': r['arquivo']}
+            for r in linhas_divergentes
+        ],
+    }
+
     return Response({
         'vendedor': vendedor_nome,
+        'diagnostico_filtro_oficial': diagnostico_filtro_oficial,
         'total_anotado': round(sum(l['valor'] for l in todas_linhas), 2),
         'linhas': resultado,
         'resumo': resumo,
