@@ -173,6 +173,13 @@ def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
                 'detalhe': (f"Cidade ({', '.join(c.title() for c in cidades)}) mapeada para "
                             f"{(outro or 'nenhum vendedor').title()}, não para {vendedor_nome.title()}.")}
 
+    # Quando o match veio da soma de vários candidatos (match múltiplo), só uma parte deles pode
+    # realmente ser do vendedor — o restante "carona" no valor da planilha sem pertencer a ele.
+    valor_fora_da_cidade = sum(
+        m['TOTAL'] for m in match
+        if mapa_municipio.get((m['CIDADE'] or '').strip().upper()) != vendedor_nome
+    ) if len(match) > 1 else 0.0
+
     nfs = ', '.join(str(m['NFNUM']) for m in match)
     total_bruto = sum(m['TOTAL'] for m in match)
     total_oficial = sum(m['TOTAL_OFICIAL'] or 0 for m in match)
@@ -181,12 +188,15 @@ def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
     if valor_nao_verificado:
         detalhe += (f' ATENÇÃO: valor não bateu — nota real R$ {total_bruto:.2f} vs '
                     f'planilha R$ {linha["valor"]:.2f} (match só por nome do cliente).')
+    if valor_fora_da_cidade:
+        detalhe += f' ATENÇÃO: R$ {valor_fora_da_cidade:.2f} do match somado é de nota(s) fora da cidade do vendedor.'
     return {
         'status': 'OK', 'is_cotrijal': is_cotrijal, 'detalhe': detalhe,
         'diverge_filtro_oficial': diverge_filtro_oficial,
         'valor_fora_filtro_oficial': round(float(total_bruto - total_oficial), 2) if diverge_filtro_oficial else 0.0,
         'valor_nao_verificado': valor_nao_verificado,
         'valor_diferenca_nao_verificado': round(float(linha['valor'] - total_bruto), 2) if valor_nao_verificado else 0.0,
+        'valor_fora_da_cidade': round(float(valor_fora_da_cidade), 2),
     }
 
 
@@ -263,10 +273,22 @@ def conferencia_vendedor(request):
         ],
     }
 
+    linhas_fora_cidade = [r for r in resultado if r.get('valor_fora_da_cidade')]
+    diagnostico_valor_fora_cidade = {
+        'valor_total': round(sum(r['valor_fora_da_cidade'] for r in linhas_fora_cidade), 2),
+        'qtd': len(linhas_fora_cidade),
+        'linhas': [
+            {'ped': r['ped'], 'cliente': r['cliente'], 'valor_planilha': r['valor'],
+             'valor_fora_da_cidade': r['valor_fora_da_cidade'], 'arquivo': r['arquivo'], 'detalhe': r['detalhe']}
+            for r in linhas_fora_cidade
+        ],
+    }
+
     return Response({
         'vendedor': vendedor_nome,
         'diagnostico_filtro_oficial': diagnostico_filtro_oficial,
         'diagnostico_valor_nao_verificado': diagnostico_valor_nao_verificado,
+        'diagnostico_valor_fora_cidade': diagnostico_valor_fora_cidade,
         'total_anotado': round(sum(l['valor'] for l in todas_linhas), 2),
         'linhas': resultado,
         'resumo': resumo,
