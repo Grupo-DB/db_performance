@@ -1656,14 +1656,6 @@ def calculos_comissoes(request):
 
         # Total Vendedor = Vendas Diretas + Vendas por Representantes (base da comissão e do card)
         total_vendedor = total_direto + total_por_representantes
-
-        # TESTE (temporário): mesma base, mas somando VALOR_TOTAL em vez de VALOR_PRODUTO,
-        # para comparar contra o "Confirmado" da conferência de planilha (que usa valor de nota cheio).
-        _agro_debug[f'{nome_agro}_total_direto_valor_total'] = round(float(df_direta['VALOR_TOTAL'].sum()), 2)
-        _agro_debug[f'{nome_agro}_total_por_representantes_valor_total'] = round(float(df_outros_validos['VALOR_TOTAL'].sum()), 2)
-        _agro_debug[f'{nome_agro}_total_vendedor_valor_total'] = round(
-            float(df_direta['VALOR_TOTAL'].sum()) + float(df_outros_validos['VALOR_TOTAL'].sum()), 2
-        )
         # Lançamentos do diálogo/PDF seguem a mesma base dos cards (union deduplicado por índice)
         lancamentos = _monta_lancamentos_agro(df_agro.loc[df_direta.index.union(df_outros_validos.index)])
 
