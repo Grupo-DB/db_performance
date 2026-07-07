@@ -135,6 +135,7 @@ def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
     best_ratio, best = scored[0]
 
     match = None
+    valor_nao_verificado = False
     if best_ratio >= 0.55 and abs(best['TOTAL'] - linha['valor']) < 1:
         match = [best]
     else:
@@ -144,6 +145,7 @@ def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
             match = similares
         elif best_ratio >= 0.65:
             match = [best]
+            valor_nao_verificado = True
 
     if not match:
         return {'status': 'PENDENTE', 'is_cotrijal': _is_cotrijal(linha['cliente']),
@@ -175,10 +177,16 @@ def _classificar_linha(linha, candidatos, vendedor_nome, mapa_municipio):
     total_bruto = sum(m['TOTAL'] for m in match)
     total_oficial = sum(m['TOTAL_OFICIAL'] or 0 for m in match)
     diverge_filtro_oficial = abs(total_bruto - total_oficial) > 1
+    detalhe = f'Confirmado no sistema (NF {nfs}).'
+    if valor_nao_verificado:
+        detalhe += (f' ATENÇÃO: valor não bateu — nota real R$ {total_bruto:.2f} vs '
+                    f'planilha R$ {linha["valor"]:.2f} (match só por nome do cliente).')
     return {
-        'status': 'OK', 'is_cotrijal': is_cotrijal, 'detalhe': f'Confirmado no sistema (NF {nfs}).',
+        'status': 'OK', 'is_cotrijal': is_cotrijal, 'detalhe': detalhe,
         'diverge_filtro_oficial': diverge_filtro_oficial,
         'valor_fora_filtro_oficial': round(float(total_bruto - total_oficial), 2) if diverge_filtro_oficial else 0.0,
+        'valor_nao_verificado': valor_nao_verificado,
+        'valor_diferenca_nao_verificado': round(float(linha['valor'] - total_bruto), 2) if valor_nao_verificado else 0.0,
     }
 
 
@@ -244,9 +252,21 @@ def conferencia_vendedor(request):
         ],
     }
 
+    linhas_nao_verificadas = [r for r in resultado if r.get('valor_nao_verificado')]
+    diagnostico_valor_nao_verificado = {
+        'valor_diferenca_total': round(sum(r['valor_diferenca_nao_verificado'] for r in linhas_nao_verificadas), 2),
+        'qtd': len(linhas_nao_verificadas),
+        'linhas': [
+            {'ped': r['ped'], 'cliente': r['cliente'], 'valor_planilha': r['valor'],
+             'valor_diferenca': r['valor_diferenca_nao_verificado'], 'arquivo': r['arquivo'], 'detalhe': r['detalhe']}
+            for r in linhas_nao_verificadas
+        ],
+    }
+
     return Response({
         'vendedor': vendedor_nome,
         'diagnostico_filtro_oficial': diagnostico_filtro_oficial,
+        'diagnostico_valor_nao_verificado': diagnostico_valor_nao_verificado,
         'total_anotado': round(sum(l['valor'] for l in todas_linhas), 2),
         'linhas': resultado,
         'resumo': resumo,
