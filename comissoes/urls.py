@@ -4,7 +4,7 @@ from .views import (RegiaoViewSet, RepresentanteViewSet, MetaViewSet, ComissaoVi
                     RegraComissaoViewSet, RegraComissaoGrupoViewSet, RegraComissaoFaixaViewSet,
                     calculos_comissoes, popular_mapeamento_agro, consulta_canceladas)
 from .conferencia import conferencia_vendedor
-from .teste_valor_total import teste_total_vendedor_valor_total, descobrir_colunas_pedido
+from .teste_valor_total import teste_total_vendedor_valor_total, descobrir_colunas_pedido, teste_pedidos_pendentes_erp
 from django.urls import path
 
 router = DefaultRouter()
@@ -26,4 +26,5 @@ urlpatterns = [
     path('conferencia_vendedor/', conferencia_vendedor, name='conferencia_vendedor'),
     path('teste_total_vendedor_valor_total/', teste_total_vendedor_valor_total, name='teste_total_vendedor_valor_total'),
     path('descobrir_colunas_pedido/', descobrir_colunas_pedido, name='descobrir_colunas_pedido'),
+    path('teste_pedidos_pendentes_erp/', teste_pedidos_pendentes_erp, name='teste_pedidos_pendentes_erp'),
 ] + router.urls

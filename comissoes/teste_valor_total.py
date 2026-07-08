@@ -36,6 +36,54 @@ def descobrir_colunas_pedido(request):
 
 @csrf_exempt
 @api_view(['POST'])
+def teste_pedidos_pendentes_erp(request):
+    """Endpoint de teste: pedidos do Agronegócio com saldo ainda não despachado
+    (Quantidade - Despachado - Cancelado > 0), direto do ERP, sem depender de planilha."""
+    data_inicio = request.data.get('dataInicio')
+    data_fim = request.data.get('dataFim')
+    if not data_inicio or not data_fim:
+        return Response({'erro': 'Informe dataInicio e dataFim (YYYY-MM-DD).'}, status=400)
+
+    sql = f"""
+        SELECT PED.PEDNUM AS PEDIDO, PED.PEDDATA AS DATA, PED.PEDSIT AS SITUACAO, CLI.CLINOME AS CLIENTE,
+        (SELECT CIDNOME + '-' + ESTUF FROM CIDADE JOIN ESTADO ON ESTCOD = CIDEST WHERE CIDCOD = CLI.CLICIDADE) AS CIDADE,
+        SUM(IPED.IPEDQUANT) AS QUANTIDADE,
+        SUM(IPED.IPEDQUANTDESP) AS DESPACHADO,
+        SUM(IPED.IPEDQUANTCANC) AS CANCELADO,
+        SUM(IPED.IPEDQUANT - IPED.IPEDQUANTDESP - IPED.IPEDQUANTCANC) AS SALDO,
+        SUM(IPED.IPEDTOTAL) AS TOTAL
+        FROM PEDIDO PED
+        JOIN CLIENTE CLI ON CLI.CLICOD = PED.PEDCLI
+        JOIN ITEMPEDIDO IPED ON IPED.IPEDPED = PED.PEDNUM
+        JOIN ESTOQUE ESTQ ON ESTQ.ESTQCOD = IPED.IPEDESTQ
+        WHERE ESTQ.ESTQGALM IN (1974, 1587, 1828)
+        AND CAST(PED.PEDDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+        GROUP BY PED.PEDNUM, PED.PEDDATA, PED.PEDSIT, CLI.CLINOME, CLI.CLICIDADE
+        HAVING SUM(IPED.IPEDQUANT - IPED.IPEDQUANTDESP - IPED.IPEDQUANTCANC) > 0
+        ORDER BY PED.PEDDATA
+    """
+    df = pd.read_sql(sql, engine)
+
+    mapa_municipio = {
+        _norm_cidade(m.cidade_estado): m.representante.nome.strip().upper()
+        for m in MapeamentoMunicipio.objects.filter(segmento='AGRONEGOCIO').select_related('representante')
+    }
+    df['CIDADE'] = df['CIDADE'].fillna('').str.strip().str.upper()
+    df['CLIENTE'] = df['CLIENTE'].fillna('').str.strip().str.upper()
+    df['_rep'] = df['CIDADE'].apply(lambda c: mapa_municipio.get(_norm_cidade(c), ''))
+    mask_yara = df['CLIENTE'].str.contains('YARA', na=False)
+    mask_cotrijal = df['CLIENTE'].str.contains('COTRIJAL', na=False)
+
+    resultado = {}
+    for nome in VENDEDORES_AGRO:
+        df_v = df[(df['_rep'] == nome) & ~mask_yara & ~mask_cotrijal]
+        resultado[nome] = df_v.drop(columns=['_rep']).round(2).to_dict(orient='records')
+
+    return Response(resultado)
+
+
+@csrf_exempt
+@api_view(['POST'])
 def teste_total_vendedor_valor_total(request):
     """Endpoint de teste/diagnóstico (leve): recalcula o 'Total Vendedor' do Agronegócio
     (Vendas Diretas + Vendas por Representantes) usando VALOR_TOTAL em vez de VALOR_PRODUTO,
