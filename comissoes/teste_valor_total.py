@@ -5,6 +5,7 @@ import pandas as pd
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+from sqlalchemy import text
 
 from .views import engine
 from .models import MapeamentoMunicipio
@@ -15,6 +16,22 @@ VENDEDORES_AGRO = ('ILDOMAR DA FONTE CARVALHO', 'EVERTON MARQUES DORNELES')
 def _norm_cidade(s):
     nfkd = unicodedata.normalize('NFKD', str(s) if s else '')
     return nfkd.encode('ascii', 'ignore').decode('ascii').upper().strip()
+
+
+@csrf_exempt
+@api_view(['POST', 'GET'])
+def descobrir_colunas_pedido(request):
+    """Endpoint de investigação (temporário): lista as colunas de PEDIDO e ITEMPEDIDO
+    para eu conseguir montar a consulta de 'pedidos pendentes direto do ERP'."""
+    sql = """
+        SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME IN ('PEDIDO', 'ITEMPEDIDO')
+        ORDER BY TABLE_NAME, ORDINAL_POSITION
+    """
+    with engine.connect() as conn:
+        rows = [dict(r) for r in conn.execute(text(sql)).mappings().all()]
+    return Response({'colunas': rows})
 
 
 @csrf_exempt
