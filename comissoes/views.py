@@ -1656,6 +1656,13 @@ def calculos_comissoes(request):
 
         # Total Vendedor = Vendas Diretas + Vendas por Representantes (base da comissão e do card)
         total_vendedor = total_direto + total_por_representantes
+
+        # Devoluções já embutidas no Total Vendedor (linhas com VALOR_PRODUTO negativo, vindas
+        # da união com NOTAFISCALENTRADA) — expostas à parte para explicar a diferença do
+        # "Total Vendedor" oficial contra a conferência manual de planilha (que não vê estorno).
+        _df_devolucoes_agro = df_rep_valido[df_rep_valido['VALOR_PRODUTO'] < 0]
+        devolucoes_lancamentos = _monta_lancamentos_agro(_df_devolucoes_agro) if len(_df_devolucoes_agro) else []
+        devolucoes_total = round(float(_df_devolucoes_agro['VALOR_PRODUTO'].sum()), 2) if len(_df_devolucoes_agro) else 0.0
         # Lançamentos do diálogo/PDF seguem a mesma base dos cards (union deduplicado por índice)
         lancamentos = _monta_lancamentos_agro(df_agro.loc[df_direta.index.union(df_outros_validos.index)])
 
@@ -1704,6 +1711,8 @@ def calculos_comissoes(request):
             'detalhamento_por_representante': detalhamento_por_representante,
             'cotrijal_total': round(cotrijal_total, 2),
             'cotrijal_lancamentos': cotrijal_lancamentos,
+            'devolucoes_total': devolucoes_total,
+            'devolucoes_lancamentos': devolucoes_lancamentos,
             'incluir_cotrijal': incluir_cotrijal_agro,
             'fixo': _agro_fixo,
             'lancamentos': lancamentos,
