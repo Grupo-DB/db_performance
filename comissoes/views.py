@@ -1627,6 +1627,38 @@ def calculos_comissoes(request):
     # Linhas da tabela AGRONEGOCIO da planilha (Comissões!A46:G54)
     _resumo_agro_rows = []
 
+    # Pedidos do Agronegócio com saldo ainda não despachado (Quantidade - Despachado - Cancelado > 0),
+    # direto de PEDIDO/ITEMPEDIDO — não depende de nenhuma nota fiscal emitida nem de planilha manual.
+    # Janela: desde 1º de janeiro do ano do período selecionado até o fim do período (evita arrastar
+    # pedidos de anos anteriores já abandonados/esquecidos no sistema).
+    _ano_inicio_pedidos = f"{dataFim[:4]}-01-01"
+    _sql_pedidos_pendentes = f"""
+        SELECT PED.PEDNUM AS PEDIDO, PED.PEDDATA AS DATA, CLI.CLINOME AS CLIENTE,
+        (SELECT CIDNOME + '-' + ESTUF FROM CIDADE JOIN ESTADO ON ESTCOD = CIDEST WHERE CIDCOD = CLI.CLICIDADE) AS CIDADE,
+        SUM(IPED.IPEDQUANT) AS QUANTIDADE,
+        SUM(IPED.IPEDQUANTDESP) AS DESPACHADO,
+        SUM(IPED.IPEDQUANT - IPED.IPEDQUANTDESP - IPED.IPEDQUANTCANC) AS SALDO,
+        SUM(IPED.IPEDTOTAL) AS TOTAL
+        FROM PEDIDO PED
+        JOIN CLIENTE CLI ON CLI.CLICOD = PED.PEDCLI
+        JOIN ITEMPEDIDO IPED ON IPED.IPEDPED = PED.PEDNUM
+        JOIN ESTOQUE ESTQ ON ESTQ.ESTQCOD = IPED.IPEDESTQ
+        WHERE ESTQ.ESTQGALM IN (1974, 1587, 1828)
+        AND CAST(PED.PEDDATA AS DATE) BETWEEN '{_ano_inicio_pedidos}' AND '{dataFim}'
+        AND PED.PEDSIT <> 2
+        GROUP BY PED.PEDNUM, PED.PEDDATA, CLI.CLINOME, CLI.CLICIDADE
+        HAVING SUM(IPED.IPEDQUANT - IPED.IPEDQUANTDESP - IPED.IPEDQUANTCANC) > 0
+        ORDER BY PED.PEDDATA
+    """
+    _df_pedidos_pendentes = pd.read_sql(_sql_pedidos_pendentes, engine)
+    _df_pedidos_pendentes['CIDADE'] = _df_pedidos_pendentes['CIDADE'].fillna('').str.strip().str.upper()
+    _df_pedidos_pendentes['CLIENTE'] = _df_pedidos_pendentes['CLIENTE'].fillna('').str.strip().str.upper()
+    _df_pedidos_pendentes['_rep'] = _df_pedidos_pendentes['CIDADE'].apply(
+        lambda c: _CIDADE_AGRO_REP.get(_norm_cidade(c), '')
+    )
+    _mask_yara_pedidos = _df_pedidos_pendentes['CLIENTE'].str.contains('YARA', na=False)
+    _mask_cotrijal_pedidos = _df_pedidos_pendentes['CLIENTE'].str.contains('COTRIJAL', na=False)
+
     for nome_agro in ('ILDOMAR DA FONTE CARVALHO', 'EVERTON MARQUES DORNELES'):
         mask_rep = df_agro_no_yara['_rep_agro'] == nome_agro
         df_rep = df_agro_no_yara[mask_rep].copy()
@@ -1663,6 +1695,18 @@ def calculos_comissoes(request):
         _df_devolucoes_agro = df_rep_valido[df_rep_valido['VALOR_PRODUTO'] < 0]
         devolucoes_lancamentos = _monta_lancamentos_agro(_df_devolucoes_agro) if len(_df_devolucoes_agro) else []
         devolucoes_total = round(float(_df_devolucoes_agro['VALOR_PRODUTO'].sum()), 2) if len(_df_devolucoes_agro) else 0.0
+
+        # Pedidos com saldo em aberto (não despachados) nas cidades deste vendedor — visibilidade
+        # de pipeline, independente de nota fiscal já emitida ou de planilha manual.
+        _df_pend_vendedor = _df_pedidos_pendentes[
+            (_df_pedidos_pendentes['_rep'] == nome_agro) & ~_mask_yara_pedidos & ~_mask_cotrijal_pedidos
+        ]
+        _pend_cols = _df_pend_vendedor[['PEDIDO', 'DATA', 'CLIENTE', 'CIDADE', 'QUANTIDADE', 'DESPACHADO', 'SALDO', 'TOTAL']].copy()
+        if len(_pend_cols):
+            _pend_cols['DATA'] = pd.to_datetime(_pend_cols['DATA']).dt.strftime('%d/%m/%Y')
+        pedidos_pendentes = _pend_cols.round(2).to_dict(orient='records')
+        pedidos_pendentes_total = round(float(_df_pend_vendedor['TOTAL'].sum()), 2)
+
         # Lançamentos do diálogo/PDF seguem a mesma base dos cards (union deduplicado por índice)
         lancamentos = _monta_lancamentos_agro(df_agro.loc[df_direta.index.union(df_outros_validos.index)])
 
@@ -1713,6 +1757,8 @@ def calculos_comissoes(request):
             'cotrijal_lancamentos': cotrijal_lancamentos,
             'devolucoes_total': devolucoes_total,
             'devolucoes_lancamentos': devolucoes_lancamentos,
+            'pedidos_pendentes_total': pedidos_pendentes_total,
+            'pedidos_pendentes': pedidos_pendentes,
             'incluir_cotrijal': incluir_cotrijal_agro,
             'fixo': _agro_fixo,
             'lancamentos': lancamentos,
