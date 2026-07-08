@@ -44,6 +44,8 @@ def teste_pedidos_pendentes_erp(request):
     if not data_inicio or not data_fim:
         return Response({'erro': 'Informe dataInicio e dataFim (YYYY-MM-DD).'}, status=400)
 
+    ano_inicio = f"{data_fim[:4]}-01-01"
+
     sql = f"""
         SELECT PED.PEDNUM AS PEDIDO, PED.PEDDATA AS DATA, PED.PEDSIT AS SITUACAO, CLI.CLINOME AS CLIENTE,
         (SELECT CIDNOME + '-' + ESTUF FROM CIDADE JOIN ESTADO ON ESTCOD = CIDEST WHERE CIDCOD = CLI.CLICIDADE) AS CIDADE,
@@ -57,7 +59,7 @@ def teste_pedidos_pendentes_erp(request):
         JOIN ITEMPEDIDO IPED ON IPED.IPEDPED = PED.PEDNUM
         JOIN ESTOQUE ESTQ ON ESTQ.ESTQCOD = IPED.IPEDESTQ
         WHERE ESTQ.ESTQGALM IN (1974, 1587, 1828)
-        AND CAST(PED.PEDDATA AS DATE) <= '{data_fim}'
+        AND CAST(PED.PEDDATA AS DATE) BETWEEN '{ano_inicio}' AND '{data_fim}'
         AND PED.PEDSIT <> 2
         GROUP BY PED.PEDNUM, PED.PEDDATA, PED.PEDSIT, CLI.CLINOME, CLI.CLICIDADE
         HAVING SUM(IPED.IPEDQUANT - IPED.IPEDQUANTDESP - IPED.IPEDQUANTCANC) > 0
