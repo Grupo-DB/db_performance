@@ -28,8 +28,92 @@ class PublicAnaliseViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.AllowAny]
 
 
+# Cálculos especiais de argamassa: cada um é um campo JSON dedicado no modelo Analise
+# (preenchido pelos drawers do menu "Ações Argamassa"/"Peneiras" em analise.ts), fora do
+# pipeline genérico de Ensaio/CalculoEnsaio. Mapeia campo_especial -> (nome do campo no
+# model, extrator do valor a partir do JSON, descrição, unidade).
+CAMPOS_ESPECIAIS = {
+    'substrato_media': ('substrato', lambda d: (d or {}).get('media'), 'Resist. Pot. Ader. Tração (Substrato)', 'MPa'),
+    'superficial_media': ('superficial', lambda d: (d or {}).get('media'), 'Resist. Pot. Ader. Tração (Superfície)', 'MPa'),
+    'flexao_media_geral': ('flexao', lambda d: (d or {}).get('media_geral'), 'Resist. Tração na Flexão', 'MPa'),
+    'compressao_media_geral': ('compressao', lambda d: (d or {}).get('media_geral'), 'Resist. Compressão', 'MPa'),
+    'deslizamento_resultado': ('deslizamento', lambda d: (d or {}).get('resultado'), 'Deslizamento (Colantes)', 'mm'),
+    'peneiras_finos': ('peneiras', lambda d: (d or {}).get('finos'), 'Peneiras Secas — % Finos (total)', '%'),
+    'tracao_normal_media': ('tracao_normal', lambda d: (d or {}).get('media'), 'Resist. Ader. Tração (Normal)', 'MPa'),
+    'tracao_submersa_media': ('tracao_submersa', lambda d: (d or {}).get('media'), 'Resist. Ader. Tração (Submersa)', 'MPa'),
+    'tracao_estufa_media': ('tracao_estufa', lambda d: (d or {}).get('media'), 'Resist. Ader. Tração (Estufa)', 'MPa'),
+    'tracao_aberto_media': ('tracao_tempo_aberto', lambda d: (d or {}).get('media'), 'Resist. Ader. Tração (Tempo em Aberto)', 'MPa'),
+    'modulo_elasticidade_ed': ('modulo_elasticidade', lambda d: ((d or {}).get('media') or {}).get('ed'), 'Módulo de Elasticidade Dinâmico (Ed)', 'GPa'),
+    'modulo_elasticidade_densidade': ('modulo_elasticidade', lambda d: ((d or {}).get('media') or {}).get('pMax'), 'Módulo de Elasticidade — Densidade', 'g/cm³'),
+    'variacao_dimensional_l1': ('variacao_dimensional', lambda d: ((d or {}).get('l1') or {}).get('media'), 'Variação Dimensional Linear (L1)', '%'),
+    'variacao_dimensional_l7': ('variacao_dimensional', lambda d: ((d or {}).get('l7') or {}).get('media'), 'Variação Dimensional Linear (L7)', '%'),
+    'variacao_dimensional_l28': ('variacao_dimensional', lambda d: ((d or {}).get('l28') or {}).get('media'), 'Variação Dimensional Linear (L28)', '%'),
+    'variacao_massa_m1': ('variacao_massa', lambda d: ((d or {}).get('m1') or {}).get('media'), 'Variação de Massa (M1)', '%'),
+    'variacao_massa_m7': ('variacao_massa', lambda d: ((d or {}).get('m7') or {}).get('media'), 'Variação de Massa (M7)', '%'),
+    'variacao_massa_m28': ('variacao_massa', lambda d: ((d or {}).get('m28') or {}).get('media'), 'Variação de Massa (M28)', '%'),
+}
+
+_LABEL_METRICA_PENEIRA = {
+    'retido': 'Retido',
+    'passante': 'Passante',
+    'acumulado': 'Acumulado',
+    'passante_acumulado': 'Passante Acumulado',
+}
+
+
+def _extrair_valor_peneira(analise, campo_especial, malha, metrica):
+    """
+    Extrai retido/passante/acumulado/passante_acumulado de uma malha específica das
+    peneiras (secas ou úmidas) de uma Analise.
+
+    Peneiras Secas já salvam porcentual_retido/passante/acumulado/passante_acumulado
+    prontos por linha (calculados em analise.ts:calcularPercentuaisEAcumulado). Peneiras
+    Úmidas só salvam o resultado (% retido) por linha — os demais valores são calculados
+    aqui com a mesma fórmula de soma corrida usada pelo frontend para as secas.
+    """
+    field_name = 'peneiras' if campo_especial == 'peneiras_secas' else 'peneiras_umidas'
+    dados = getattr(analise, field_name, None) or {}
+    linhas = dados.get('peneiras') or []
+
+    if campo_especial == 'peneiras_secas':
+        linha = next((l for l in linhas if l.get('peneira') == malha), None)
+        if not linha:
+            return None
+        chave = {
+            'retido': 'porcentual_retido',
+            'passante': 'passante',
+            'acumulado': 'acumulado',
+            'passante_acumulado': 'passante_acumulado',
+        }.get(metrica)
+        return linha.get(chave) if chave else None
+
+    # peneiras_umidas: soma corrida do 'resultado' (% retido) na ordem salva das linhas
+    acumulado = 0.0
+    retido_da_malha = None
+    for l in linhas:
+        r = l.get('resultado')
+        if r is None:
+            continue
+        acumulado += r
+        if l.get('peneira') == malha:
+            retido_da_malha = r
+            break
+
+    if retido_da_malha is None:
+        return None
+    if metrica == 'retido':
+        return retido_da_malha
+    if metrica == 'passante':
+        return 100 - retido_da_malha
+    if metrica == 'acumulado':
+        return acumulado
+    if metrica == 'passante_acumulado':
+        return 100 - acumulado
+    return None
+
+
 @method_decorator(csrf_exempt, name='dispatch')
-class AnaliseViewSet(viewsets.ModelViewSet):  
+class AnaliseViewSet(viewsets.ModelViewSet):
     queryset = Analise.objects.all()
     serializer_class = AnaliseSerializer
 
@@ -382,6 +466,13 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         Estatísticas (opcionais):
           - ensaio_id: int — filtra por ID do ensaio
           - ensaio_nome: string — filtra por nome/descrição do ensaio (icontains)
+          - campo_especial: string — uma das chaves de CAMPOS_ESPECIAIS (cálculos de
+            argamassa fora do pipeline genérico de ensaio/cálculo, ex.: 'substrato_media',
+            'modulo_elasticidade_ed'). Se for 'peneiras_secas' ou 'peneiras_umidas',
+            também exige peneira_malha e peneira_metrica.
+          - peneira_malha: string — valor exato da malha (ex.: '# 10 - ABNT/ASTM 10 - 2,00 mm'),
+            usado só com campo_especial='peneiras_secas'|'peneiras_umidas'
+          - peneira_metrica: 'retido'|'passante'|'acumulado'|'passante_acumulado' — idem
           - analises_excluidas: lista de IDs de análises a ignorar no cálculo
         """
         from django.db.models import Q
@@ -566,18 +657,23 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         # ── 3. CÁLCULO DE ESTATÍSTICAS (opcional) ───────────────────────────
         ensaio_id_filtro = data.get('ensaio_id')
         ensaio_nome_filtro = data.get('ensaio_nome')
+        campo_especial = data.get('campo_especial')
+        peneira_malha = data.get('peneira_malha')
+        peneira_metrica = data.get('peneira_metrica')
         analises_excluidas = set(data.get('analises_excluidas', []))
 
-        if ensaio_id_filtro or ensaio_nome_filtro:
+        if ensaio_id_filtro or ensaio_nome_filtro or campo_especial:
             ids_para_calcular = [a['id'] for a in analises_list if a['id'] not in analises_excluidas]
             amostra_por_analise = {a['id']: (a['amostra'] or {}).get('numero') for a in analises_list}
 
             valores_por_analise = {}
 
             # ── 3a. Busca em AnaliseEnsaio.ensaios_utilizados ────────────────
+            # (só relevante quando ensaio_id/ensaio_nome vêm no payload; para
+            # campo_especial puro, o loop abaixo simplesmente não casa nada)
             ensaios_qs = AnaliseEnsaio.objects.filter(
                 analise_id__in=ids_para_calcular
-            ).select_related('analise__amostra').order_by('analise_id', '-id')
+            ).select_related('analise__amostra').order_by('analise_id', '-id') if (ensaio_id_filtro or ensaio_nome_filtro) else AnaliseEnsaio.objects.none()
 
             for ae in ensaios_qs:
                 analise_id = ae.analise_id
@@ -650,11 +746,75 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                             'fonte': 'calculo',
                         }
 
+            # ── 3c. Cálculos especiais de argamassa (campos JSON de Analise) ─
+            if campo_especial:
+                if campo_especial in ('peneiras_secas', 'peneiras_umidas'):
+                    descricao_campo = 'Peneiras {} — {} — {}'.format(
+                        'Secas' if campo_especial == 'peneiras_secas' else 'Úmidas',
+                        peneira_malha or '',
+                        _LABEL_METRICA_PENEIRA.get(peneira_metrica, peneira_metrica or ''),
+                    )
+                    unidade_campo = '%'
+                    analises_especiais_qs = Analise.objects.filter(id__in=ids_para_calcular)
+                    for analise in analises_especiais_qs:
+                        if analise.id in valores_por_analise:
+                            continue
+                        valor = _extrair_valor_peneira(analise, campo_especial, peneira_malha, peneira_metrica)
+                        if valor is None:
+                            continue
+                        try:
+                            valor_float = float(valor)
+                        except (ValueError, TypeError):
+                            continue
+                        valores_por_analise[analise.id] = {
+                            'analise_id': analise.id,
+                            'amostra_numero': amostra_por_analise.get(analise.id),
+                            'valor': valor_float,
+                            'ensaio_id': None,
+                            'ensaio_descricao': descricao_campo,
+                            'unidade': unidade_campo,
+                            'fonte': 'especial',
+                        }
+                elif campo_especial in CAMPOS_ESPECIAIS:
+                    nome_campo, extrator, descricao_campo, unidade_campo = CAMPOS_ESPECIAIS[campo_especial]
+                    analises_especiais_qs = Analise.objects.filter(id__in=ids_para_calcular)
+                    for analise in analises_especiais_qs:
+                        if analise.id in valores_por_analise:
+                            continue
+                        valor = extrator(getattr(analise, nome_campo, None))
+                        if valor is None:
+                            continue
+                        try:
+                            valor_float = float(valor)
+                        except (ValueError, TypeError):
+                            continue
+                        valores_por_analise[analise.id] = {
+                            'analise_id': analise.id,
+                            'amostra_numero': amostra_por_analise.get(analise.id),
+                            'valor': valor_float,
+                            'ensaio_id': None,
+                            'ensaio_descricao': descricao_campo,
+                            'unidade': unidade_campo,
+                            'fonte': 'especial',
+                        }
+
             valores = [v['valor'] for v in valores_por_analise.values()]
             detalhes = sorted(valores_por_analise.values(), key=lambda x: x['analise_id'])
 
+            # Descrição/unidade de fallback quando não há nenhum valor encontrado
+            if campo_especial in ('peneiras_secas', 'peneiras_umidas'):
+                descricao_fallback = 'Peneiras {} — {} — {}'.format(
+                    'Secas' if campo_especial == 'peneiras_secas' else 'Úmidas',
+                    peneira_malha or '',
+                    _LABEL_METRICA_PENEIRA.get(peneira_metrica, peneira_metrica or ''),
+                )
+            elif campo_especial in CAMPOS_ESPECIAIS:
+                descricao_fallback = CAMPOS_ESPECIAIS[campo_especial][2]
+            else:
+                descricao_fallback = ensaio_nome_filtro
+
             # Descrição representativa (primeiro detalhe encontrado)
-            descricao_repr = detalhes[0]['ensaio_descricao'] if detalhes else ensaio_nome_filtro
+            descricao_repr = detalhes[0]['ensaio_descricao'] if detalhes else descricao_fallback
             unidade_repr = detalhes[0]['unidade'] if detalhes else ''
 
             if valores:
@@ -674,7 +834,7 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                 resposta['estatisticas'] = {
                     'ensaio_id': ensaio_id_filtro,
                     'ensaio_nome': ensaio_nome_filtro,
-                    'ensaio_descricao': ensaio_nome_filtro,
+                    'ensaio_descricao': descricao_fallback,
                     'unidade': '',
                     'quantidade_medicoes': 0,
                     'analises_excluidas': list(analises_excluidas),
