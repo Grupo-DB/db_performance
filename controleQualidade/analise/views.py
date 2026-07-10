@@ -590,11 +590,13 @@ class AnaliseViewSet(viewsets.ModelViewSet):
           - tipo_peneira: 'secas' | 'umidas' (obrigatório)
           - analises_ids: lista opcional de IDs de Analise para restringir o resultado
             (evita plotar uma curva por análise quando o filtro retorna muitas)
+          - malhas: lista opcional de malhas (rótulo do catálogo) para restringir os
+            pontos retornados a essas malhas específicas
 
         Resposta: { "curvas": [ { analise_id, amostra_numero, data, pontos: [
-          { malha, passante_acumulado } ] } ] }
-        Peneiras Secas já salvam passante_acumulado pronto por linha. Peneiras Úmidas só
-        salvam o resultado (% retido) por linha — passante_acumulado é calculado aqui por
+          { malha, retido, passante, acumulado, passante_acumulado } ] } ] }
+        Peneiras Secas já salvam os 4 valores prontos por linha. Peneiras Úmidas só
+        salvam o resultado (% retido) por linha — os demais são calculados aqui por
         soma corrida, mesma fórmula usada em campo_especial='peneiras_umidas'.
         """
         data = request.data
@@ -607,6 +609,9 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         if analises_ids:
             qs = qs.filter(id__in=analises_ids)
 
+        malhas_filtro = data.get('malhas')
+        malhas_filtro_set = set(malhas_filtro) if malhas_filtro else None
+
         field_name = 'peneiras' if tipo_peneira == 'secas' else 'peneiras_umidas'
         curvas = []
         for analise in qs:
@@ -617,9 +622,20 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                 for linha in linhas:
                     malha = linha.get('peneira')
                     passante_acumulado = linha.get('passante_acumulado')
-                    if malha and passante_acumulado is not None:
-                        pontos.append({'malha': malha, 'passante_acumulado': passante_acumulado})
+                    if not malha or passante_acumulado is None:
+                        continue
+                    if malhas_filtro_set and malha not in malhas_filtro_set:
+                        continue
+                    pontos.append({
+                        'malha': malha,
+                        'retido': linha.get('porcentual_retido'),
+                        'passante': linha.get('passante'),
+                        'acumulado': linha.get('acumulado'),
+                        'passante_acumulado': passante_acumulado,
+                    })
             else:
+                # soma corrida sobre TODAS as linhas (na ordem salva), independente do
+                # filtro de malhas — o filtro só decide o que entra em `pontos`
                 acumulado = 0.0
                 for linha in linhas:
                     malha = linha.get('peneira')
@@ -627,7 +643,15 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                     if not malha or resultado is None:
                         continue
                     acumulado += resultado
-                    pontos.append({'malha': malha, 'passante_acumulado': 100 - acumulado})
+                    if malhas_filtro_set and malha not in malhas_filtro_set:
+                        continue
+                    pontos.append({
+                        'malha': malha,
+                        'retido': resultado,
+                        'passante': 100 - resultado,
+                        'acumulado': acumulado,
+                        'passante_acumulado': 100 - acumulado,
+                    })
 
             if not pontos:
                 continue
