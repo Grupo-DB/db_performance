@@ -437,54 +437,18 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         }
         return JsonResponse(response_data, safe=False)
 
-    @action(detail=False, methods=['post'], url_path='filtrar-e-calcular')
-    def filtrar_e_calcular(self, request):
+    def _queryset_analises_filtrado(self, data):
         """
-        Filtra análises dinamicamente e, opcionalmente, calcula estatísticas
-        (média, máximo, mínimo) de um ensaio específico dentro das análises filtradas.
-
-        Parâmetros (POST):
-        Filtros de Analise:
-          - data_inicio / data_fim: range de datas (YYYY-MM-DD)
-          - finalizada_inicio / finalizada_fim: range de finalizada_at
-          - aprovada_inicio / aprovada_fim: range de aprovada_at
-          - finalizada: true | false
-          - aprovada: true | false
-          - laudo: true | false
-          - usada_laudo: true | false
-          - estado: string ou lista de strings
-          - laboratorio_atual: string ou lista
-          - classificacao: string
-        Filtros de Amostra (via amostra__):
-          - laboratorio: string ou lista
-          - local_coleta: string ou lista
-          - tipo_amostra: string ou lista
-          - produto_ids: lista de IDs de ProdutoAmostra
-          - material: string ou lista
-          - fornecedor: string ou lista
-          - finalidade: string ou lista
-        Estatísticas (opcionais):
-          - ensaio_id: int — filtra por ID do ensaio
-          - ensaio_nome: string — filtra por nome/descrição do ensaio (icontains)
-          - campo_especial: string — uma das chaves de CAMPOS_ESPECIAIS (cálculos de
-            argamassa fora do pipeline genérico de ensaio/cálculo, ex.: 'substrato_media',
-            'modulo_elasticidade_ed'). Se for 'peneiras_secas' ou 'peneiras_umidas',
-            também exige peneira_malha e peneira_metrica.
-          - peneira_malha: string — valor exato da malha (ex.: '# 10 - ABNT/ASTM 10 - 2,00 mm'),
-            usado só com campo_especial='peneiras_secas'|'peneiras_umidas'
-          - peneira_metrica: 'retido'|'passante'|'acumulado'|'passante_acumulado' — idem
-          - analises_excluidas: lista de IDs de análises a ignorar no cálculo
+        Constrói o queryset de Analise a partir dos mesmos filtros aceitos por
+        filtrar-e-calcular. Extraído para ser reaproveitado também por
+        curva-granulometrica.
         """
         from django.db.models import Q
-        import json
+        from datetime import datetime as _dt, timedelta as _td
 
-        data = request.data
-
-        # ── 1. CONSTRUÇÃO DO QUERYSET FILTRADO ──────────────────────────────
         qs = Analise.objects.select_related('amostra', 'amostra__produto_amostra')
 
         # Datas da análise
-        from datetime import datetime as _dt, timedelta as _td
         data_inicio = data.get('data_inicio')
         data_fim = data.get('data_fim')
         if data_inicio:
@@ -613,7 +577,112 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             else:
                 qs = qs.filter(amostra__produto_amostra__subtipo__icontains=subtipo)
 
-        qs = qs.order_by('-id')
+        return qs.order_by('-id')
+
+    @action(detail=False, methods=['post'], url_path='curva-granulometrica')
+    def curva_granulometrica(self, request):
+        """
+        Retorna, para cada análise filtrada, os pontos da curva granulométrica
+        (malha -> % passante acumulado) de Peneiras Secas ou Úmidas — usado pelo
+        gráfico de curva granulométrica dos Relatórios Dinâmicos.
+
+        Parâmetros (POST): os mesmos filtros de filtrar-e-calcular, mais:
+          - tipo_peneira: 'secas' | 'umidas' (obrigatório)
+          - analises_ids: lista opcional de IDs de Analise para restringir o resultado
+            (evita plotar uma curva por análise quando o filtro retorna muitas)
+
+        Resposta: { "curvas": [ { analise_id, amostra_numero, data, pontos: [
+          { malha, passante_acumulado } ] } ] }
+        Peneiras Secas já salvam passante_acumulado pronto por linha. Peneiras Úmidas só
+        salvam o resultado (% retido) por linha — passante_acumulado é calculado aqui por
+        soma corrida, mesma fórmula usada em campo_especial='peneiras_umidas'.
+        """
+        data = request.data
+        tipo_peneira = data.get('tipo_peneira')
+        if tipo_peneira not in ('secas', 'umidas'):
+            return Response({'detail': "tipo_peneira deve ser 'secas' ou 'umidas'."}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        qs = self._queryset_analises_filtrado(data)
+        analises_ids = data.get('analises_ids')
+        if analises_ids:
+            qs = qs.filter(id__in=analises_ids)
+
+        field_name = 'peneiras' if tipo_peneira == 'secas' else 'peneiras_umidas'
+        curvas = []
+        for analise in qs:
+            dados = getattr(analise, field_name, None) or {}
+            linhas = dados.get('peneiras') or []
+            pontos = []
+            if tipo_peneira == 'secas':
+                for linha in linhas:
+                    malha = linha.get('peneira')
+                    passante_acumulado = linha.get('passante_acumulado')
+                    if malha and passante_acumulado is not None:
+                        pontos.append({'malha': malha, 'passante_acumulado': passante_acumulado})
+            else:
+                acumulado = 0.0
+                for linha in linhas:
+                    malha = linha.get('peneira')
+                    resultado = linha.get('resultado')
+                    if not malha or resultado is None:
+                        continue
+                    acumulado += resultado
+                    pontos.append({'malha': malha, 'passante_acumulado': 100 - acumulado})
+
+            if not pontos:
+                continue
+
+            curvas.append({
+                'analise_id': analise.id,
+                'amostra_numero': analise.amostra.numero if analise.amostra else None,
+                'data': analise.data,
+                'pontos': pontos,
+            })
+
+        return Response({'curvas': curvas})
+
+    @action(detail=False, methods=['post'], url_path='filtrar-e-calcular')
+    def filtrar_e_calcular(self, request):
+        """
+        Filtra análises dinamicamente e, opcionalmente, calcula estatísticas
+        (média, máximo, mínimo) de um ensaio específico dentro das análises filtradas.
+
+        Parâmetros (POST):
+        Filtros de Analise:
+          - data_inicio / data_fim: range de datas (YYYY-MM-DD)
+          - finalizada_inicio / finalizada_fim: range de finalizada_at
+          - aprovada_inicio / aprovada_fim: range de aprovada_at
+          - finalizada: true | false
+          - aprovada: true | false
+          - laudo: true | false
+          - usada_laudo: true | false
+          - estado: string ou lista de strings
+          - laboratorio_atual: string ou lista
+          - classificacao: string
+        Filtros de Amostra (via amostra__):
+          - laboratorio: string ou lista
+          - local_coleta: string ou lista
+          - tipo_amostra: string ou lista
+          - produto_ids: lista de IDs de ProdutoAmostra
+          - material: string ou lista
+          - fornecedor: string ou lista
+          - finalidade: string ou lista
+        Estatísticas (opcionais):
+          - ensaio_id: int — filtra por ID do ensaio
+          - ensaio_nome: string — filtra por nome/descrição do ensaio (icontains)
+          - campo_especial: string — uma das chaves de CAMPOS_ESPECIAIS (cálculos de
+            argamassa fora do pipeline genérico de ensaio/cálculo, ex.: 'substrato_media',
+            'modulo_elasticidade_ed'). Se for 'peneiras_secas' ou 'peneiras_umidas',
+            também exige peneira_malha e peneira_metrica.
+          - peneira_malha: string — valor exato da malha (ex.: '# 10 - ABNT/ASTM 10 - 2,00 mm'),
+            usado só com campo_especial='peneiras_secas'|'peneiras_umidas'
+          - peneira_metrica: 'retido'|'passante'|'acumulado'|'passante_acumulado' — idem
+          - analises_excluidas: lista de IDs de análises a ignorar no cálculo
+        """
+        import json
+
+        data = request.data
+        qs = self._queryset_analises_filtrado(data)
 
         # ── 2. SERIALIZAÇÃO COMPACTA DA LISTA ───────────────────────────────
         analises_list = []
