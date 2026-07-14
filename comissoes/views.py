@@ -626,6 +626,10 @@ def calculos_comissoes(request):
         return _params.get(chave, default)
     # ─────────────────────────────────────────────────────────────────────────
 
+    # Variantes de nome que representam o grupo CB/CAL CREM (usado tanto para classificar
+    # vendas quanto para normalizar o grupo cadastrado em metas individuais/globais)
+    CB_TERMOS = ['CB CAL', 'CAL PINTURA', 'CERRO BRANCO', 'CAL CREM', 'CB/CAL']
+
     # Busca metas do banco para o período e monta no mesmo formato do metas_request
     # chave: "MM/AAAAREP_NOME" → {"CB": valor, "PRIMOR": valor, ...}
     from .models import Meta as MetaModel
@@ -643,8 +647,7 @@ def calculos_comissoes(request):
                 metas_db[chave] = {}
             grupo_key = m.grupo.strip().upper()
             # Normaliza variantes de CB/CAL CREM para a chave usada no cálculo
-            _cb_termos = ['CB CAL', 'CAL PINTURA', 'CERRO BRANCO', 'CAL CREM', 'CB/CAL']
-            if any(t in grupo_key for t in _cb_termos):
+            if any(t in grupo_key for t in CB_TERMOS):
                 grupo_key = 'CB'
             metas_db[chave][grupo_key] = float(m.valor)
     except Exception:
@@ -675,14 +678,13 @@ def calculos_comissoes(request):
     bonus_interno = p('BONUS_INTERNO_CC', 0.0005)
 
     # GRUPO_COMERCIAL (coluna AA da planilha) é a base do filtro de grupo
-    grupo_cb_termos    = ['CB CAL', 'CAL PINTURA', 'CERRO BRANCO', 'CAL CREM', 'CB/CAL']
     grupo_primor_termos = ['PRIMOR']
     grupo_primex_termos = ['PRIMEX']
     grupo_finaliza_termos = ['FINALIZA']
 
     def grupo_gestao(linha):
         l = str(linha).upper()
-        if any(g in l for g in grupo_cb_termos):
+        if any(g in l for g in CB_TERMOS):
             return 'CB'
         if any(g in l for g in grupo_primor_termos):
             return 'PRIMOR'
@@ -792,6 +794,13 @@ def calculos_comissoes(request):
     base_mpa_vendas = 0.0
     total_comissao_primex = 0.0  # base para Marco Alan Lopes (10%)
 
+    # Bônus de meta global CC: população elegível (vendedores externos CC com venda no período,
+    # loop principal + Agner — NÃO inclui Adriano Born, que tem regra própria) e realizado por
+    # grupo dessa mesma população, usados mais abaixo para comparar com a meta global cadastrada.
+    GRUPOS_CC = ['CB', 'PRIMOR', 'PRIMEX', 'FINALIZA']
+    chaves_vendedores_cc_elegiveis = []
+    realizado_global_por_grupo = {g: 0.0 for g in GRUPOS_CC}
+
     for rep_chave, vinc_int in VINCULO_INT_MATRIZ.items():
         # Inclui vendas diretas (REPRESENTANTE) + vendas de sub-representantes (REPRESENTANTE_MASTER)
         mask_rep = df_cc['REPRESENTANTE'].str.contains(rep_chave, na=False, regex=False)
@@ -802,6 +811,10 @@ def calculos_comissoes(request):
         vendas = vendas_por_grupo(df_rep)
         chave_meta = f"{periodo_chave}{rep_chave}"
         comissao_rep, comissao_grupos = comissao_ext_com_bonus(vendas, chave_meta)
+
+        chaves_vendedores_cc_elegiveis.append(rep_chave)
+        for g in GRUPOS_CC:
+            realizado_global_por_grupo[g] += vendas.get(g, 0.0)
 
         base_vendas[rep_chave] = vendas
         total_comissao_primex += comissao_grupos.get('PRIMEX', 0.0)
@@ -870,6 +883,58 @@ def calculos_comissoes(request):
         'venda_carbomax': round(float(venda_agner_carbomax), 2),
         'tipo': 'Vendedor Externo CC'
     }
+    if total_agner > 0:
+        chaves_vendedores_cc_elegiveis.append('AGNER LORETO WALMRATH')
+        for g in GRUPOS_CC:
+            realizado_global_por_grupo[g] += vendas_agner.get(g, 0.0)
+
+    # ---- 1b. Bônus de meta global CC ----
+    # Meta cadastrada sem representante (representante=null na tela de Metas) = meta da empresa
+    # toda para aquela linha/período. Realizado = soma das vendas dos vendedores externos CC
+    # elegíveis (mesma população acumulada acima). Se bater, o bônus (% configurável por linha
+    # sobre o realizado) é dividido igualmente entre todos os elegíveis do período, mesmo quem
+    # não vendeu nada daquela linha específica — e soma na comissão de cada um (não fica só num
+    # resumo à parte, senão não entra em resumo_por_vendedor/total_geral/"meus dados").
+    n_elegiveis_cc = len(chaves_vendedores_cc_elegiveis)
+    metas_globais_por_grupo = {}
+    try:
+        metas_globais_qs = Meta.objects.filter(
+            representante__isnull=True, segmento='CONSTRUCAO CIVIL',
+            data_meta__range=[dataInicio, dataFim]
+        )
+        for m in metas_globais_qs:
+            grupo_key = (m.grupo or '').strip().upper()
+            if any(t in grupo_key for t in CB_TERMOS):
+                grupo_key = 'CB'
+            metas_globais_por_grupo[grupo_key] = metas_globais_por_grupo.get(grupo_key, 0.0) + float(m.valor)
+    except Exception:
+        metas_globais_por_grupo = {}
+
+    meta_global_cc = {}
+    for grupo in GRUPOS_CC:
+        meta_g = metas_globais_por_grupo.get(grupo, 0.0)
+        realizado_g = round(float(realizado_global_por_grupo.get(grupo, 0.0)), 2)
+        pct_bonus = p(f'BONUS_GLOBAL_CC_{grupo}', 0.001)
+        atingiu = bool(considerar_potencializadores and meta_g > 0 and realizado_g >= meta_g and n_elegiveis_cc > 0)
+        bonus_total = round(realizado_g * pct_bonus, 2) if atingiu else 0.0
+        bonus_por_vendedor = round(bonus_total / n_elegiveis_cc, 2) if atingiu else 0.0
+        meta_global_cc[grupo] = {
+            'meta': round(meta_g, 2),
+            'realizado': realizado_g,
+            'percentual_atingido': round(realizado_g / meta_g * 100, 1) if meta_g > 0 else 0.0,
+            'atingiu': atingiu,
+            'percentual_bonus': pct_bonus,
+            'bonus_total': bonus_total,
+            'qtd_vendedores_elegiveis': n_elegiveis_cc,
+            'bonus_por_vendedor': bonus_por_vendedor,
+        }
+        if atingiu:
+            for chave in chaves_vendedores_cc_elegiveis:
+                resultado[chave]['comissao'] = round(resultado[chave]['comissao'] + bonus_por_vendedor, 2)
+                resultado[chave].setdefault('bonus_meta_global_por_grupo', {})[grupo] = bonus_por_vendedor
+                resultado[chave]['bonus_meta_global_total'] = round(
+                    resultado[chave].get('bonus_meta_global_total', 0.0) + bonus_por_vendedor, 2
+                )
 
     # ---- 2. Adriano Born ----
     df_adriano = df_cc[df_cc['REPRESENTANTE'].str.contains('ADRIANO L. BORN|ADRIANO BORN', na=False, regex=True)]
@@ -2059,5 +2124,6 @@ def calculos_comissoes(request):
         'qtd_notas_removidas': len(_notas_removidas_lista),
         'dataframe_vendas': _dataframe_vendas,
         'resumo_agro': resumo_agro,
+        'meta_global_cc': meta_global_cc,
         'devolucoes_resumo': _devolucoes_resumo,
     }, safe=False)
