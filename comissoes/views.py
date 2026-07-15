@@ -183,10 +183,10 @@ def popular_mapeamento_agro(request):
 
 #========================   Consulta de vendas para montar cálculos =========================#
  # String de conexão
-#connection_string = 'mssql+pyodbc://DBCONSULTA:%21%40%23123qweQWE@172.10.27.51:1433/DB?driver=ODBC+Driver+17+for+SQL+Server'
+connection_string = 'mssql+pyodbc://DBCONSULTA:%21%40%23123qweQWE@172.10.27.51:1433/DB?driver=ODBC+Driver+17+for+SQL+Server'
 
 ### Para uso em LOCALENV
-connection_string = 'mssql+pyodbc://DBCONSULTA:%21%40%23123qweQWE@45.6.118.50,65530/DB?driver=ODBC+Driver+17+for+SQL+Server'
+#connection_string = 'mssql+pyodbc://DBCONSULTA:%21%40%23123qweQWE@45.6.118.50,65530/DB?driver=ODBC+Driver+17+for+SQL+Server'
 
 
 # Cria a engine
@@ -858,6 +858,8 @@ def calculos_comissoes(request):
     total_agner_matriz = df_agner_nao_atm['VALOR_PRODUTO'].sum()
     proporcao_agner_matriz = (total_agner_matriz / total_agner) if total_agner > 0 else 0
     vendas_agner = vendas_por_grupo(df_agner)
+    if total_agner > 0:
+        base_vendas['AGNER LORETO WALMRATH'] = vendas_agner
     comissao_agner_base, comissao_grupos_agner = comissao_ext_com_bonus(vendas_agner, f"{periodo_chave}AGNER LORETO WALMRATH")
     # Adicional CARBOMAX: SUMIFS(V:V, K:K, AGNER, AA:AA, "CARBOMAX") * taxa configurável
     venda_agner_carbomax = df_agner[df_agner['GRUPO_COMERCIAL'].str.contains('CARBOMAX', na=False)]['VALOR_PRODUTO'].sum()
