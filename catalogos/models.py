@@ -20,6 +20,10 @@ def upload_anexo_pedido(instance, filename):
     return f"pedidos/anexos/{instance.pedido_id}/{filename}"
 
 
+def upload_imagem_item_nao_catalogado(instance, filename):
+    return f"pedidos/nao_catalogados/{instance.pedido_id}/{filename}"
+
+
 class Fabricante(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=255, null=False, blank=False)
@@ -286,6 +290,26 @@ class AnexoPedido(models.Model):
 
     def __str__(self):
         return f"Anexo {self.id} - Pedido {self.pedido.numero_referencia}"
+
+
+class ItemPedidoNaoCatalogado(models.Model):
+    """Item que o solicitante não encontrou no catálogo; segue junto ao pedido
+    para o comprador cadastrar no ERP."""
+    id = models.AutoField(primary_key=True)
+    pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE, related_name='itens_nao_catalogados')
+    nome = models.CharField(max_length=455)
+    unidade = models.CharField(max_length=50, blank=True, null=True, help_text='Unidade de medida (ex.: PEÇA, UN, METRO)')
+    equipamento = models.CharField(max_length=455, blank=True, null=True, help_text='Equipamento a ser aplicado')
+    imagem = models.ImageField(upload_to=upload_imagem_item_nao_catalogado, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Item não catalogado'
+        verbose_name_plural = 'Itens não catalogados'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.nome} (não catalogado) - Pedido {self.pedido.numero_referencia}"
 
 
 class PedidoNotificacao(models.Model):

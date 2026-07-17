@@ -48,6 +48,7 @@ kombu==5.3.7
 markdown-it-py==3.0.0
 MarkupSafe==2.1.5
 mdurl==0.1.2
+msoffcrypto-tool==6.0.0
 mssql-django==1.4
 numpy==2.0.0
 openai==2.2.0

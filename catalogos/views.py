@@ -15,6 +15,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.contrib.auth.models import User
 from django.conf import settings
+from django.db.models import Count
 from django.core.mail import EmailMultiAlternatives
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
@@ -23,7 +24,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
     Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, AnexoPedido,
-    PedidoNotificacao, CatalogoPDF, ItemErpCatalogo, EquipamentoCatalogo,
+    ItemPedidoNaoCatalogado, PedidoNotificacao, CatalogoPDF, ItemErpCatalogo, EquipamentoCatalogo,
 )
 from .serializers import (
     FabricanteSerializer, EquipamentoSerializer,
@@ -32,7 +33,8 @@ from .serializers import (
     ItemListSerializer, ItemDetailSerializer, ItemCreateUpdateSerializer,
     PedidoListSerializer, PedidoDetailSerializer, PedidoCreateSerializer,
     PedidoUpdateStatusSerializer, PedidoNotificacaoSerializer,
-    AnexoPedidoSerializer, CatalogoPDFSerializer, ItemErpCatalogoSerializer,
+    AnexoPedidoSerializer, ItemPedidoNaoCatalogadoSerializer,
+    CatalogoPDFSerializer, ItemErpCatalogoSerializer,
     EquipamentoCatalogoSerializer,
 )
 
@@ -528,7 +530,9 @@ class PedidoViewSet(viewsets.ModelViewSet):
         return PedidoListSerializer
 
     def get_queryset(self):
-        return Pedido.objects.all()
+        return Pedido.objects.annotate(
+            qtd_itens_nao_catalogados=Count('itens_nao_catalogados')
+        )
 
     def perform_create(self, serializer):
         super().perform_create(serializer)
@@ -633,6 +637,18 @@ class AnexoPedidoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return AnexoPedido.objects.filter(pedido_id=self.kwargs['pedido_pk'])
+
+    def perform_create(self, serializer):
+        serializer.save(pedido_id=self.kwargs['pedido_pk'])
+
+
+class ItemPedidoNaoCatalogadoViewSet(viewsets.ModelViewSet):
+    """Itens não catalogados de um pedido (nested em /pedidos/{pedido_pk}/)."""
+    serializer_class = ItemPedidoNaoCatalogadoSerializer
+    http_method_names = ['get', 'post', 'delete']
+
+    def get_queryset(self):
+        return ItemPedidoNaoCatalogado.objects.filter(pedido_id=self.kwargs['pedido_pk'])
 
     def perform_create(self, serializer):
         serializer.save(pedido_id=self.kwargs['pedido_pk'])

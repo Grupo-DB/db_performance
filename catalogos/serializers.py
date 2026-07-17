@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from .models import (
     Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, AnexoPedido,
-    PedidoNotificacao, CatalogoPDF, ItemErpCatalogo, EquipamentoCatalogo,
+    ItemPedidoNaoCatalogado, PedidoNotificacao, CatalogoPDF, ItemErpCatalogo, EquipamentoCatalogo,
 )
 
 
@@ -161,15 +161,22 @@ class PedidoListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     solicitante_nome = serializers.SerializerMethodField(read_only=True)
     responsavel_nome = serializers.SerializerMethodField(read_only=True)
+    qtd_itens_nao_catalogados = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Pedido
         fields = [
             'id', 'numero_referencia', 'status', 'status_display',
             'solicitante_nome', 'responsavel', 'responsavel_nome',
-            'total', 'motivo_rejeicao', 'created_at', 'updated_at',
+            'total', 'motivo_rejeicao', 'qtd_itens_nao_catalogados',
+            'created_at', 'updated_at',
         ]
         read_only_fields = ['numero_referencia', 'created_at', 'updated_at']
+
+    def get_qtd_itens_nao_catalogados(self, obj):
+        # Usa a anotação do queryset quando presente; senão conta direto.
+        anotado = getattr(obj, 'qtd_itens_nao_catalogados', None)
+        return anotado if anotado is not None else obj.itens_nao_catalogados.count()
 
     def get_solicitante_nome(self, obj):
         if not obj.usuario:
@@ -189,12 +196,20 @@ class AnexoPedidoSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 
+class ItemPedidoNaoCatalogadoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ItemPedidoNaoCatalogado
+        fields = ['id', 'pedido', 'nome', 'unidade', 'equipamento', 'imagem', 'created_at']
+        read_only_fields = ['id', 'pedido', 'created_at']
+
+
 class PedidoDetailSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     solicitante_nome = serializers.SerializerMethodField(read_only=True)
     responsavel_nome = serializers.SerializerMethodField(read_only=True)
     itens_pedido = ItemPedidoDetailSerializer(read_only=True, many=True)
     anexos = AnexoPedidoSerializer(read_only=True, many=True)
+    itens_nao_catalogados = ItemPedidoNaoCatalogadoSerializer(read_only=True, many=True)
 
     class Meta:
         model = Pedido
@@ -202,7 +217,7 @@ class PedidoDetailSerializer(serializers.ModelSerializer):
             'id', 'numero_referencia', 'status', 'status_display',
             'solicitante_nome', 'responsavel', 'responsavel_nome',
             'total', 'observacoes', 'motivo_rejeicao', 'itens_pedido',
-            'anexos', 'created_at', 'updated_at',
+            'anexos', 'itens_nao_catalogados', 'created_at', 'updated_at',
         ]
         read_only_fields = ['numero_referencia', 'total', 'created_at', 'updated_at']
 

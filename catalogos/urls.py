@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     FabricanteViewSet, EquipamentoViewSet, VeiculoViewSet, SecaoViewSet, ItemViewSet,
-    PedidoViewSet, PedidoNotificacaoViewSet, AnexoPedidoViewSet,
+    PedidoViewSet, PedidoNotificacaoViewSet, AnexoPedidoViewSet, ItemPedidoNaoCatalogadoViewSet,
     CatalogoPDFViewSet, ItemErpCatalogoViewSet, EquipamentoCatalogoViewSet,
     consultar_produtos, consultar_imagem_produto,
     serve_catalogo_pdf_inline,
@@ -23,6 +23,7 @@ router.register(r'equipamento-catalogo', EquipamentoCatalogoViewSet, basename='e
 
 anexo_router = DefaultRouter()
 anexo_router.register(r'anexos', AnexoPedidoViewSet, basename='pedido-anexo')
+anexo_router.register(r'itens-nao-catalogados', ItemPedidoNaoCatalogadoViewSet, basename='pedido-item-nao-catalogado')
 
 urlpatterns = [
     path('', include(router.urls)),
