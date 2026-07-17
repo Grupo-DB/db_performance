@@ -234,14 +234,17 @@ class PedidoDetailSerializer(serializers.ModelSerializer):
 
 class PedidoCreateSerializer(serializers.ModelSerializer):
     itens = ItemPedidoWriteSerializer(many=True, write_only=True, required=False)
+    # Se True, o e-mail NÃO é enviado no create (o front dispara depois de subir os itens avulsos).
+    adiar_email = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
         model = Pedido
-        fields = ['id', 'numero_referencia', 'observacoes', 'itens']
+        fields = ['id', 'numero_referencia', 'observacoes', 'itens', 'adiar_email']
         read_only_fields = ['id', 'numero_referencia']
 
     def create(self, validated_data):
         itens_data = validated_data.pop('itens', [])
+        validated_data.pop('adiar_email', None)
         request = self.context.get('request')
 
         pedido = Pedido.objects.create(

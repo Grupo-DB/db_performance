@@ -331,6 +331,59 @@ def _enviar_email_novo_pedido(pedido):
         for idx, i in enumerate(itens)
     )
 
+    # --- Itens não catalogados (para cadastrar no ERP) ---
+    itens_nc = list(pedido.itens_nao_catalogados.all())
+    imagens_nc = []  # (cid, caminho_absoluto)
+    linhas_nc_html = ''
+    for idx, it in enumerate(itens_nc):
+        cid = f"item_nc_{it.id}"
+        if it.imagem:
+            try:
+                caminho = it.imagem.path
+                imagens_nc.append((cid, caminho))
+                img_cell = (f"<img src='cid:{cid}' alt='{it.nome}' width='72' "
+                            f"style='display:block;border:1px solid #f0e2d0;border-radius:6px'>")
+            except Exception:
+                img_cell = "<span style='color:#aaa;font-size:12px'>imagem indisponível</span>"
+        else:
+            img_cell = "<span style='color:#aaa;font-size:12px'>sem imagem</span>"
+        linhas_nc_html += (
+            f"<tr style=\"background:{'#fff7ee' if idx % 2 == 0 else '#fff'}\">"
+            f"<td style='padding:9px 14px;border-bottom:1px solid #f0e2d0;color:#222;font-size:13px'>{it.nome}</td>"
+            f"<td style='padding:9px 14px;border-bottom:1px solid #f0e2d0;color:#444;font-size:13px'>{it.unidade or '-'}</td>"
+            f"<td style='padding:9px 14px;border-bottom:1px solid #f0e2d0;color:#444;font-size:13px'>{it.equipamento or '-'}</td>"
+            f"<td style='padding:9px 14px;border-bottom:1px solid #f0e2d0;text-align:center'>{img_cell}</td>"
+            f"</tr>"
+        )
+
+    secao_nc_html = ''
+    if itens_nc:
+        secao_nc_html = f"""
+  <!-- ===== ITENS NÃO CATALOGADOS ===== -->
+  <tr>
+    <td style="background:#fff;padding:0 32px 28px;border-left:1px solid #e8eef5;border-right:1px solid #e8eef5">
+      <p style="margin:0 0 14px;font-size:13px;font-weight:700;color:{LARANJA};text-transform:uppercase;letter-spacing:0.8px">
+        Itens não catalogados &mdash; cadastrar no ERP
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #f0e2d0;border-radius:8px;overflow:hidden">
+        <thead>
+          <tr style="background:{LARANJA}">
+            <th style="padding:11px 14px;text-align:left;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.3px">Nome</th>
+            <th style="padding:11px 14px;text-align:left;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.3px">Unidade</th>
+            <th style="padding:11px 14px;text-align:left;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.3px">Equipamento</th>
+            <th style="padding:11px 14px;text-align:center;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.3px">Imagem</th>
+          </tr>
+        </thead>
+        <tbody>{linhas_nc_html}</tbody>
+      </table>
+    </td>
+  </tr>"""
+
+    linhas_nc_txt = '\n'.join(
+        f"  - {it.nome} | Unidade: {it.unidade or '-'} | Equipamento: {it.equipamento or '-'}"
+        for it in itens_nc
+    )
+
     corpo_txt = (
         f"Novo pedido de compra criado no sistema ManagerDB.\n\n"
         f"Número:       {pedido.numero_referencia}\n"
@@ -339,6 +392,7 @@ def _enviar_email_novo_pedido(pedido):
         f"Total:        R$ {float(pedido.total):.2f}\n"
         f"Observações:  {pedido.observacoes or '—'}\n\n"
         f"Itens:\n{linhas_txt}\n"
+        + (f"\nItens não catalogados (cadastrar no ERP):\n{linhas_nc_txt}\n" if itens_nc else "")
     )
 
     corpo_html = f"""<!DOCTYPE html>
@@ -450,7 +504,7 @@ def _enviar_email_novo_pedido(pedido):
       </table>
     </td>
   </tr>
-
+{secao_nc_html}
   <!-- ===== FOOTER ===== -->
   <tr>
     <td style="background:{AZUL};border-radius:0 0 12px 12px;padding:16px 32px;text-align:center">
@@ -482,6 +536,17 @@ def _enviar_email_novo_pedido(pedido):
         logo.add_header('Content-ID', '<logo_db>')
         logo.add_header('Content-Disposition', 'inline', filename='logoNovoDb.png')
         msg.attach(logo)
+
+    # Imagens dos itens não catalogados (inline via cid:)
+    for cid, caminho in imagens_nc:
+        try:
+            with open(caminho, 'rb') as f:
+                img = MIMEImage(f.read())
+            img.add_header('Content-ID', f'<{cid}>')
+            img.add_header('Content-Disposition', 'inline', filename=os.path.basename(caminho))
+            msg.attach(img)
+        except Exception:
+            pass
 
     msg.send(fail_silently=True)
 
@@ -537,11 +602,27 @@ class PedidoViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         super().perform_create(serializer)
         pedido = serializer.instance
+        # Quando o pedido tem itens não catalogados, o front os envia DEPOIS de criar
+        # o pedido; nesse caso o e-mail é disparado por /pedidos/{id}/enviar_email/
+        # após os uploads, para já incluí-los. Caso contrário, envia agora.
+        adiar = str(self.request.data.get('adiar_email', '')).lower() in ('true', '1')
+        if not adiar:
+            threading.Thread(
+                target=_enviar_email_novo_pedido,
+                args=(pedido,),
+                daemon=True,
+            ).start()
+
+    @action(detail=True, methods=['post'])
+    def enviar_email(self, request, pk=None):
+        """Dispara o e-mail de novo pedido (usado após o upload dos itens não catalogados)."""
+        pedido = self.get_object()
         threading.Thread(
             target=_enviar_email_novo_pedido,
             args=(pedido,),
             daemon=True,
         ).start()
+        return Response({'detail': 'E-mail enfileirado.'}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['patch'])
     def update_status(self, request, pk=None):
