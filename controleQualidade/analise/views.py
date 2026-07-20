@@ -124,6 +124,18 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
 
+    def perform_destroy(self, instance):
+        # AnaliseEnsaio/AnaliseCalculo apontam para Analise com on_delete=RESTRICT,
+        # o que faz o delete padrão falhar (500) quando existem ensaios/cálculos.
+        # Apagamos os filhos antes da própria Análise, numa transação.
+        # A Amostra é mantida propositalmente (Amostra.ordem é SET_NULL, então
+        # a exclusão da OS depois apenas zera o vínculo, sem remover a amostra).
+        from django.db import transaction
+        with transaction.atomic():
+            instance.ensaios.all().delete()
+            instance.calculos.all().delete()
+            instance.delete()
+
     @action(detail=False, methods=['post'], url_path='porData')
     def porData(self, request):
         data_inicial = request.data.get('data_inicial')
