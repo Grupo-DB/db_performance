@@ -2138,10 +2138,42 @@ def calculos_comissoes(request):
         'valor_total': round(float(df.loc[_mask_devolucao, 'VALOR_TOTAL'].sum()), 2),
     }
 
+    # ---- Diagnóstico temporário: vendas de dolomita (todos os segmentos) ----
+    # Para identificar como a dolomita aparece (representante, cidade, segmento, grupo).
+    _mask_dol_full = (
+        df['GRUPO_COMERCIAL'].str.contains('DOLOMIT', na=False) |
+        df['GRUPO_COMERCIAL_LINHA_PRODUTOS'].str.contains('DOLOMIT', na=False) |
+        df['GRUPO'].str.contains('DOLOMIT', na=False)
+    )
+    _df_dol = df[_mask_dol_full].copy()
+
+    def _agrupa_dol(col):
+        if _df_dol.empty or col not in _df_dol.columns:
+            return []
+        g = _df_dol.groupby(col, dropna=False)['VALOR_PRODUTO'].agg(['sum', 'count']).reset_index()
+        g = g.sort_values('sum', ascending=False)
+        return [
+            {'chave': str(r[col]), 'valor': round(float(r['sum']), 2), 'qtd': int(r['count'])}
+            for _, r in g.iterrows()
+        ]
+
+    _dolomita_debug = {
+        'total_geral': round(float(_df_dol['VALOR_PRODUTO'].sum()), 2) if not _df_dol.empty else 0.0,
+        'qtd_linhas': int(len(_df_dol)),
+        'por_representante': _agrupa_dol('REPRESENTANTE'),
+        'por_master': _agrupa_dol('REPRESENTANTE_MASTER'),
+        'por_cidade': _agrupa_dol('CIDADE_FATURAMENTO'),
+        'por_segmento': _agrupa_dol('SEGMENTO_PRODUTO'),
+        'por_grupo': _agrupa_dol('GRUPO'),
+        'por_grupo_comercial': _agrupa_dol('GRUPO_COMERCIAL'),
+        'por_cliente': _agrupa_dol('CLIENTE_NOME'),
+    }
+
     return JsonResponse({
         'comissoes': resultado,
         'resumo_por_vendedor': dict(sorted(_resumo.items())),
         'total_geral': _total_geral,
+        '_dolomita_debug': _dolomita_debug,
         'base_vendas_cc': base_vendas,
         'debug_estados': _debug_estados,
         'total_agro_incl_yara': round(float(venda_agro_total_geral), 2),
