@@ -40,6 +40,7 @@ PARAMETROS_DEFAULT = [
     ('ATM_CAL_SUCRO',       'Taxa Cal Sucro para Mariane ATM (0,125%)',       0.001250),
     ('ATM_KRICAL',          'Taxa KRICAL para Mariane ATM (0,25%)',           0.002500),
     ('ATM_DOLOMITA',        'Taxa dolomita para Alexandra/Mariane ATM (0,5%)',0.005000),
+    ('CC_DOLOMITA',         'Taxa adicional dolomita p/ os 12 vendedores externos CC (0,8%)', 0.008000),
     ('ATM_DIRETO',          'Taxa ATM direto para Alexandra/Mariane (0,5%)',  0.005000),
     ('DARCILEI_ATM',        'Taxa Darcilei sobre total ATM sem COFCO (0,04%)',0.000400),
     # ── Marco Antônio Correa ────────────────────────────────────────────────

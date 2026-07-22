@@ -138,7 +138,7 @@ def popular_mapeamento_agro(request):
         'CORONEL BARROS-RS': 'ILDOMAR DA FONTE CARVALHO',
         'IJUI-RS': 'ILDOMAR DA FONTE CARVALHO',
         'PEJUCARA-RS': 'ILDOMAR DA FONTE CARVALHO',
-        'CARAZINHO-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'CARAZINHO-RS': 'EVERTON MARQUES DORNELES',
         'PASSO FUNDO-RS': 'ILDOMAR DA FONTE CARVALHO',
         'SANTA MARIA-RS': 'ILDOMAR DA FONTE CARVALHO',
         'ERECHIM-RS': 'EVERTON MARQUES DORNELES',
@@ -801,6 +801,20 @@ def calculos_comissoes(request):
     chaves_vendedores_cc_elegiveis = []
     realizado_global_por_grupo = {g: 0.0 for g in GRUPOS_CC}
 
+    # Adicional dolomita: 0,8% (configurável) sobre a venda de dolomita de cada um dos 12
+    # vendedores externos CC — soma na comissão do próprio rep (linha à parte, detalhada no modal).
+    taxa_cc_dolomita = p('CC_DOLOMITA', 0.008)
+
+    def venda_dolomita_de(df_rep_):
+        if df_rep_.empty:
+            return 0.0
+        mask_dol = (
+            df_rep_['GRUPO_COMERCIAL'].str.contains('DOLOMIT', na=False) |
+            df_rep_['GRUPO_COMERCIAL_LINHA_PRODUTOS'].str.contains('DOLOMIT', na=False) |
+            df_rep_['GRUPO'].str.contains('DOLOMIT', na=False)
+        )
+        return float(df_rep_[mask_dol]['VALOR_PRODUTO'].sum())
+
     for rep_chave, vinc_int in VINCULO_INT_MATRIZ.items():
         # Inclui vendas diretas (REPRESENTANTE) + vendas de sub-representantes (REPRESENTANTE_MASTER)
         mask_rep = df_cc['REPRESENTANTE'].str.contains(rep_chave, na=False, regex=False)
@@ -818,11 +832,19 @@ def calculos_comissoes(request):
 
         base_vendas[rep_chave] = vendas
         total_comissao_primex += comissao_grupos.get('PRIMEX', 0.0)
+
+        # Adicional dolomita (0,8% sobre a venda de dolomita do rep), somado ao total.
+        venda_dolomita_rep = venda_dolomita_de(df_rep)
+        comissao_dolomita_rep = venda_dolomita_rep * taxa_cc_dolomita
+
         resultado[rep_chave] = {
-            'comissao': round(comissao_rep, 2),
+            'comissao': round(comissao_rep + comissao_dolomita_rep, 2),
             'comissao_por_grupo': comissao_grupos,
             'vendas_por_grupo': vendas,
             'vendedor_interno': vinc_int,
+            'venda_dolomita': round(venda_dolomita_rep, 2),
+            'comissao_dolomita': round(comissao_dolomita_rep, 2),
+            'taxa_dolomita': taxa_cc_dolomita,
             'tipo': 'Vendedor Externo CC'
         }
 
@@ -1454,7 +1476,6 @@ def calculos_comissoes(request):
         'ALMIRANTE TAMANDARE DO SUL-RS': 'ILDOMAR DA FONTE CARVALHO',
         'BARRA FUNDA-RS': 'EVERTON MARQUES DORNELES',
         'BOA VISTA DAS MISSOES-RS': 'EVERTON MARQUES DORNELES',
-        'CARAZINHO-RS': 'ILDOMAR DA FONTE CARVALHO',
         'CERRO GRANDE-RS': 'EVERTON MARQUES DORNELES',
         'CHAPADA-RS': 'EVERTON MARQUES DORNELES',
         'COQUEIROS DO SUL-RS': 'EVERTON MARQUES DORNELES',
@@ -1530,7 +1551,7 @@ def calculos_comissoes(request):
         'JULIO DE CASTILHOS-RS': 'ILDOMAR DA FONTE CARVALHO',
         'PINHAL GRANDE-RS': 'ILDOMAR DA FONTE CARVALHO',
         'QUEVEDOS-RS': 'ILDOMAR DA FONTE CARVALHO',
-        'SANTIAGO-RS': 'ILDOMAR DA FONTE CARVALHO',
+        'SANTIAGO-RS': 'EVERTON MARQUES DORNELES',
         'TUPANCIRETA-RS': 'ILDOMAR DA FONTE CARVALHO',
         'UNISTALDA-RS': 'EVERTON MARQUES DORNELES',
         #'CRUZEIRO DO SUL-RS': 'EVERTON MARQUES DORNELES',
