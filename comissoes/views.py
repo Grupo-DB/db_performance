@@ -834,7 +834,13 @@ def calculos_comissoes(request):
         total_comissao_primex += comissao_grupos.get('PRIMEX', 0.0)
 
         # Adicional dolomita (0,8% sobre a venda de dolomita do rep), somado ao total.
-        venda_dolomita_rep = venda_dolomita_de(df_rep)
+        # Busca no dataframe COMPLETO (df), não só em df_cc: boa parte da dolomita é
+        # classificada como Agronegócio (ESTQGALM 1974/1587/1828), fora de Construção Civil.
+        df_rep_full = df[
+            df['REPRESENTANTE'].str.contains(rep_chave, na=False, regex=False) |
+            df['REPRESENTANTE_MASTER'].str.contains(rep_chave, na=False, regex=False)
+        ]
+        venda_dolomita_rep = venda_dolomita_de(df_rep_full)
         comissao_dolomita_rep = venda_dolomita_rep * taxa_cc_dolomita
 
         resultado[rep_chave] = {
