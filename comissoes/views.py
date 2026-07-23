@@ -814,6 +814,15 @@ def calculos_comissoes(request):
         mask_dol = df_rep_['GRUPO_COMERCIAL'].str.contains('CARBOMAX', na=False)
         return float(df_rep_[mask_dol]['VALOR_PRODUTO'].sum())
 
+    # Pool de dolomita "VENDAS ATM" (PROVISÓRIO — ver TODO na divisão, abaixo):
+    # a maior parte da dolomita é faturada pelo canal "VENDAS ATM", sem representante (nem
+    # master) amarrado. Total desse canal → base para 0,8% dividido igualmente entre os 12.
+    _mask_carbomax_df = df['GRUPO_COMERCIAL'].str.contains('CARBOMAX', na=False)
+    venda_dolomita_atm_total = float(
+        df[_mask_carbomax_df & df['REPRESENTANTE'].str.contains('VENDAS ATM', na=False)]['VALOR_PRODUTO'].sum()
+    )
+    comissao_dolomita_atm_pool = venda_dolomita_atm_total * taxa_cc_dolomita
+
     for rep_chave, vinc_int in VINCULO_INT_MATRIZ.items():
         # Inclui vendas diretas (REPRESENTANTE) + vendas de sub-representantes (REPRESENTANTE_MASTER)
         mask_rep = df_cc['REPRESENTANTE'].str.contains(rep_chave, na=False, regex=False)
@@ -877,6 +886,25 @@ def calculos_comissoes(request):
         # Acumula base MPA se for rep MPA
         if any(t in rep_chave for t in REP_MPA_TERMOS):
             base_mpa_vendas += sum(vendas.values())
+
+    # ---- Pool de dolomita "VENDAS ATM" dividido igualmente entre os 12 (PROVISÓRIO) ----
+    # POR ORA (definido com o usuário em 22/07/2026): como a dolomita do canal "VENDAS ATM"
+    # não tem representante, o 0,8% sobre esse total é dividido IGUALMENTE entre os vendedores
+    # externos CC (os 12 do VINCULO_INT_MATRIZ que tiveram venda no período). Somado à comissão
+    # de cada um, além do que ele já recebe pela dolomita do próprio nome.
+    # TODO(dolomita): atribuição DEFINITIVA ainda pendente (provável: por cliente/carteira ou
+    # por região/cidade). Rever com o diagnóstico _dolomita_debug e ajustar esta divisão.
+    _reps_12_com_venda = list(chaves_vendedores_cc_elegiveis)  # só os 12 — Agner ainda não foi incluído
+    if _reps_12_com_venda and comissao_dolomita_atm_pool > 0:
+        _share_venda_atm = venda_dolomita_atm_total / len(_reps_12_com_venda)
+        _share_comissao_atm = comissao_dolomita_atm_pool / len(_reps_12_com_venda)
+        for _k in _reps_12_com_venda:
+            _r = resultado[_k]
+            _r['comissao'] = round(_r['comissao'] + _share_comissao_atm, 2)
+            _r['venda_dolomita'] = round(_r.get('venda_dolomita', 0.0) + _share_venda_atm, 2)
+            _r['comissao_dolomita'] = round(_r.get('comissao_dolomita', 0.0) + _share_comissao_atm, 2)
+            _r['dolomita_atm_pool_venda'] = round(_share_venda_atm, 2)
+            _r['dolomita_atm_pool_comissao'] = round(_share_comissao_atm, 2)
 
     # Agner: comissão igual aos demais reps (taxas_externo por grupo + potencializador) * 1.05 final
     df_agner = df_cc[df_cc['REPRESENTANTE'].str.contains('AGNER', na=False)]
