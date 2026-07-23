@@ -1764,6 +1764,7 @@ def calculos_comissoes(request):
         'REPRESENTANTE_MASTER': 'representante_master',
         'CLIENTE_NOME': 'cliente',
         'CIDADE_FATURAMENTO': 'cidade',
+        'ESTOQUE': 'produto',
         'GRUPO_COMERCIAL': 'grupo_comercial',
         'QUANTIDADE': 'quantidade',
         'QUANTIDADE_TN': 'quantidade_tn',
