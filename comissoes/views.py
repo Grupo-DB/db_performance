@@ -814,6 +814,38 @@ def calculos_comissoes(request):
         mask_dol = df_rep_['GRUPO_COMERCIAL'].str.contains('CARBOMAX', na=False)
         return float(df_rep_[mask_dol]['VALOR_PRODUTO'].sum())
 
+    # Colunas dos lançamentos (vendas individuais) expostos ao front (tabela/PDF por vendedor):
+    # nomes ERP (uppercase) → chaves minúsculas usadas no Angular. Usado tanto pelos externos CC
+    # (loop abaixo + Agner/Adriano) quanto pelo agro (seção mais abaixo, via alias).
+    _COLUNAS_LANCAMENTO = {
+        'DATA_EMISSAO': 'data',
+        'NOTA_FISCAL': 'nota_fiscal',
+        'REPRESENTANTE': 'representante',
+        'REPRESENTANTE_MASTER': 'representante_master',
+        'CLIENTE_NOME': 'cliente',
+        'CIDADE_FATURAMENTO': 'cidade',
+        'ESTOQUE': 'produto',
+        'GRUPO_COMERCIAL': 'grupo_comercial',
+        'QUANTIDADE': 'quantidade',
+        'QUANTIDADE_TN': 'quantidade_tn',
+        'VALOR_TOTAL': 'valor_total',
+        'EMPRESAFILIAL': 'filial',
+    }
+    def _monta_lancamentos(df_in):
+        """Converte um recorte do df de vendas na lista de lançamentos usada pelo front (PDF/tabela)."""
+        if df_in is None or len(df_in) == 0:
+            return []
+        _cols_disp = {k: v for k, v in _COLUNAS_LANCAMENTO.items() if k in df_in.columns}
+        _df_lanc = df_in[list(_cols_disp.keys())].rename(columns=_cols_disp).copy()
+        for _c in _df_lanc.columns:
+            if pd.api.types.is_datetime64_any_dtype(_df_lanc[_c]):
+                _df_lanc[_c] = _df_lanc[_c].dt.strftime('%d/%m/%Y')
+        for _c in ['valor_produto', 'valor_total', 'quantidade_tn']:
+            if _c in _df_lanc.columns:
+                _df_lanc[_c] = _df_lanc[_c].round(2)
+        _df_lanc = _df_lanc.fillna('').sort_values('data') if 'data' in _df_lanc.columns else _df_lanc.fillna('')
+        return _df_lanc.to_dict(orient='records')
+
     # Pool de dolomita "VENDAS ATM" (PROVISÓRIO — ver TODO na divisão, abaixo):
     # a maior parte da dolomita é faturada pelo canal "VENDAS ATM", sem representante (nem
     # master) amarrado. Total desse canal → base para 0,8% dividido igualmente entre os 12.
@@ -859,6 +891,7 @@ def calculos_comissoes(request):
             'venda_dolomita': round(venda_dolomita_rep, 2),
             'comissao_dolomita': round(comissao_dolomita_rep, 2),
             'taxa_dolomita': taxa_cc_dolomita,
+            'lancamentos': _monta_lancamentos(df_rep_full),
             'tipo': 'Vendedor Externo CC'
         }
 
@@ -947,6 +980,7 @@ def calculos_comissoes(request):
         'venda_dolomita': round(float(venda_agner_dolomita), 2),
         'comissao_dolomita': round(float(comissao_agner_dolomita), 2),
         'taxa_dolomita': taxa_agner_dolomita,
+        'lancamentos': _monta_lancamentos(df_agner),
         'tipo': 'Vendedor Externo CC'
     }
     if total_agner > 0:
@@ -971,6 +1005,7 @@ def calculos_comissoes(request):
             'venda_dolomita': round(venda_dolomita_amd, 2),
             'comissao_dolomita': round(comissao_dolomita_amd, 2),
             'taxa_dolomita': taxa_cc_dolomita,
+            'lancamentos': _monta_lancamentos(df_amd_full),
             'tipo': 'Vendedor Externo CC'
         }
 
@@ -1080,6 +1115,7 @@ def calculos_comissoes(request):
         'venda_dolomita': round(venda_dolomita_adriano, 2),
         'comissao_dolomita': round(comissao_dolomita_adriano, 2),
         'taxa_dolomita': taxa_cc_dolomita,
+        'lancamentos': _monta_lancamentos(df_adriano_full),
         'tipo': 'Representante Externo CC'
     }
 
@@ -1757,32 +1793,8 @@ def calculos_comissoes(request):
     venda_agro_total_geral = df_agro['VALOR_PRODUTO'].sum()
 
     _agro_debug = {}
-    _COLUNAS_LANCAMENTO = {
-        'DATA_EMISSAO': 'data',
-        'NOTA_FISCAL': 'nota_fiscal',
-        'REPRESENTANTE': 'representante',
-        'REPRESENTANTE_MASTER': 'representante_master',
-        'CLIENTE_NOME': 'cliente',
-        'CIDADE_FATURAMENTO': 'cidade',
-        'ESTOQUE': 'produto',
-        'GRUPO_COMERCIAL': 'grupo_comercial',
-        'QUANTIDADE': 'quantidade',
-        'QUANTIDADE_TN': 'quantidade_tn',
-        'VALOR_TOTAL': 'valor_total',
-        'EMPRESAFILIAL': 'filial',
-    }
-    def _monta_lancamentos_agro(df_in):
-        """Converte um recorte de df_agro_no_yara na lista de lançamentos usada pelo front (PDF/detalhamento)."""
-        _cols_disp = {k: v for k, v in _COLUNAS_LANCAMENTO.items() if k in df_in.columns}
-        _df_lanc = df_in[list(_cols_disp.keys())].rename(columns=_cols_disp).copy()
-        for _c in _df_lanc.columns:
-            if pd.api.types.is_datetime64_any_dtype(_df_lanc[_c]):
-                _df_lanc[_c] = _df_lanc[_c].dt.strftime('%d/%m/%Y')
-        for _c in ['valor_produto', 'valor_total', 'quantidade_tn']:
-            if _c in _df_lanc.columns:
-                _df_lanc[_c] = _df_lanc[_c].round(2)
-        _df_lanc = _df_lanc.fillna('').sort_values('data') if 'data' in _df_lanc.columns else _df_lanc.fillna('')
-        return _df_lanc.to_dict(orient='records')
+    # Reaproveita o mapeador genérico definido lá em cima (mesmo dict de colunas p/ CC e agro).
+    _monta_lancamentos_agro = _monta_lancamentos
 
     # Linhas da tabela AGRONEGOCIO da planilha (Comissões!A46:G54)
     _resumo_agro_rows = []
