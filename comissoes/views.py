@@ -892,6 +892,8 @@ def calculos_comissoes(request):
     # não tem representante, o 0,8% sobre esse total é dividido IGUALMENTE entre os vendedores
     # externos CC (os 12 do VINCULO_INT_MATRIZ que tiveram venda no período). Somado à comissão
     # de cada um, além do que ele já recebe pela dolomita do próprio nome.
+    # O Agner NÃO entra neste pool: sendo representante, o 0,8% dele é sobre a dolomita do
+    # próprio nome (exposta no bloco do Agner, abaixo).
     # TODO(dolomita): atribuição DEFINITIVA ainda pendente (provável: por cliente/carteira ou
     # por região/cidade). Rever com o diagnóstico _dolomita_debug e ajustar esta divisão.
     _reps_12_com_venda = list(chaves_vendedores_cc_elegiveis)  # só os 12 — Agner ainda não foi incluído
@@ -916,9 +918,14 @@ def calculos_comissoes(request):
     if total_agner > 0:
         base_vendas['AGNER LORETO WALMRATH'] = vendas_agner
     comissao_agner_base, comissao_grupos_agner = comissao_ext_com_bonus(vendas_agner, f"{periodo_chave}AGNER LORETO WALMRATH")
-    # Adicional CARBOMAX: SUMIFS(V:V, K:K, AGNER, AA:AA, "CARBOMAX") * taxa configurável
-    venda_agner_carbomax = df_agner[df_agner['GRUPO_COMERCIAL'].str.contains('CARBOMAX', na=False)]['VALOR_PRODUTO'].sum()
-    comissao_agner_base += venda_agner_carbomax * p('AGNER_CARBOMAX_TAXA', 0.008)
+    # Dolomita do próprio nome do Agner: SUMIFS(V:V, K:K, AGNER, AA:AA, "CARBOMAX") * 0,8%.
+    # CARBOMAX é a marca de calcário dolomítico. Como o Agner é REPRESENTANTE, o 0,8% dele é
+    # sobre a venda de dolomita do próprio nome (NÃO entra no pool "VENDAS ATM" dos 12). Exposta
+    # como 'comissao_dolomita' para aparecer na coluna DOLOMITA igual à dos demais reps.
+    venda_agner_dolomita = float(df_agner[df_agner['GRUPO_COMERCIAL'].str.contains('CARBOMAX', na=False)]['VALOR_PRODUTO'].sum())
+    taxa_agner_dolomita = p('AGNER_CARBOMAX_TAXA', 0.008)
+    comissao_agner_dolomita = venda_agner_dolomita * taxa_agner_dolomita
+    comissao_agner_base += comissao_agner_dolomita
     comissao_agner = comissao_agner_base * p('AGNER_MULTIPLICADOR', 1.05)
     total_comissao_primex += comissao_grupos_agner.get('PRIMEX', 0.0)
     comissao_int_agner_total = comissao_int_com_bonus(vendas_agner, f"{periodo_chave}AGNER LORETO WALMRATH")
@@ -937,7 +944,9 @@ def calculos_comissoes(request):
         'comissao_base': round(float(comissao_agner_base), 2),
         'comissao_por_grupo': comissao_grupos_agner,
         'vendas_por_grupo': vendas_agner,
-        'venda_carbomax': round(float(venda_agner_carbomax), 2),
+        'venda_dolomita': round(float(venda_agner_dolomita), 2),
+        'comissao_dolomita': round(float(comissao_agner_dolomita), 2),
+        'taxa_dolomita': taxa_agner_dolomita,
         'tipo': 'Vendedor Externo CC'
     }
     if total_agner > 0:
