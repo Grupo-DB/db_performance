@@ -801,18 +801,17 @@ def calculos_comissoes(request):
     chaves_vendedores_cc_elegiveis = []
     realizado_global_por_grupo = {g: 0.0 for g in GRUPOS_CC}
 
-    # Adicional dolomita: 0,8% (configurável) sobre a venda de dolomita de cada um dos 12
-    # vendedores externos CC — soma na comissão do próprio rep (linha à parte, detalhada no modal).
+    # Adicional dolomita: 0,8% (configurável) sobre a venda de CARBOMAX (marca de calcário
+    # dolomítico) de cada um dos 12 vendedores externos CC — mesma lógica da linha do Agner,
+    # porém no df COMPLETO (todos os segmentos). Somado na comissão do próprio rep
+    # (linha à parte, detalhada no modal). Buscar por 'DOLOMIT' pelo nome do rep dava ~zero;
+    # a dolomita desses reps aparece sob o grupo comercial CARBOMAX.
     taxa_cc_dolomita = p('CC_DOLOMITA', 0.008)
 
     def venda_dolomita_de(df_rep_):
         if df_rep_.empty:
             return 0.0
-        mask_dol = (
-            df_rep_['GRUPO_COMERCIAL'].str.contains('DOLOMIT', na=False) |
-            df_rep_['GRUPO_COMERCIAL_LINHA_PRODUTOS'].str.contains('DOLOMIT', na=False) |
-            df_rep_['GRUPO'].str.contains('DOLOMIT', na=False)
-        )
+        mask_dol = df_rep_['GRUPO_COMERCIAL'].str.contains('CARBOMAX', na=False)
         return float(df_rep_[mask_dol]['VALOR_PRODUTO'].sum())
 
     for rep_chave, vinc_int in VINCULO_INT_MATRIZ.items():
@@ -833,8 +832,8 @@ def calculos_comissoes(request):
         base_vendas[rep_chave] = vendas
         total_comissao_primex += comissao_grupos.get('PRIMEX', 0.0)
 
-        # Adicional dolomita (0,8% sobre a venda de dolomita do rep), somado ao total.
-        # Busca no dataframe COMPLETO (df), não só em df_cc: boa parte da dolomita é
+        # Adicional dolomita (0,8% sobre a venda de CARBOMAX do rep), somado ao total.
+        # Busca no dataframe COMPLETO (df), não só em df_cc: boa parte da venda é
         # classificada como Agronegócio (ESTQGALM 1974/1587/1828), fora de Construção Civil.
         df_rep_full = df[
             df['REPRESENTANTE'].str.contains(rep_chave, na=False, regex=False) |
@@ -1008,13 +1007,22 @@ def calculos_comissoes(request):
     # Comissão por grupo à taxa externa (para Marco Alan Lopes / debug) — com potencializador
     _, comissao_ext_pg_adriano = comissao_ext_com_bonus(vendas_adriano_grupos, chave_adriano)
 
+    # Adicional dolomita (0,8% sobre a venda de CARBOMAX): mesma lógica do Agner e dos 12 reps CC,
+    # buscando no df COMPLETO (a dolomita cai sob o grupo comercial CARBOMAX / segmento agro).
+    df_adriano_full = df[df['REPRESENTANTE'].str.contains('ADRIANO L. BORN|ADRIANO BORN', na=False, regex=True)]
+    venda_dolomita_adriano = venda_dolomita_de(df_adriano_full)
+    comissao_dolomita_adriano = venda_dolomita_adriano * taxa_cc_dolomita
+
     resultado['ADRIANO L. BORN REPRESENTACOES EIRELI'] = {
-        'comissao': round(float(venda_adriano * taxa_adriano), 2),
+        'comissao': round(float(venda_adriano * taxa_adriano) + comissao_dolomita_adriano, 2),
         'taxa_aplicada': taxa_adriano,
         'percentual_meta': round(pct_atingido, 2),
         'venda_total': round(float(venda_adriano), 2),
         'vendas_por_grupo': vendas_adriano_grupos,
         'comissao_por_grupo_externo': comissao_ext_pg_adriano,
+        'venda_dolomita': round(venda_dolomita_adriano, 2),
+        'comissao_dolomita': round(comissao_dolomita_adriano, 2),
+        'taxa_dolomita': taxa_cc_dolomita,
         'tipo': 'Representante Externo CC'
     }
 
