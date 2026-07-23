@@ -2165,6 +2165,29 @@ def calculos_comissoes(request):
             for _, r in g.iterrows()
         ]
 
+    # Cruzamento: para cada CLIENTE que tem dolomita, quais representantes REAIS (fora "VENDAS ATM")
+    # esse mesmo cliente teve em outras vendas do período (qualquer produto). Revela o "dono" do
+    # cliente para atribuir a dolomita sem mapeamento manual.
+    def _reps_reais_do_cliente(cli):
+        sub = df[(df['CLIENTE_NOME'] == cli) & (~df['REPRESENTANTE'].str.contains('VENDAS ATM', na=False))]
+        if sub.empty:
+            return 'SEM OUTRO REP (só VENDAS ATM)'
+        g = sub.groupby('REPRESENTANTE', dropna=False)['VALOR_PRODUTO'].sum().sort_values(ascending=False)
+        return ' | '.join(f"{str(r)} (R$ {v:,.0f})" for r, v in g.items())
+
+    _por_cliente_dono = []
+    if not _df_dol.empty:
+        _g_cli = _df_dol.groupby('CLIENTE_NOME', dropna=False)['VALOR_PRODUTO'].agg(['sum', 'count']).reset_index()
+        _g_cli = _g_cli.sort_values('sum', ascending=False)
+        _por_cliente_dono = [
+            {
+                'chave': f"{str(r['CLIENTE_NOME'])}  →  {_reps_reais_do_cliente(r['CLIENTE_NOME'])}",
+                'valor': round(float(r['sum']), 2),
+                'qtd': int(r['count']),
+            }
+            for _, r in _g_cli.iterrows()
+        ]
+
     _dolomita_debug = {
         'total_geral': round(float(_df_dol['VALOR_PRODUTO'].sum()), 2) if not _df_dol.empty else 0.0,
         'qtd_linhas': int(len(_df_dol)),
@@ -2175,6 +2198,7 @@ def calculos_comissoes(request):
         'por_grupo': _agrupa_dol('GRUPO'),
         'por_grupo_comercial': _agrupa_dol('GRUPO_COMERCIAL'),
         'por_cliente': _agrupa_dol('CLIENTE_NOME'),
+        'por_cliente_dono': _por_cliente_dono,
     }
 
     return JsonResponse({
