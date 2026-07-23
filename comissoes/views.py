@@ -954,6 +954,26 @@ def calculos_comissoes(request):
         for g in GRUPOS_CC:
             realizado_global_por_grupo[g] += vendas_agner.get(g, 0.0)
 
+    # ---- Dolomita do Adriano Marques Dias (COLATECH) — PROVISÓRIO / A REVISAR ----
+    # ATENÇÃO(dolomita-amd): o Adriano Marques Dias é rep de canal ATM (alimenta a comissão
+    # interna da Mariane, seção 6 abaixo). Ele NÃO é vendedor externo CC do VINCULO_INT_MATRIZ nem
+    # tinha resultado próprio. Mas tem dolomita no próprio nome (CARBOMAX ~R$ 5.472). Por ora,
+    # igual ao Agner: 0,8% sobre a dolomita do próprio nome vai para ele (entrada própria só com a
+    # dolomita). NÃO entra no pool "VENDAS ATM" nem no bônus de meta global CC.
+    # TODO(dolomita-amd): confirmar com o usuário se ele deve mesmo ser pagável e a que título;
+    # se não, remover este bloco (ou mudar o destino da comissão).
+    df_amd_full = df[df['REPRESENTANTE'].str.contains('ADRIANO MARQUES DIAS', na=False, regex=False)]
+    venda_dolomita_amd = venda_dolomita_de(df_amd_full)
+    comissao_dolomita_amd = venda_dolomita_amd * taxa_cc_dolomita
+    if venda_dolomita_amd > 0:
+        resultado['ADRIANO MARQUES DIAS'] = {
+            'comissao': round(comissao_dolomita_amd, 2),
+            'venda_dolomita': round(venda_dolomita_amd, 2),
+            'comissao_dolomita': round(comissao_dolomita_amd, 2),
+            'taxa_dolomita': taxa_cc_dolomita,
+            'tipo': 'Vendedor Externo CC'
+        }
+
     # ---- 1b. Bônus de meta global CC ----
     # Meta cadastrada sem representante (representante=null na tela de Metas) = meta da empresa
     # toda para aquela linha/período. Realizado = soma das vendas dos vendedores externos CC
