@@ -1903,6 +1903,17 @@ def calculos_comissoes(request):
             })
         detalhamento_por_representante.sort(key=lambda x: x['total'], reverse=True)
 
+        # Detalhamento das Vendas Diretas (master vazio) — agrupado por REPRESENTANTE da nota.
+        # Vendas sem representante na nota caem em "(Venda direta / casa)".
+        detalhamento_direta = []
+        for rep_nome, grupo in df_direta.groupby('REPRESENTANTE'):
+            detalhamento_direta.append({
+                'representante': rep_nome if rep_nome else '(Venda direta / casa)',
+                'total': round(float(grupo['VALOR_PRODUTO'].sum()), 2),
+                'lancamentos': _monta_lancamentos_agro(grupo),
+            })
+        detalhamento_direta.sort(key=lambda x: x['total'], reverse=True)
+
         # comissao = total_vendedor * taxa_vendedor + (total_agro_geral - total_vendedor) * taxa_base
         # Nota: $B$54 da planilha é o total agro GERAL (incl. YARA), não apenas excl. YARA
         _agro_fixo = p('AGRO_FIXO_REP', 8225.0)
@@ -1925,6 +1936,7 @@ def calculos_comissoes(request):
             'total_direto': round(total_direto, 2),
             'total_por_representantes': round(total_por_representantes, 2),
             'detalhamento_por_representante': detalhamento_por_representante,
+            'detalhamento_direta': detalhamento_direta,
             'cotrijal_total': round(cotrijal_total, 2),
             'cotrijal_lancamentos': cotrijal_lancamentos,
             'devolucoes_total': devolucoes_total,
