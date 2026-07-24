@@ -204,6 +204,29 @@ class RegraComissaoGrupo(models.Model):
         ordering = ['grupo']
 
 
+class AlertaClienteInativo(models.Model):
+    """Estado de acompanhamento dos alertas de clientes inativos (não compram há X dias).
+
+    O cálculo de inatividade é feito em tempo real contra o ERP; este model guarda só o
+    estado da ação do usuário (resolvido / ignorar) por cliente (chave = CLICOD do ERP)."""
+
+    cliente_codigo = models.CharField(max_length=50, unique=True, help_text='CLICOD do ERP')
+    cliente_nome = models.CharField(max_length=455, blank=True)
+    resolvido = models.BooleanField(default=False, help_text='Contato feito; sai da lista de pendentes')
+    ignorar = models.BooleanField(default=False, help_text='Nunca mais alertar este cliente')
+    observacao = models.TextField(blank=True)
+    # Última compra conhecida no momento em que foi resolvido — se o cliente comprar depois
+    # disso, o alerta é reaberto automaticamente.
+    ultima_compra_ao_resolver = models.DateField(null=True, blank=True)
+    resolvido_por = models.CharField(max_length=255, blank=True)
+    data_resolucao = models.DateTimeField(null=True, blank=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Alerta de Cliente Inativo"
+        verbose_name_plural = "Alertas de Clientes Inativos"
+
+
 class RegraComissaoFaixa(models.Model):
     """Faixas de meta para regras do tipo ESCADA_META (ex: Adriano Born)."""
 
