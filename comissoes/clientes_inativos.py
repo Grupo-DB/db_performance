@@ -41,7 +41,9 @@ def _consulta_ultima_compra(janela_inicio: str) -> pd.DataFrame:
             COUNT(DISTINCT NF.NFCOD)              QTD_NOTAS,
             (SELECT CIDNOME + '-' + ESTUF FROM CIDADE
                 JOIN ESTADO ON ESTCOD = CIDEST WHERE CIDCOD = MAX(CLICIDADE)) CIDADE,
-            MAX(CLIFONE)                          TELEFONE,
+            MAX(COALESCE(NULLIF(LTRIM(RTRIM(CLITELEFONE)), ''),
+                         NULLIF(LTRIM(RTRIM(CLICELULAR)), ''),
+                         NULLIF(LTRIM(RTRIM(CLIWHATSAPP)), ''))) TELEFONE,
             (SELECT TOP 1 REPNOME FROM NOTAFISCAL X
                 JOIN REPRESENTANTE ON REPCOD = X.NFREP
                 WHERE X.NFCLI = NF.NFCLI AND X.NFSIT = 1
@@ -74,6 +76,8 @@ def clientes_inativos(request):
       - representante (str, opcional): filtra a carteira. Obrigatório p/ não-admin.
       - incluir_resolvidos (bool, default false): inclui os já marcados como resolvidos.
       - incluir_ignorados (bool, default false): inclui os marcados como 'não alertar mais'.
+      - pagina (int, default 1): página da listagem (1-based).
+      - por_pagina (int, default 24, máx 200): itens por página; 0 = sem paginar.
     """
     dados = request.data if request.method == 'POST' else request.query_params
 
@@ -91,11 +95,24 @@ def clientes_inativos(request):
     representante = (dados.get('representante') or '').strip()
     incluir_resolvidos = _bool('incluir_resolvidos')
     incluir_ignorados = _bool('incluir_ignorados')
+    pagina = max(1, _int('pagina', 1))
+    # por_pagina = 0 devolve tudo (usado por exportações); acima disso, teto de 200.
+    por_pagina = _int('por_pagina', 24)
+    por_pagina = 0 if por_pagina <= 0 else min(por_pagina, 200)
+
+    def _vazio(erro=None):
+        corpo = {
+            'clientes': [], 'total': 0, 'total_pendentes': 0,
+            'pagina': 1, 'por_pagina': por_pagina, 'total_paginas': 0,
+        }
+        if erro:
+            corpo['erro'] = erro
+        return corpo
 
     admin = _is_admin(request)
     if not admin and not representante:
         # Não-admin sem carteira informada: não expõe a base inteira.
-        return Response({'clientes': [], 'total': 0, 'erro': 'Carteira (representante) não informada.'})
+        return Response(_vazio('Carteira (representante) não informada.'))
 
     hoje = timezone.localdate()
     janela_inicio = (hoje - dt.timedelta(days=janela_dias)).strftime('%Y-%m-%d')
@@ -103,8 +120,8 @@ def clientes_inativos(request):
 
     df = _consulta_ultima_compra(janela_inicio)
     if df.empty:
-        return Response({'clientes': [], 'total': 0, 'parametros': {
-            'dias_inatividade': dias_inatividade, 'janela_dias': janela_dias}})
+        return Response(dict(_vazio(), parametros={
+            'dias_inatividade': dias_inatividade, 'janela_dias': janela_dias}))
 
     df['ULTIMA_COMPRA'] = pd.to_datetime(df['ULTIMA_COMPRA']).dt.date
     df['REPRESENTANTE'] = df['REPRESENTANTE'].fillna('').astype(str).str.strip()
@@ -174,9 +191,26 @@ def clientes_inativos(request):
 
     clientes.sort(key=lambda c: c['dias_sem_comprar'], reverse=True)
 
+    total = len(clientes)
+    # Pendentes = o que ainda exige ação, contado sobre o conjunto inteiro (não só a página).
+    total_pendentes = sum(1 for c in clientes if not c['resolvido'] and not c['ignorar'])
+
+    if por_pagina:
+        total_paginas = (total + por_pagina - 1) // por_pagina
+        pagina = min(pagina, total_paginas) if total_paginas else 1
+        inicio = (pagina - 1) * por_pagina
+        clientes = clientes[inicio:inicio + por_pagina]
+    else:
+        total_paginas = 1 if total else 0
+        pagina = 1
+
     return Response({
         'clientes': clientes,
-        'total': len(clientes),
+        'total': total,
+        'total_pendentes': total_pendentes,
+        'pagina': pagina,
+        'por_pagina': por_pagina,
+        'total_paginas': total_paginas,
         'parametros': {
             'dias_inatividade': dias_inatividade,
             'janela_dias': janela_dias,
