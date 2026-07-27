@@ -814,6 +814,14 @@ def calculos_argamassa_graficos(request):
         return JsonResponse({'error': 'Tipo de cálculo inválido'}, status=400)    
     
     
+    # Sem `produto` informado, devolve a série de TODOS os produtos de argamassa
+    # (mesma lista de ESTQCOD de calculos_argamassa_produtos). É o que o Painel
+    # Operacional usa no gráfico de produção total de argamassa por dia.
+    TODOS_PRODUTOS = '''2708,2709,2710,2711,2714,2715,2716,2717,2719,2728,
+                    2729,2730,22089,23987,23988,23989,24019,24020,24021,
+                    24022,24023,24024,24222,25877,25878'''
+    filtro_produto = f"AND ESTQCOD = '{produto}'" if produto else f"AND ESTQCOD IN ({TODOS_PRODUTOS})"
+
     consulta_argamassa = pd.read_sql(f"""
             SELECT BPROCOD, BPRODATA, ESTQCOD,EQPLOC, ESTQNOMECOMP,BPROEQP,BPROHRPROD,BPROHROPER,BPROFPROQUANT,BPROFPRO,
                 IBPROQUANT, ((ESTQPESO*IBPROQUANT) /1000) PESO
@@ -830,7 +838,7 @@ def calculos_argamassa_graficos(request):
                 AND BPROSIT = 1
                 AND IBPROTIPO = 'D'
                 AND BPROEP = 1
-                AND ESTQCOD = '{produto}'
+                {filtro_produto}
                 ORDER BY BPRODATA, BPROCOD, ESTQNOMECOMP, ESTQCOD
             """,engine)
     # Inicializar variáveis
@@ -856,7 +864,9 @@ def calculos_argamassa_graficos(request):
 
 
         #calculo do volume acumulado dos ensacados
-        volume_diario_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('DIA')['PESO'].sum().reset_index()
+        # Com produto informado filtra por ele; sem produto, soma todos.
+        base_produto = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto] if produto else consulta_argamassa
+        volume_diario_df = base_produto.groupby('DIA')['PESO'].sum().reset_index()
         
         #Preencher dias Faltantes
         volume_diario_df = preencher_dias_faltantes(volume_diario_df)
@@ -882,7 +892,7 @@ def calculos_argamassa_graficos(request):
         dias_no_mes = (consulta_argamassa['BPRODATA'].max().replace(day=1) + pd.DateOffset(months=1) - pd.DateOffset(days=1)).day        
 
         if dias_corridos > 0 :
-            volume_ultimo_dia = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto & (consulta_argamassa['DIA'] == dias_corridos )]
+            volume_ultimo_dia = base_produto[base_produto['DIA'] == dias_corridos]
 
             #Volume total
             volume_ultimo_dia_total = int(volume_ultimo_dia['PESO'].sum())
@@ -928,7 +938,8 @@ def calculos_argamassa_graficos(request):
             return meses_completos.merge(volume_df, on='MES', how='left').fillna(0).infer_objects(copy=False)
         
         #calculo do volume acumulado dos ensacados
-        volume_mensal_df = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto].groupby('MES')['PESO'].sum().reset_index()
+        base_produto = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto] if produto else consulta_argamassa
+        volume_mensal_df = base_produto.groupby('MES')['PESO'].sum().reset_index()
        
         #Preencher dias Faltantes
         volume_mensal_df = preencher_meses_faltantes(volume_mensal_df)
@@ -953,7 +964,7 @@ def calculos_argamassa_graficos(request):
         meses_no_ano = 12
 
         if meses_corridos > 0 :
-            volume_ultimo_mes = consulta_argamassa[consulta_argamassa['ESTQCOD'] == produto & (consulta_argamassa['MES'] == meses_corridos )]
+            volume_ultimo_mes = base_produto[base_produto['MES'] == meses_corridos]
             
             #Volume total
             volume_ultimo_mes_total = volume_ultimo_mes['PESO'].sum()
