@@ -7,6 +7,7 @@ from django.db import connections
 from sqlalchemy import create_engine
 import pandas as pd
 import locale
+import calendar
 
 locale.setlocale(locale.LC_ALL,'pt_BR.UTF-8')
 
@@ -800,13 +801,27 @@ def calculos_argamassa_graficos(request):
     tipo_calculo = request.data.get('tipo_calculo')
     etapa = request.data.get('etapa')
     produto = request.data.get('produto')
+    # `mes` (1 a 12) e `ano` opcionais: sem eles, usa o mês corrente. Mesmo
+    # contrato de britagem/calcular_graficos, para o painel poder trocar o mês.
+    mes = request.data.get('mes')
+    ano = request.data.get('ano')
+    mes_ref = int(mes) if mes else datetime.now().month
+    ano_ref = int(ano) if ano else datetime.now().year
+    eh_mes_corrente = (mes_ref == datetime.now().month and ano_ref == datetime.now().year)
+    # Média diária: no mês corrente divide pelos dias decorridos; num mês fechado,
+    # pelo total de dias do mês.
+    dias_para_media = (datetime.now().day - 1) if eh_mes_corrente else calendar.monthrange(ano_ref, mes_ref)[1]
     # Definindo as datas com base no tipo de cálculo
     if tipo_calculo == 'atual':
         data_inicio = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d 07:10:00')
         data_fim = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d 07:10:00')
     elif tipo_calculo == 'mensal':
-        data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')  # Início do mês
-        data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
+        if eh_mes_corrente:
+            data_inicio = datetime.now().strftime('%Y-%m-01 07:10:00')
+            data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')
+        else:
+            data_inicio = datetime(ano_ref, mes_ref, 1).strftime('%Y-%m-%d 07:10:00')
+            data_fim = datetime(ano_ref, mes_ref, calendar.monthrange(ano_ref, mes_ref)[1]).strftime('%Y-%m-%d 07:10:00')
     elif tipo_calculo == 'anual':
         data_inicio = datetime.now().strftime('%Y-01-01 07:10:00')  # Início do ano
         data_fim = datetime.now().strftime('%Y-%m-%d 07:10:00')  # Data atual
@@ -878,7 +893,7 @@ def calculos_argamassa_graficos(request):
         #volume Total
         volume_diario_total = int(volume_diario_df['PESO'].sum())
         #data Atual 
-        hoje = datetime.now().day -1
+        hoje = dias_para_media
 
         # Calculo média agregada todos os produtos
         if hoje > 0 :
