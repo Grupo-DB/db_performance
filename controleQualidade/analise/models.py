@@ -34,6 +34,8 @@ class Analise(models.Model):
     tracao_tempo_aberto = models.JSONField(null=True, blank=True)
     modulo_elasticidade = models.JSONField(null=True, blank=True)
     deslizamento = models.JSONField(null=True, blank=True)
+    massa_especifica = models.JSONField(null=True, blank=True)
+    retencao_agua = models.JSONField(null=True, blank=True)
     classificacao = models.CharField(max_length=255, null=True, blank=True)
     capilaridade = models.JSONField(null=True, blank=True)
     cal_completo = models.JSONField(null=True, blank=True)

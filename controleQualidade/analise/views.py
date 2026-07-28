@@ -51,6 +51,8 @@ CAMPOS_ESPECIAIS = {
     'variacao_massa_m1': ('variacao_massa', lambda d: ((d or {}).get('m1') or {}).get('media'), 'Variação de Massa (M1)', '%'),
     'variacao_massa_m7': ('variacao_massa', lambda d: ((d or {}).get('m7') or {}).get('media'), 'Variação de Massa (M7)', '%'),
     'variacao_massa_m28': ('variacao_massa', lambda d: ((d or {}).get('m28') or {}).get('media'), 'Variação de Massa (M28)', '%'),
+    'massa_especifica_media': ('massa_especifica', lambda d: (d or {}).get('media'), 'Massa Específica (Areia/Calcário)', 'kg/m³'),
+    'retencao_agua_resultado': ('retencao_agua', lambda d: (d or {}).get('resultado'), 'Retenção de Água', '%'),
 }
 
 _LABEL_METRICA_PENEIRA = {
