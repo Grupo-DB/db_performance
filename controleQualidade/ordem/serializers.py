@@ -37,7 +37,10 @@ class OrdemExpressaSerializer(serializers.ModelSerializer):
     def get_ensaio_detalhes(self, obj):
         """Retorna ensaios da tabela intermediária com info de laboratório"""
         try:
-            ensaios_intermediarios = obj.ensaios_intermediarios.all().order_by('ordem')
+            # Sem `.order_by('ordem')`: ele descarta o prefetch_related e refaz a query
+            # por ordem expressa. O model já tem `Meta.ordering = ['ordem']`, então
+            # `.all()` (que usa o cache do prefetch) devolve na mesma ordem.
+            ensaios_intermediarios = obj.ensaios_intermediarios.all()
                         
             result = []
             for item in ensaios_intermediarios:
@@ -55,7 +58,8 @@ class OrdemExpressaSerializer(serializers.ModelSerializer):
     def get_calculo_ensaio_detalhes(self, obj):
         """Retorna cálculos da tabela intermediária com info de laboratório"""
         try:
-            calculos_intermediarios = obj.calculos_intermediarios.all().order_by('ordem')
+            # Idem ao get_ensaio_detalhes: Meta.ordering já garante a ordem.
+            calculos_intermediarios = obj.calculos_intermediarios.all()
                         
             result = []
             for item in calculos_intermediarios:

@@ -147,26 +147,59 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         # Converte para date (YYYY-MM-DD)
         data_inicial = datetime.fromisoformat(data_inicial.replace('Z', '+00:00')).date()
         data_final = datetime.fromisoformat(data_final.replace('Z', '+00:00')).date()
-        diario = Analise.objects.filter(
+        # Mesmo prefetch da listagem: o boletim diário usa o serializer completo.
+        diario = self._queryset_lista(
             data__range=[data_inicial, data_final], finalizada=False,
-        )        
+        )
         serializer = self.get_serializer(diario, many=True)
         return Response(serializer.data, status=http_status.HTTP_200_OK
     )
 
+    # Relações que o AnaliseSerializer percorre para CADA análise. Sem isto a listagem
+    # fazia ~19 queries por análise (~6.200 para as 320 fechadas) e o TTFB ficava em ~5 s.
+    # A lista cobre a árvore inteira: amostra -> ordem -> planos -> ensaios/cálculos ->
+    # variáveis, mais o ramo da ordem expressa e as tabelas intermediárias.
+    _RELACOES_LISTA = (
+        'amostra',
+        'amostra__ordem',
+        'amostra__produto_amostra',
+        'amostra__expressa',
+    )
+    _RELACOES_LISTA_M2M = (
+        'ensaios',
+        'calculos',
+        'amostra__imagens',
+        # plano da ordem: o serializer expande ensaios e cálculos de cada plano
+        'amostra__ordem__plano_analise',
+        'amostra__ordem__plano_analise__ensaios__tipo_ensaio',
+        'amostra__ordem__plano_analise__ensaios__variavel',
+        'amostra__ordem__plano_analise__calculos_ensaio__ensaios__tipo_ensaio',
+        'amostra__ordem__plano_analise__calculos_ensaio__ensaios__variavel',
+        # ordem expressa: M2M cru (vem como lista de ids em fields='__all__') e as
+        # tabelas intermediárias, que o serializer expande com EnsaioSerializer
+        'amostra__expressa__ensaios',
+        'amostra__expressa__calculos_ensaio',
+        'amostra__expressa__ensaios_intermediarios__ensaio__tipo_ensaio',
+        'amostra__expressa__ensaios_intermediarios__ensaio__variavel',
+        'amostra__expressa__calculos_intermediarios__calculo__ensaios__tipo_ensaio',
+        'amostra__expressa__calculos_intermediarios__calculo__ensaios__variavel',
+    )
+
+    def _queryset_lista(self, **filtros):
+        return (Analise.objects
+                .filter(**filtros)
+                .select_related(*self._RELACOES_LISTA)
+                .prefetch_related(*self._RELACOES_LISTA_M2M))
+
     @action(detail=False, methods=['get'], url_path='abertas')
     def abertas(self, request):
-        analises = Analise.objects.filter(
-            finalizada=0,
-        )
+        analises = self._queryset_lista(finalizada=0)
         serializer = self.get_serializer(analises, many=True)
         return Response(serializer.data)
-    
+
     @action(detail=False, methods=['get'], url_path='fechadas')
     def fechadas(self, request):
-        analises = Analise.objects.filter(
-            finalizada=1,
-        )
+        analises = self._queryset_lista(finalizada=1)
         serializer = self.get_serializer(analises, many=True)
         return Response(serializer.data)
     
@@ -746,6 +779,9 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                     'local_coleta': amostra.local_coleta if amostra else None,
                     'tipo_amostra': amostra.tipo_amostra if amostra else None,
                     'fornecedor': amostra.fornecedor if amostra else None,
+                    # Usada pelo relatório PDF por classificação do dashboard de qualidade
+                    # (agrupa por origem/produto/finalidade/local de coleta).
+                    'finalidade': amostra.finalidade if amostra else None,
                     'produto_amostra': {
                         'id': amostra.produto_amostra.id,
                         'nome': amostra.produto_amostra.nome,

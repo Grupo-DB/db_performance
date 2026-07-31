@@ -29,11 +29,66 @@ class AnaliseSerializer(serializers.ModelSerializer):
         model = Analise
         fields = '__all__'
 
+    # ------------------------------------------------------------------ caches
+    # Estes dois métodos rodam por análise; na listagem (abertas/fechadas) isso
+    # eram ~19 queries por análise, ~6.200 para as 320 fechadas, e um TTFB de ~5 s.
+    # As caches abaixo vivem na instância do serializer, que o DRF cria uma vez por
+    # request (com many=True o child é reaproveitado para todos os objetos) — não há
+    # risco de dado velho entre requests.
+
+    @property
+    def _mapa_ensaios(self):
+        """
+        Todos os Ensaio por id, com as variáveis já carregadas.
+        `get_ultimo_calculo` fazia `Ensaio.objects.get(id=...)` + `variavel.all()`
+        dentro de dois loops aninhados — 300 das 771 queries de uma lista de 40
+        análises. São ~70 ensaios cadastrados no total, então trazer todos de uma vez
+        é mais barato que buscar um a um, e cabe em 2 queries.
+        """
+        if not hasattr(self, '_ensaios_por_id'):
+            self._ensaios_por_id = {
+                e.id: e for e in Ensaio.objects.prefetch_related('variavel').all()
+            }
+        return self._ensaios_por_id
+
+    def _variaveis_do_ensaio(self, ensaio_id):
+        """
+        `(chaves_var, variaveis_utilizadas)` de um ensaio, calculado uma única vez.
+        A forma não depende da análise nem do cálculo, então repetir por linha era
+        trabalho puro. Devolve None quando o ensaio não existe.
+        """
+        if not hasattr(self, '_variaveis_por_ensaio'):
+            self._variaveis_por_ensaio = {}
+        if ensaio_id not in self._variaveis_por_ensaio:
+            ensaio = self._mapa_ensaios.get(ensaio_id)
+            if ensaio is None:
+                self._variaveis_por_ensaio[ensaio_id] = None
+            else:
+                chaves = {}
+                utilizadas = []
+                for i, variavel in enumerate(ensaio.variavel.all()):
+                    key = f'var{i+1:02d}' if i < 9 else f'var{i+1}'  # var01, var02, etc.
+                    var_data = {
+                        'valor': variavel.id,
+                        'descricao': getattr(variavel, 'descricao', str(variavel))
+                    }
+                    chaves[key] = var_data
+                    utilizadas.append({
+                        'nome': getattr(variavel, 'descricao', str(variavel)),
+                        'valor': variavel.id,
+                        'tecnica': key
+                    })
+                self._variaveis_por_ensaio[ensaio_id] = (chaves, utilizadas)
+        return self._variaveis_por_ensaio[ensaio_id]
+
     def get_ultimo_ensaio(self, obj):
-        ultimo = obj.ensaios.order_by('-id').first()
-        if ultimo:
-            return AnaliseEnsaioSerializer(ultimo).data
-        return None
+        # `order_by('-id').first()` ignora o prefetch_related e refaz a query. Ordenar
+        # em Python a lista já carregada é o mesmo resultado sem ida ao banco.
+        ensaios = list(obj.ensaios.all())
+        if not ensaios:
+            return None
+        ultimo = max(ensaios, key=lambda e: e.id)
+        return AnaliseEnsaioSerializer(ultimo).data
 
     # def get_ultimo_calculo(self, obj):
     #     ultimo = obj.calculos.order_by('-id')
@@ -42,11 +97,13 @@ class AnaliseSerializer(serializers.ModelSerializer):
     #     return None
     
     def get_ultimo_calculo(self, obj):
-        calculos = obj.calculos.order_by('-id')
-        if calculos.exists():
+        # Mesma troca do get_ultimo_ensaio: a lista vem do prefetch e a ordenação é em
+        # Python. `order_by('-id')` + `.exists()` custavam duas queries por análise.
+        calculos = sorted(obj.calculos.all(), key=lambda c: c.id, reverse=True)
+        if calculos:
             calculos_lista = []
             calculos_tipos_vistos = set()  # Para controlar quais tipos já foram adicionados
-            
+
             for calculo in calculos:
                 # Se já temos este tipo de cálculo, pula
                 if calculo.calculos in calculos_tipos_vistos:
@@ -73,33 +130,17 @@ class AnaliseSerializer(serializers.ModelSerializer):
                         if ensaio_id and not str(ensaio_id).startswith('temp_'):
                             try:
                                 ensaio_id = int(ensaio_id)  # Converte para int
-                                ensaio = Ensaio.objects.get(id=ensaio_id)
-                                
-                                # Adiciona o campo 'variaveis' como objeto (igual ultimo_ensaio)
-                                variaveis_object = {}
-                                variaveis_utilizadas = []
-                                
-                                for i, variavel in enumerate(ensaio.variavel.all()):
-                                    key = f'var{i+1:02d}' if i < 9 else f'var{i+1}'  # var01, var02, etc.
-                                    var_data = {
-                                        'valor': variavel.id,
-                                        'descricao': getattr(variavel, 'descricao', str(variavel))
-                                    }
-                                    variaveis_object[key] = var_data
-                                    # Também adiciona como campo individual
-                                    ensaio_completo[key] = var_data
-                                    
-                                    # Adiciona ao variaveis_utilizadas (igual ultimo_ensaio)
-                                    variaveis_utilizadas.append({
-                                        'nome': getattr(variavel, 'descricao', str(variavel)),
-                                        'valor': variavel.id,
-                                        'tecnica': key
-                                    })
-                                
-                                #ensaio_completo['variaveis'] = variaveis_object
+                                variaveis = self._variaveis_do_ensaio(ensaio_id)
+                                if variaveis is None:
+                                    raise Ensaio.DoesNotExist
+
+                                # Cada variável também vira campo individual (var01, var02...),
+                                # como o ultimo_ensaio faz
+                                chaves, variaveis_utilizadas = variaveis
+                                ensaio_completo.update(chaves)
                                 ensaio_completo['variaveis_utilizadas'] = variaveis_utilizadas
                                 ensaios_com_variaveis.append(ensaio_completo)
-                                
+
                             except (Ensaio.DoesNotExist, ValueError, TypeError):
                                 # Se o ensaio não existe ou ID inválido, adiciona sem variáveis
                                 if isinstance(ensaio_data, dict):
