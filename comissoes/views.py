@@ -191,6 +191,37 @@ connection_string = 'mssql+pyodbc://DBCONSULTA:%21%40%23123qweQWE@172.10.27.51:1
 
 # Cria a engine
 engine = create_engine(connection_string)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CIDADE_FATURAMENTO / REGIAO — endereço de ENTREGA da nota vs. sede do cliente
+#
+# A regra ANTIGA só usava o endereço de entrega da nota (`NFECLI`) quando o pedido
+# tinha o parâmetro PESPARAMETRO 579 = 'S'. Quando o item da nota não tem pedido
+# (`INF.INFPED` NULL), a subconsulta devolve NULL, `NULL = 'S'` não é verdadeiro e
+# caía na cidade do CADASTRO do cliente — mesmo tendo o endereço correto da nota
+# disponível em `NFECLI`.
+#
+# Efeito: a NF 796324 (THALES MANJABOSCO SCALCO) sai na DANFE como CAMPO NOVO-RS e
+# o sistema mostrava SOLEDADE-RS, a sede do cliente. Como a atribuição do vendedor
+# agro é 100% por cidade (MapeamentoMunicipio), a comissão ia para o representante
+# errado.
+#
+# A regra NOVA prefere o endereço da nota sempre que ele existir. Vale só a partir
+# de `CORTE_CIDADE_ENTREGA` para NÃO mexer em período já fechado/pago — decisão do
+# usuário em 31/07/2026: "corrigir do mês 7 em diante".
+#
+# Impacto medido em 07/2026 (mesmos filtros de venda válida da consulta):
+#   47 de 3.131 itens mudam de cidade — R$ 438.345 de R$ 14,9 mi (2,9%)
+#   3 itens trocam de representante agro — R$ 246.240, do ILDOMAR para o EVERTON
+#     NF 796325 Soledade→São Borja (R$ 180.000)
+#     NF 796324 Soledade→Campo Novo (R$ 45.000)
+#     NF 796966 Sta. Bárbara do Sul→Sto. Antônio das Missões (R$ 21.240)
+#
+# PARA REVERTER: colocar uma data futura aqui (ex. '2099-01-01') que a regra antiga
+# volta a valer para tudo. Scripts do diagnóstico em
+# `managerdb/tools/comissoes/` (diag_cidade_nf.py e impacto_cidade.py).
+# ─────────────────────────────────────────────────────────────────────────────
+CORTE_CIDADE_ENTREGA = '2026-07-01'
 @csrf_exempt
 @api_view(['POST'])
 def consulta_canceladas(request):
@@ -272,6 +303,17 @@ def calculos_comissoes(request):
         JOIN ESTADO ON ESTCOD = CIDEST
         WHERE CIDCOD = CLICIDADE) CLIENTE_CIDADE,
         CASE
+        -- A partir de {CORTE_CIDADE_ENTREGA}: prefere o endereço de ENTREGA da nota (NFECLI).
+        WHEN CAST(NFDATA AS DATE) >= '{CORTE_CIDADE_ENTREGA}' THEN COALESCE(
+                (SELECT CIDNOME + '-' + ESTUF FROM ENDERECOCLIENTE
+                        JOIN CIDADE ON CIDCOD = ECLICIDADE
+                        JOIN ESTADO ON ESTCOD = CIDEST
+                        WHERE ECLICOD = NFECLI
+                        AND ECLICLI = NFCLI),
+                (SELECT CIDNOME + '-' + ESTUF FROM CIDADE
+                        JOIN ESTADO ON ESTCOD = CIDEST
+                        WHERE CIDCOD = CLICIDADE))
+        -- Regra antiga (períodos já fechados): só com o flag 579 do pedido.
         WHEN (SELECT PPDADOCHAR FROM PESPARAMETRO 
                 WHERE PPTPP = 579 AND PPREF = INF.INFPED) = 'S' AND NFECLI > 0 THEN (SELECT CIDNOME + '-' + ESTUF FROM ENDERECOCLIENTE
                                                                 JOIN CIDADE ON CIDCOD = ECLICIDADE
@@ -317,6 +359,15 @@ def calculos_comissoes(request):
         WHEN CLICOD IN (37, 2454) THEN 'YARA'
         WHEN ESTQGALM IN (1587, 1828) THEN R.REPNOME
         ELSE CASE
+                WHEN CAST(NFDATA AS DATE) >= '{CORTE_CIDADE_ENTREGA}' THEN COALESCE(
+                        (SELECT RGNOME FROM ENDERECOCLIENTE
+                                JOIN CIDADE ON CIDCOD = ECLICIDADE
+                                JOIN REGIAO ON RGCOD = CIDRG
+                                WHERE ECLICOD = NFECLI
+                                AND ECLICLI = NFCLI),
+                        (SELECT RGNOME FROM CIDADE
+                                JOIN REGIAO ON RGCOD = CIDRG
+                                WHERE CIDCOD = CLICIDADE))
                 WHEN (SELECT PPDADOCHAR FROM PESPARAMETRO 
                 WHERE PPTPP = 579 AND PPREF = INF.INFPED) = 'S' AND NFECLI > 0 THEN (SELECT RGNOME FROM ENDERECOCLIENTE
                                                                 JOIN CIDADE ON CIDCOD = ECLICIDADE
@@ -473,6 +524,21 @@ def calculos_comissoes(request):
         JOIN ESTADO ON ESTCOD = CIDEST
         WHERE CIDCOD = CLICIDADE) CLIENTE_CIDADE,
     CASE
+        -- A partir de {CORTE_CIDADE_ENTREGA}: prefere o endereço de ENTREGA da nota.
+        -- O corte usa NF.NFDATA (data da VENDA original) e não NFEDATA (data da
+        -- devolução, que filtra o período aqui): assim a devolução cai na MESMA
+        -- cidade em que a venda foi atribuída e o estorno fecha. Com NFEDATA, uma
+        -- devolução em 07 de uma venda de 06 debitaria uma cidade diferente da que
+        -- foi creditada.
+        WHEN CAST(NF.NFDATA AS DATE) >= '{CORTE_CIDADE_ENTREGA}' THEN COALESCE(
+            (SELECT CIDNOME + '-' + ESTUF FROM ENDERECOCLIENTE
+                JOIN CIDADE ON CIDCOD = ECLICIDADE
+                JOIN ESTADO ON ESTCOD = CIDEST
+                WHERE ECLICOD = NF.NFECLI
+                AND ECLICLI = NFCLI),
+            (SELECT CIDNOME + '-' + ESTUF FROM CIDADE
+                JOIN ESTADO ON ESTCOD = CIDEST
+                WHERE CIDCOD = CLICIDADE))
         WHEN (SELECT PPDADOCHAR FROM PESPARAMETRO 
             WHERE PPTPP = 579 AND PPREF = INF.INFPED) = 'S' AND NF.NFECLI > 0 THEN (SELECT CIDNOME + '-' + ESTUF FROM ENDERECOCLIENTE
                                                                 JOIN CIDADE ON CIDCOD = ECLICIDADE
@@ -517,6 +583,15 @@ def calculos_comissoes(request):
         WHEN CLICOD IN (37, 2454) THEN 'YARA'
         WHEN ESTQGALM IN (1587, 1828) THEN R.REPNOME
         ELSE CASE
+            WHEN CAST(NF.NFDATA AS DATE) >= '{CORTE_CIDADE_ENTREGA}' THEN COALESCE(
+                (SELECT RGNOME FROM ENDERECOCLIENTE
+                    JOIN CIDADE ON CIDCOD = ECLICIDADE
+                    JOIN REGIAO ON RGCOD = CIDRG
+                    WHERE ECLICOD = NF.NFECLI
+                    AND ECLICLI = NFCLI),
+                (SELECT RGNOME FROM CIDADE
+                    JOIN REGIAO ON RGCOD = CIDRG
+                    WHERE CIDCOD = CLICIDADE))
             WHEN (SELECT PPDADOCHAR FROM PESPARAMETRO 
             WHERE PPTPP = 579 AND PPREF = INF.INFPED) = 'S' AND NF.NFECLI > 0 THEN (SELECT RGNOME FROM ENDERECOCLIENTE
                                                                 JOIN CIDADE ON CIDCOD = ECLICIDADE
