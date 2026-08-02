@@ -903,6 +903,9 @@ def calculos_comissoes(request):
         'GRUPO_COMERCIAL': 'grupo_comercial',
         'QUANTIDADE': 'quantidade',
         'QUANTIDADE_TN': 'quantidade_tn',
+        # valor_produto é a base real do Total Vendedor/comissão (valor_total embute frete e ST);
+        # o front usa esse campo para cruzar nota a nota com a conferência de planilha.
+        'VALOR_PRODUTO': 'valor_produto',
         'VALOR_TOTAL': 'valor_total',
         'EMPRESAFILIAL': 'filial',
     }
