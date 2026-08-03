@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import (Comissao, Meta, Regiao, Representante, ParametroComissao,
                      VinculoRepresentante, MapeamentoMunicipio,
-                     RegraComissao, RegraComissaoGrupo, RegraComissaoFaixa)
+                     RegraComissao, RegraComissaoGrupo, RegraComissaoFaixa,
+                     PagamentoComissao)
 
 
 class RegiaoSerializer(serializers.ModelSerializer):
@@ -28,6 +29,7 @@ class RepresentanteSerializer(serializers.ModelSerializer):
             'telefone',
             'cpf',
             'cnpj',
+            'taxa_comissao_recebimento',
             'regiao_detalhes'
         ]
 
@@ -67,6 +69,24 @@ class ComissaoSerializer(serializers.ModelSerializer):
             'periodo',
             'data_pagamento',
             'representante_detalhes'
+        ]
+
+
+class PagamentoComissaoSerializer(serializers.ModelSerializer):
+    representante = serializers.PrimaryKeyRelatedField(queryset=Representante.objects.all())
+    representante_detalhes = RepresentanteSerializer(source='representante', read_only=True)
+
+    class Meta:
+        model = PagamentoComissao
+        fields = [
+            'id',
+            'representante',
+            'representante_detalhes',
+            'periodo',
+            'valor',
+            'data_pagamento',
+            'observacao',
+            'criado_em',
         ]
 
 
