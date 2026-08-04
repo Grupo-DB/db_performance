@@ -1,0 +1,142 @@
+{% extends "legal/_base_legal.html" %}
+
+{% block titulo %}Termos de Uso{% endblock %}
+{% block titulo_pagina %}Termos de Uso — Atendimento por WhatsApp{% endblock %}
+
+{% block conteudo %}
+
+<div class="aviso">
+    <strong>Antes de publicar:</strong> os campos destacados em amarelo precisam ser
+    preenchidos com os dados da empresa e revisados pelo jurídico. Este texto descreve o
+    funcionamento real do canal, mas não substitui a análise de um advogado.
+</div>
+
+<h2>1. Sobre estes termos</h2>
+<p>
+    Estes Termos de Uso regem o atendimento oferecido pela
+    <span class="preencher">[RAZÃO SOCIAL]</span>, CNPJ <span class="preencher">[CNPJ]</span>
+    (doravante "{{ empresa_nome }}", "nós"), por meio do <strong>WhatsApp</strong>.
+</p>
+<p>
+    Ao enviar uma mensagem para o nosso número de WhatsApp, você concorda com estes termos e com a
+    nossa <a href="{% url 'legal-privacidade' %}">Política de Privacidade</a>. Se não concordar,
+    utilize outro canal de contato.
+</p>
+
+<h2>2. O que é este canal</h2>
+<p>
+    Um canal de <strong>atendimento e relacionamento</strong>: tirar dúvidas, solicitar informações
+    sobre produtos e serviços, acompanhar pedidos e falar com o setor responsável. Sua mensagem é
+    encaminhada a um setor e respondida por um atendente humano.
+</p>
+<p>
+    O canal <strong>não</strong> é meio oficial para notificações judiciais, registro de ocorrências
+    de emergência, nem para formalizar contratos, salvo se a empresa confirmar isso expressamente
+    por escrito na conversa.
+</p>
+
+<h2>3. Não use para emergências</h2>
+<p>
+    <strong>Este canal não é monitorado 24 horas por dia.</strong> Em caso de emergência, acidente,
+    risco à vida, ao meio ambiente ou ao patrimônio, procure os serviços públicos de emergência
+    (SAMU 192, Bombeiros 193, Polícia 190) ou os canais de emergência indicados pela empresa.
+</p>
+
+<h2>4. Horário e prazo de resposta</h2>
+<p>
+    O atendimento humano funciona em <span class="preencher">[HORÁRIO — ex.: seg. a sex., 8h às 18h]</span>.
+    Mensagens recebidas fora desse período são respondidas no próximo dia útil. Não garantimos prazo
+    específico de resposta, salvo compromisso assumido de forma expressa.
+</p>
+
+<h2>5. Regra de janela de 24 horas do WhatsApp</h2>
+<p>
+    Por regra da própria plataforma WhatsApp, uma empresa só pode enviar mensagens livres dentro de
+    <strong>24 horas</strong> contadas da sua última mensagem. Passado esse prazo, só podemos retomar
+    o contato usando modelos de mensagem previamente aprovados pela Meta. Isso é limitação da
+    plataforma, não escolha nossa.
+</p>
+
+<h2>6. Uso adequado</h2>
+<p>Ao usar este canal, você se compromete a:</p>
+<ul>
+    <li>fornecer informações verdadeiras;</li>
+    <li>não se passar por outra pessoa ou empresa;</li>
+    <li>não enviar conteúdo ilegal, ofensivo, discriminatório, ameaçador ou obsceno;</li>
+    <li>não enviar spam, propaganda não solicitada ou correntes de mensagens;</li>
+    <li>não enviar arquivos com vírus ou código malicioso;</li>
+    <li>não tentar burlar, sobrecarregar ou explorar falhas do sistema;</li>
+    <li>não enviar dados pessoais de terceiros sem autorização deles.</li>
+</ul>
+<p>
+    Podemos encerrar o atendimento e bloquear o número em caso de descumprimento, sem prejuízo das
+    medidas legais cabíveis.
+</p>
+
+<h2>7. Não envie dados sigilosos</h2>
+<p>
+    Nunca envie por este canal <strong>senhas, códigos de verificação, número completo de cartão de
+    crédito ou CVV</strong>. A {{ empresa_nome }} não solicita esses dados pelo WhatsApp. Desconfie de
+    qualquer pedido nesse sentido, ainda que pareça vir de nós.
+</p>
+
+<h2>8. Registro das conversas</h2>
+<p>
+    As conversas são registradas e armazenadas, incluindo mensagens e arquivos enviados, conforme
+    descrito na <a href="{% url 'legal-privacidade' %}">Política de Privacidade</a>. Ao continuar o
+    atendimento, você está ciente desse registro.
+</p>
+
+<h2>9. Informações prestadas no atendimento</h2>
+<p>
+    Buscamos exatidão nas informações, mas dados sobre preço, prazo, disponibilidade e especificação
+    técnica podem mudar e <strong>só se tornam vinculantes quando formalizados</strong> em proposta,
+    pedido ou contrato. Informação prestada no WhatsApp, isoladamente, não constitui oferta firme.
+</p>
+
+<h2>10. Propriedade intelectual</h2>
+<p>
+    Marcas, nomes, logotipos, textos, catálogos, laudos e materiais técnicos enviados por nós são de
+    propriedade da {{ empresa_nome }} ou de seus licenciantes. O envio a você não transfere direitos
+    e não autoriza reprodução, alteração ou distribuição sem autorização escrita.
+</p>
+
+<h2>11. Disponibilidade e limitação de responsabilidade</h2>
+<p>
+    O canal depende da infraestrutura do WhatsApp e da Meta Platforms, além de conexão de internet.
+    Não respondemos por indisponibilidade, atraso, perda ou falha de entrega de mensagens decorrentes
+    dessas plataformas, de falha na sua conexão, ou de eventos fora do nosso controle razoável.
+</p>
+<p>
+    Nada nestes termos afasta os direitos que o Código de Defesa do Consumidor garante a você, quando
+    aplicável.
+</p>
+
+<h2>12. Relação com o WhatsApp e a Meta</h2>
+<p>
+    WhatsApp é marca da Meta Platforms, Inc. Não somos afiliados à Meta. O uso do aplicativo por você
+    está sujeito aos termos e políticas próprios da plataforma.
+</p>
+
+<h2>13. Alterações</h2>
+<p>
+    Podemos alterar estes termos a qualquer momento. A versão vigente é sempre a publicada nesta
+    página, com a data de atualização no topo. O uso do canal após a alteração implica concordância.
+</p>
+
+<h2>14. Lei aplicável e foro</h2>
+<p>
+    Estes termos são regidos pelas leis da República Federativa do Brasil. Fica eleito o foro da
+    comarca de <span class="preencher">[CIDADE/UF]</span> para resolver controvérsias, ressalvado, no
+    caso de relação de consumo, o direito do consumidor de demandar no foro do seu domicílio.
+</p>
+
+<h2>15. Contato</h2>
+<p>
+    <strong>{{ empresa_nome }}</strong><br>
+    <strong>E-mail:</strong> <span class="preencher">[E-MAIL DE CONTATO]</span><br>
+    <strong>Telefone:</strong> <span class="preencher">[TELEFONE]</span><br>
+    <strong>Endereço:</strong> <span class="preencher">[ENDEREÇO COMPLETO]</span>
+</p>
+
+{% endblock %}
