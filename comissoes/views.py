@@ -8,12 +8,10 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import connections
 from .models import (Regiao, Representante, Meta, Comissao, ParametroComissao,
                      VinculoRepresentante, MapeamentoMunicipio,
-                     RegraComissao, RegraComissaoGrupo, RegraComissaoFaixa,
-                     PagamentoComissao)
+                     RegraComissao, RegraComissaoGrupo, RegraComissaoFaixa)
 from .serializers import (RegiaoSerializer, RepresentanteSerializer, MetaSerializer, ComissaoSerializer,
                           ParametroComissaoSerializer, VinculoRepresentanteSerializer, MapeamentoMunicipioSerializer,
-                          RegraComissaoSerializer, RegraComissaoGrupoSerializer, RegraComissaoFaixaSerializer,
-                          PagamentoComissaoSerializer)
+                          RegraComissaoSerializer, RegraComissaoGrupoSerializer, RegraComissaoFaixaSerializer)
 import pandas as pd
 import locale
 
@@ -36,28 +34,6 @@ class ComissaoViewSet(viewsets.ModelViewSet):
 class ParametroComissaoViewSet(viewsets.ModelViewSet):
     queryset = ParametroComissao.objects.all()
     serializer_class = ParametroComissaoSerializer
-
-
-class PagamentoComissaoViewSet(viewsets.ModelViewSet):
-    queryset = PagamentoComissao.objects.all().select_related('representante')
-    serializer_class = PagamentoComissaoSerializer
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        representante = self.request.query_params.get('representante')
-        if representante:
-            qs = qs.filter(representante_id=representante)
-        periodo = self.request.query_params.get('periodo')
-        if periodo:
-            qs = qs.filter(periodo=periodo)
-        # Faixa de competência (AAAA-MM), usada pelo relatório de comissões recebidas
-        periodo_de = self.request.query_params.get('periodo_de')
-        if periodo_de:
-            qs = qs.filter(periodo__gte=periodo_de)
-        periodo_ate = self.request.query_params.get('periodo_ate')
-        if periodo_ate:
-            qs = qs.filter(periodo__lte=periodo_ate)
-        return qs
 
 
 class VinculoRepresentanteViewSet(viewsets.ModelViewSet):

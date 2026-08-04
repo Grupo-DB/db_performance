@@ -22,12 +22,6 @@ class Representante(models.Model):
     telefone = models.CharField(max_length=255, null=True, blank=True)
     cpf = models.CharField(max_length=255, null=True, blank=True)
     cnpj = models.CharField(max_length=255, null=True, blank=True)
-    # Percentual de comissão sobre o valor EFETIVAMENTE RECEBIDO pela empresa (ex.: 5.00 = 5%).
-    # Usado pelo relatório de comissões recebidas; não interfere no cálculo dos vendedores
-    # externos agro (Ildomar/Everton), que segue a fórmula fixa em views.calculos_comissoes.
-    taxa_comissao_recebimento = models.DecimalField(
-        max_digits=7, decimal_places=4, default=0, null=False, blank=True
-    )
 
     class Meta:
         verbose_name = "Representante"
@@ -251,28 +245,3 @@ class RegraComissaoFaixa(models.Model):
         verbose_name = "Faixa da Regra"
         verbose_name_plural = "Faixas da Regra"
         ordering = ['pct_minimo']
-
-
-class PagamentoComissao(models.Model):
-    """Repasse de comissão efetivamente pago a um representante.
-
-    O ERP não guarda o que a empresa pagou aos representantes do agro
-    (a tabela COMISSAOREP cobre só outros 7 representantes), então o
-    lançamento é manual e serve para confrontar contra a comissão devida
-    sobre os títulos já recebidos (endpoint comissoes_recebidas).
-    """
-
-    representante = models.ForeignKey(
-        Representante, on_delete=models.RESTRICT, related_name='pagamentos_comissao'
-    )
-    # Competência do repasse no formato AAAA-MM (o mês a que a comissão se refere).
-    periodo = models.CharField(max_length=7, help_text='Competência AAAA-MM')
-    valor = models.DecimalField(max_digits=14, decimal_places=2)
-    data_pagamento = models.DateField()
-    observacao = models.CharField(max_length=455, null=True, blank=True)
-    criado_em = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        verbose_name = "Pagamento de Comissão"
-        verbose_name_plural = "Pagamentos de Comissão"
-        ordering = ['-data_pagamento', 'representante__nome']

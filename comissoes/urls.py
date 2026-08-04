@@ -2,10 +2,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (RegiaoViewSet, RepresentanteViewSet, MetaViewSet, ComissaoViewSet,
                     ParametroComissaoViewSet, VinculoRepresentanteViewSet, MapeamentoMunicipioViewSet,
                     RegraComissaoViewSet, RegraComissaoGrupoViewSet, RegraComissaoFaixaViewSet,
-                    PagamentoComissaoViewSet,
                     calculos_comissoes, popular_mapeamento_agro, consulta_canceladas)
 from .conferencia import conferencia_vendedor
-from .recebimentos import comissoes_recebidas
 from .relatorio_parcelas import relatorio_vendas_parcelas
 from .clientes_inativos import clientes_inativos, marcar_alerta_cliente
 from .teste_valor_total import teste_total_vendedor_valor_total, descobrir_colunas_pedido, teste_pedidos_pendentes_erp
@@ -22,12 +20,10 @@ router.register(r'municipio', MapeamentoMunicipioViewSet, basename='municipio')
 router.register(r'regra', RegraComissaoViewSet, basename='regra')
 router.register(r'regra-grupo', RegraComissaoGrupoViewSet, basename='regra-grupo')
 router.register(r'regra-faixa', RegraComissaoFaixaViewSet, basename='regra-faixa')
-router.register(r'pagamento', PagamentoComissaoViewSet, basename='pagamento')
 
 urlpatterns = [
     path('calculos_comissoes/', calculos_comissoes, name='calculos_comissoes'),
     path('consulta_canceladas/', consulta_canceladas, name='consulta_canceladas'),
-    path('comissoes_recebidas/', comissoes_recebidas, name='comissoes_recebidas'),
     path('relatorio_vendas_parcelas/', relatorio_vendas_parcelas, name='relatorio_vendas_parcelas'),
     path('municipio/popular_agro/', popular_mapeamento_agro, name='popular_mapeamento_agro'),
     path('conferencia_vendedor/', conferencia_vendedor, name='conferencia_vendedor'),
