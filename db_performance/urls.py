@@ -5,8 +5,15 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 
+from whatsapp.legal_views import PoliticaPrivacidadeView, TermosUsoView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    # Páginas legais públicas exigidas pela Meta no cadastro do app do WhatsApp.
+    # Ficam na raiz (não dentro de whatsapp/) porque valem para a empresa, não só para
+    # esse canal, e porque a URL aparece para o usuário final no diálogo do WhatsApp.
+    path('privacidade/', PoliticaPrivacidadeView.as_view(), name='legal-privacidade'),
+    path('termos/', TermosUsoView.as_view(), name='legal-termos'),
     #path('auth/', include('autenticacoes.urls')),
     path('management/', include('avaliacoes.management.urls')),
     path('datacalc/', include('avaliacoes.datacalc.urls')),
