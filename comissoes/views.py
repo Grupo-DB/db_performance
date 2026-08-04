@@ -795,7 +795,17 @@ def calculos_comissoes(request):
 
     df_cc = df_cc.copy()
     # Usa GRUPO_COMERCIAL como fonte primária; fallback para GRUPO_COMERCIAL_LINHA_PRODUTOS e depois GRUPO
+    # A linha de produtos 'ACABAMENTO' é o grupo de gestão Acabamentos (cal pintura), que
+    # pertence a CB. Tem de ser testada ANTES do GRUPO_COMERCIAL: a Finaliza Efeitos
+    # vendida no ATM vem com GRUPO_COMERCIAL='FINALIZA' e linha 'ACABAMENTO', então pelo
+    # grupo comercial ela caía em FINALIZA (1,4%) em vez de CB (1,9%) — e ficava separada
+    # das irmãs de linha 'ACABAMENTO' que têm GRUPO_COMERCIAL='CERRO BRANCO' e já iam p/ CB.
+    LINHA_PRODUTOS_CB_TERMOS = ['ACABAMENTO']
+
     def grupo_gestao_row(row):
+        linha = str(row['GRUPO_COMERCIAL_LINHA_PRODUTOS']).upper()
+        if any(t in linha for t in LINHA_PRODUTOS_CB_TERMOS):
+            return 'CB'
         result = grupo_gestao(row['GRUPO_COMERCIAL'])
         if result == 'OUTROS':
             result = grupo_gestao(row['GRUPO_COMERCIAL_LINHA_PRODUTOS'])
@@ -803,6 +813,11 @@ def calculos_comissoes(request):
             result = grupo_gestao(row['GRUPO'])
         return result
     df_cc['GRUPO_GESTAO'] = df_cc.apply(grupo_gestao_row, axis=1)
+    # Também no df completo: os lançamentos expostos ao front saem de `df` (não de df_cc,
+    # porque parte da venda do rep é agro) e a tabela de lançamentos precisa do MESMO
+    # grupo de gestão usado no cálculo. Derivar isso no Angular duplicaria a regra
+    # (inclusive a da linha ACABAMENTO) e as duas versões sairiam do ar em algum momento.
+    df['GRUPO_GESTAO'] = df.apply(grupo_gestao_row, axis=1)
 
     resultado = {}
     # Tabela de base de vendas para comparação (espelha a planilha)
@@ -925,6 +940,12 @@ def calculos_comissoes(request):
         'CIDADE_FATURAMENTO': 'cidade',
         'ESTOQUE': 'produto',
         'GRUPO_COMERCIAL': 'grupo_comercial',
+        # Grupo de gestão (CB/PRIMOR/PRIMEX/FINALIZA/OUTROS) — o mesmo que define a taxa
+        'GRUPO_GESTAO': 'grupo_gestao',
+        # Segmento do PRODUTO (não do vendedor): os lançamentos saem do df completo, então
+        # um vendedor de CC traz também as vendas agro dele. Sem este campo a tabela de
+        # lançamentos de CC somaria as linhas agro e não fecharia com a Base de Vendas CC.
+        'SEGMENTO_PRODUTO': 'segmento_produto',
         'QUANTIDADE': 'quantidade',
         'QUANTIDADE_TN': 'quantidade_tn',
         # valor_produto é a base real do Total Vendedor/comissão (valor_total embute frete e ST);
@@ -947,15 +968,6 @@ def calculos_comissoes(request):
                 _df_lanc[_c] = _df_lanc[_c].round(2)
         _df_lanc = _df_lanc.fillna('').sort_values('data') if 'data' in _df_lanc.columns else _df_lanc.fillna('')
         return _df_lanc.to_dict(orient='records')
-
-    # Pool de dolomita "VENDAS ATM" (PROVISÓRIO — ver TODO na divisão, abaixo):
-    # a maior parte da dolomita é faturada pelo canal "VENDAS ATM", sem representante (nem
-    # master) amarrado. Total desse canal → base para 0,8% dividido igualmente entre os 12.
-    _mask_carbomax_df = df['GRUPO_COMERCIAL'].str.contains('CARBOMAX', na=False)
-    venda_dolomita_atm_total = float(
-        df[_mask_carbomax_df & df['REPRESENTANTE'].str.contains('VENDAS ATM', na=False)]['VALOR_PRODUTO'].sum()
-    )
-    comissao_dolomita_atm_pool = venda_dolomita_atm_total * taxa_cc_dolomita
 
     for rep_chave, vinc_int in VINCULO_INT_MATRIZ.items():
         # Inclui vendas diretas (REPRESENTANTE) + vendas de sub-representantes (REPRESENTANTE_MASTER)
@@ -1022,26 +1034,14 @@ def calculos_comissoes(request):
         if any(t in rep_chave for t in REP_MPA_TERMOS):
             base_mpa_vendas += sum(vendas.values())
 
-    # ---- Pool de dolomita "VENDAS ATM" dividido igualmente entre os 12 (PROVISÓRIO) ----
-    # POR ORA (definido com o usuário em 22/07/2026): como a dolomita do canal "VENDAS ATM"
-    # não tem representante, o 0,8% sobre esse total é dividido IGUALMENTE entre os vendedores
-    # externos CC (os 12 do VINCULO_INT_MATRIZ que tiveram venda no período). Somado à comissão
-    # de cada um, além do que ele já recebe pela dolomita do próprio nome.
-    # O Agner NÃO entra neste pool: sendo representante, o 0,8% dele é sobre a dolomita do
-    # próprio nome (exposta no bloco do Agner, abaixo).
-    # TODO(dolomita): atribuição DEFINITIVA ainda pendente (provável: por cliente/carteira ou
-    # por região/cidade). Rever com o diagnóstico _dolomita_debug e ajustar esta divisão.
-    _reps_12_com_venda = list(chaves_vendedores_cc_elegiveis)  # só os 12 — Agner ainda não foi incluído
-    if _reps_12_com_venda and comissao_dolomita_atm_pool > 0:
-        _share_venda_atm = venda_dolomita_atm_total / len(_reps_12_com_venda)
-        _share_comissao_atm = comissao_dolomita_atm_pool / len(_reps_12_com_venda)
-        for _k in _reps_12_com_venda:
-            _r = resultado[_k]
-            _r['comissao'] = round(_r['comissao'] + _share_comissao_atm, 2)
-            _r['venda_dolomita'] = round(_r.get('venda_dolomita', 0.0) + _share_venda_atm, 2)
-            _r['comissao_dolomita'] = round(_r.get('comissao_dolomita', 0.0) + _share_comissao_atm, 2)
-            _r['dolomita_atm_pool_venda'] = round(_share_venda_atm, 2)
-            _r['dolomita_atm_pool_comissao'] = round(_share_comissao_atm, 2)
+    # Dolomita: cada um recebe 0,8% sobre o que VENDEU, e nada se não vendeu.
+    # Substitui (03/08/2026, decisão do usuário) o rateio provisório que dividia o 0,8%
+    # do canal "VENDAS ATM" igualmente entre os externos CC — quem não vendia dolomita
+    # também recebia. A parcela do canal "VENDAS ATM", que não tem representante amarrado,
+    # deixa de ser distribuída: sem venda atribuída a alguém, não gera comissão.
+    # Não há meta de dolomita: CARBOMAX fica fora de `vendas_por_grupo` (só CB/PRIMOR/
+    # PRIMEX/FINALIZA), então não entra na base de meta nem no potencializador — a taxa
+    # é sempre a cheia de 0,8%.
 
     # Agner: comissão igual aos demais reps (taxas_externo por grupo + potencializador) * 1.05 final
     df_agner = df_cc[df_cc['REPRESENTANTE'].str.contains('AGNER', na=False)]
