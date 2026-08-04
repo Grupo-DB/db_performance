@@ -1,7 +1,11 @@
 """Relatório de vendas e parcelas por representante (agronegócio).
 
 Substitui o relatório que o laboratório/comercial montava à mão em planilha + PDF.
-NÃO calcula comissão: é acompanhamento de venda e de parcela.
+Acompanhamento de venda e de parcela, com a comissão do representante no rodapé.
+A comissão incide **só sobre parcela recebida** — parcela em aberto aparece no
+relatório mas não gera comissão. A taxa é **a mesma para todos os representantes** e
+sai do parâmetro `AGRO_TAXA_RECEBIDO` (Comissões › Parâmetros), para poder ser mudada
+sem deploy. O padrão é 5%.
 
 Modelo validado contra o relatório manual do representante J.J. CRUZ (jul/2026), que
 fechou ao centavo (R$ 149.919,00). Três regras saíram dessa conferência:
@@ -23,10 +27,26 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from .models import ParametroComissao
 from .views import engine
 
 # Grupos de almoxarifado do agronegócio — mesma lista de views.calculos_comissoes.
 GRUPOS_ALMOX_AGRO = (1974, 1587, 1828)
+
+# Chave do parâmetro com a taxa única de comissão sobre o recebido, e o padrão
+# se ela não estiver cadastrada. Guardada como fração (0.05 = 5%), igual às outras.
+PARAM_TAXA = 'AGRO_TAXA_RECEBIDO'
+TAXA_PADRAO = 0.05
+
+
+def _taxa_comissao() -> float:
+    """Taxa em % (5.0 = 5%). Vem do parâmetro ativo; cai no padrão se não existir."""
+    try:
+        pc = ParametroComissao.objects.filter(chave=PARAM_TAXA, ativo=True).first()
+        fracao = float(pc.taxa) if pc else TAXA_PADRAO
+    except Exception:
+        fracao = TAXA_PADRAO
+    return round(fracao * 100, 4)
 
 
 def _sql(data_inicio: str, data_fim: str) -> str:
@@ -107,7 +127,7 @@ def relatorio_vendas_parcelas(request):
     if not len(df):
         return Response({
             'dataInicio': data_inicio, 'dataFim': data_fim,
-            'representantes': [], 'totais': _totais_vazios(),
+            'representantes': [], 'taxa': _taxa_comissao(), 'totais': _totais_vazios(),
         })
 
     df['REPRESENTANTE'] = df['REPRESENTANTE'].fillna('').str.strip().str.upper()
@@ -142,6 +162,8 @@ def relatorio_vendas_parcelas(request):
         # 'todas' ainda descarta parcela que não é nem recebida na janela nem em aberto
         # (título já liquidado fora do período) — ela não pertence a este relatório.
         df = df[df['RECEBIDA'] | df['EM_ABERTO']]
+
+    taxa = _taxa_comissao()
 
     representantes = []
     for nome_rep, df_rep in df.groupby('REPRESENTANTE', sort=True):
@@ -180,11 +202,17 @@ def relatorio_vendas_parcelas(request):
 
         rec = df_rep[df_rep['RECEBIDA']]
         ab = df_rep[df_rep['EM_ABERTO']]
+        total_recebido = round(float(rec['VALOR'].sum()), 2)
+
+        comissao = round(total_recebido * taxa / 100.0, 2)
+
         representantes.append({
             'representante': nome_rep,
             'master': ' / '.join(masters),
             'clientes': clientes,
-            'total_recebido': round(float(rec['VALOR'].sum()), 2),
+            'taxa': taxa,
+            'comissao': comissao,
+            'total_recebido': total_recebido,
             'total_aberto': round(float(ab['VALOR'].sum()), 2),
             'total_vencido': round(float(df_rep[df_rep['VENCIDA']]['VALOR'].sum()), 2),
             'qtd_clientes': int(df_rep['CLIENTE_CODIGO'].nunique()),
@@ -200,7 +228,9 @@ def relatorio_vendas_parcelas(request):
         'dataFim': data_fim,
         'situacao': situacao,
         'representantes': representantes,
+        'taxa': taxa,
         'totais': {
+            'comissao': round(sum(r['comissao'] for r in representantes), 2),
             'recebido': round(sum(r['total_recebido'] for r in representantes), 2),
             'aberto': round(sum(r['total_aberto'] for r in representantes), 2),
             'vencido': round(sum(r['total_vencido'] for r in representantes), 2),
@@ -215,6 +245,6 @@ def relatorio_vendas_parcelas(request):
 
 def _totais_vazios():
     return {
-        'recebido': 0.0, 'aberto': 0.0, 'vencido': 0.0, 'representantes': 0,
+        'comissao': 0.0, 'recebido': 0.0, 'aberto': 0.0, 'vencido': 0.0, 'representantes': 0,
         'clientes': 0, 'notas': 0, 'parcelas_recebidas': 0, 'parcelas_abertas': 0,
     }
