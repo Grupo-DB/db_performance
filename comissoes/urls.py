@@ -6,6 +6,7 @@ from .views import (RegiaoViewSet, RepresentanteViewSet, MetaViewSet, ComissaoVi
                     calculos_comissoes, popular_mapeamento_agro, consulta_canceladas)
 from .conferencia import conferencia_vendedor
 from .recebimentos import comissoes_recebidas
+from .relatorio_parcelas import relatorio_vendas_parcelas
 from .clientes_inativos import clientes_inativos, marcar_alerta_cliente
 from .teste_valor_total import teste_total_vendedor_valor_total, descobrir_colunas_pedido, teste_pedidos_pendentes_erp
 from django.urls import path
@@ -27,6 +28,7 @@ urlpatterns = [
     path('calculos_comissoes/', calculos_comissoes, name='calculos_comissoes'),
     path('consulta_canceladas/', consulta_canceladas, name='consulta_canceladas'),
     path('comissoes_recebidas/', comissoes_recebidas, name='comissoes_recebidas'),
+    path('relatorio_vendas_parcelas/', relatorio_vendas_parcelas, name='relatorio_vendas_parcelas'),
     path('municipio/popular_agro/', popular_mapeamento_agro, name='popular_mapeamento_agro'),
     path('conferencia_vendedor/', conferencia_vendedor, name='conferencia_vendedor'),
     path('clientes_inativos/', clientes_inativos, name='clientes_inativos'),
