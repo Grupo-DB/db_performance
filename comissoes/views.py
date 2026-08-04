@@ -942,6 +942,11 @@ def calculos_comissoes(request):
         'GRUPO_COMERCIAL': 'grupo_comercial',
         # Grupo de gestão (CB/PRIMOR/PRIMEX/FINALIZA/OUTROS) — o mesmo que define a taxa
         'GRUPO_GESTAO': 'grupo_gestao',
+        # Linha de produtos do ERP (ACABAMENTO, PRIMOR CDS, DOLOMITA, CAL PINTURA…).
+        # É só VISIBILIDADE: não entra em taxa nem em meta. Serve para distinguir, dentro
+        # de um grupo de gestão, de que linha a venda veio — 'ACABAMENTO' cai em CB, e sem
+        # este campo não havia como separá-lo da cal pintura no filtro.
+        'GRUPO_COMERCIAL_LINHA_PRODUTOS': 'linha_produtos',
         # Segmento do PRODUTO (não do vendedor): os lançamentos saem do df completo, então
         # um vendedor de CC traz também as vendas agro dele. Sem este campo a tabela de
         # lançamentos de CC somaria as linhas agro e não fecharia com a Base de Vendas CC.
