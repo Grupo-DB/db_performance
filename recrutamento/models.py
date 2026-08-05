@@ -386,3 +386,151 @@ class Processo(models.Model):
     def save(self, *args, **kwargs):
         self.etapa = self.calcular_etapa()
         super().save(*args, **kwargs)
+
+
+class FichaEntrevista(models.Model):
+    """
+    Formulário F-018 -- "Ficha de Entrevista e Seleção de Pessoal", versão 7.1.
+
+    É o roteiro que o RH usa durante a entrevista presencial. Antes era um .doc
+    impresso e preenchido à mão, depois arquivado em pasta física; nada disso
+    voltava para a planilha, então o parecer só existia como texto solto.
+
+    A ficha nasce sempre presa a um ``Candidato`` (registro do banco de
+    talentos) e, quando a entrevista faz parte de um processo seletivo, também
+    ao ``Processo`` correspondente -- que é o que liga a ficha à vaga.
+
+    Os campos de identificação (nome, endereço, telefone...) são copiados do
+    currículo no momento em que a ficha é aberta, mas ficam gravados aqui: a
+    ficha é um documento datado e precisa continuar mostrando o que era verdade
+    no dia da entrevista, mesmo que o cadastro mude depois.
+    """
+
+    DISP_COMERCIAL = 'COMERCIAL'
+    DISP_MANHA = 'MANHÃ'
+    DISP_TARDE = 'TARDE'
+    DISP_NOITE = 'NOITE'
+    DISP_TODAS = 'TODAS'
+    DISPONIBILIDADE_CHOICES = [
+        (DISP_COMERCIAL, 'Comercial'),
+        (DISP_MANHA, 'Manhã'),
+        (DISP_TARDE, 'Tarde'),
+        (DISP_NOITE, 'Noite'),
+        (DISP_TODAS, 'Todas'),
+    ]
+
+    RESULTADO_APROVADO = 'APROVADO'
+    RESULTADO_PRE_SELECIONADO = 'PRE_SELECIONADO'
+    RESULTADO_NAO_APROVADO = 'NAO_APROVADO'
+    RESULTADO_CHOICES = [
+        (RESULTADO_APROVADO, 'Aprovado(a) para a vaga'),
+        (RESULTADO_PRE_SELECIONADO, 'Pré-selecionado(a) para a próxima vaga'),
+        (RESULTADO_NAO_APROVADO, 'Não aprovado(a)'),
+    ]
+
+    candidato = models.ForeignKey(Candidato, on_delete=models.CASCADE, related_name='fichas')
+    processo = models.ForeignKey(
+        Processo, null=True, blank=True, on_delete=models.SET_NULL, related_name='fichas',
+        help_text='Processo seletivo em que esta entrevista aconteceu.',
+    )
+    vaga = models.ForeignKey(
+        Vaga, null=True, blank=True, on_delete=models.SET_NULL, related_name='fichas',
+    )
+
+    data_entrevista = models.DateField(null=True, blank=True, db_index=True)
+
+    # --- informações gerais (cabeçalho da ficha) ---
+    cargo_funcao = models.CharField(max_length=180, blank=True)
+    setor = models.CharField(max_length=180, blank=True)
+
+    # --- identificação do candidato (foto do cadastro no dia da entrevista) ---
+    nome = models.CharField(max_length=255, blank=True)
+    data_nascimento = models.DateField(null=True, blank=True)
+    endereco = models.CharField(max_length=255, blank=True)
+    cidade = models.CharField(max_length=120, blank=True)
+    telefone = models.CharField(max_length=30, blank=True)
+    telefone_contato = models.CharField(max_length=30, blank=True)
+    cnh_categoria = models.CharField(max_length=10, blank=True)
+    email = models.EmailField(blank=True)
+
+    # --- informações gerais do candidato ---
+    estado_civil = models.CharField(max_length=20, blank=True)
+    com_quem_mora = models.CharField(max_length=255, blank=True)
+    possui_filhos = models.BooleanField(null=True, blank=True)
+    quantos_filhos = models.PositiveSmallIntegerField(null=True, blank=True)
+    filhos_moram_juntos = models.BooleanField(null=True, blank=True)
+    historico_saude = models.TextField(blank=True, help_text='Sofreu ou sofre com problemas de saúde?')
+    esta_estudando = models.TextField(blank=True, help_text='Está estudando? Qual curso?')
+    cursos_complementares = models.TextField(blank=True)
+    escolaridade = models.CharField(max_length=60, blank=True)
+    instituicao = models.CharField(max_length=180, blank=True)
+    data_conclusao = models.CharField(max_length=40, blank=True)
+    nocoes_informatica = models.CharField(max_length=255, blank=True)
+    disponibilidade_horario = models.CharField(
+        max_length=12, choices=DISPONIBILIDADE_CHOICES, blank=True,
+    )
+
+    # --- informações específicas do candidato (roteiro da entrevista) ---
+    maiores_realizacoes = models.TextField(blank=True)
+    tempo_livre = models.TextField(blank=True)
+    bebe_fuma = models.TextField(blank=True)
+    maiores_qualidades = models.TextField(blank=True)
+    ponto_a_melhorar = models.TextField(blank=True)
+    como_se_ve_futuro = models.TextField(blank=True)
+    por_que_escolheu_db = models.TextField(blank=True)
+    sabe_sobre_empresa = models.TextField(blank=True)
+    conhece_alguem_empresa = models.TextField(blank=True)
+    algo_mais_sobre_voce = models.TextField(blank=True)
+
+    # --- informações profissionais (três experiências, como no formulário) ---
+    exp1_empresa = models.CharField(max_length=255, blank=True, help_text='Última experiência profissional.')
+    exp1_atividades = models.TextField(blank=True)
+    exp1_tempo = models.CharField(max_length=120, blank=True)
+    exp1_motivo_saida = models.TextField(blank=True)
+
+    exp2_empresa = models.CharField(max_length=255, blank=True)
+    exp2_atividades = models.TextField(blank=True)
+    exp2_tempo = models.CharField(max_length=120, blank=True)
+    exp2_motivo_saida = models.TextField(blank=True)
+
+    exp3_empresa = models.CharField(max_length=255, blank=True)
+    exp3_atividades = models.TextField(blank=True)
+    exp3_tempo = models.CharField(max_length=120, blank=True)
+    exp3_motivo_saida = models.TextField(blank=True)
+
+    experiencia_mais_identificou = models.TextField(blank=True)
+    experiencia_por_que = models.TextField(blank=True)
+
+    # --- avaliação final ---
+    parecer_recrutador = models.TextField(blank=True)
+    atende_requisitos = models.BooleanField(null=True, blank=True)
+    resultado = models.CharField(max_length=20, choices=RESULTADO_CHOICES, blank=True, db_index=True)
+    observacoes = models.TextField(blank=True)
+
+    avaliador_1 = models.CharField(max_length=120, blank=True)
+    avaliador_2 = models.CharField(max_length=120, blank=True)
+    avaliador_3 = models.CharField(max_length=120, blank=True)
+
+    versao_formulario = models.CharField(max_length=10, default='7.1')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Ficha de entrevista (F-018)'
+        verbose_name_plural = 'Fichas de entrevista (F-018)'
+        ordering = ['-data_entrevista', '-id']
+        indexes = [
+            models.Index(fields=['candidato', '-data_entrevista']),
+            models.Index(fields=['resultado', '-data_entrevista']),
+        ]
+
+    def __str__(self):
+        return f'F-018 {self.nome or self.candidato.nome} - {self.data_entrevista or "sem data"}'
+
+    def save(self, *args, **kwargs):
+        # A vaga da ficha acompanha o processo quando ele existe: evita a ficha
+        # dizer uma vaga e o processo outra.
+        if self.processo_id and not self.vaga_id:
+            self.vaga_id = self.processo.vaga_id
+        super().save(*args, **kwargs)

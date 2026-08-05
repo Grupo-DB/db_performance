@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import AreaInteresse, Candidato, Processo, Vaga
+from .models import AreaInteresse, Candidato, FichaEntrevista, Processo, Vaga
 
 
 class AreaInteresseSerializer(serializers.ModelSerializer):
@@ -17,6 +17,7 @@ class CandidatoListSerializer(serializers.ModelSerializer):
     idade = serializers.IntegerField(read_only=True)
     areas_interesse_nomes = serializers.SerializerMethodField()
     total_processos = serializers.IntegerField(read_only=True)
+    total_fichas = serializers.IntegerField(read_only=True)
     ultimo_parecer = serializers.SerializerMethodField()
     contratado_alguma_vez = serializers.SerializerMethodField()
 
@@ -28,7 +29,7 @@ class CandidatoListSerializer(serializers.ModelSerializer):
             'funcao_desejada', 'pcd', 'ja_trabalhou_db', 'data_recebimento',
             'pasta_arquivo', 'observacoes', 'ativo',
             'areas_interesse', 'areas_interesse_nomes', 'total_processos',
-            'ultimo_parecer', 'contratado_alguma_vez',
+            'total_fichas', 'ultimo_parecer', 'contratado_alguma_vez',
         ]
 
     def get_areas_interesse_nomes(self, obj):
@@ -58,6 +59,7 @@ class CandidatoSerializer(serializers.ModelSerializer):
     idade = serializers.IntegerField(read_only=True)
     areas_interesse_nomes = serializers.SerializerMethodField()
     processos_resumo = serializers.SerializerMethodField()
+    fichas_resumo = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidato
@@ -66,6 +68,23 @@ class CandidatoSerializer(serializers.ModelSerializer):
 
     def get_areas_interesse_nomes(self, obj):
         return [a.nome for a in obj.areas_interesse.all()]
+
+    def get_fichas_resumo(self, obj):
+        """Fichas F-018 do candidato -- alimenta a aba Entrevistas do currículo."""
+        return [
+            {
+                'id': f.id,
+                'data_entrevista': f.data_entrevista,
+                'cargo_funcao': f.cargo_funcao,
+                'setor': f.setor,
+                'vaga': f.vaga.descricao if f.vaga else None,
+                'processo_id': f.processo_id,
+                'resultado': f.resultado,
+                'atende_requisitos': f.atende_requisitos,
+                'avaliador_1': f.avaliador_1,
+            }
+            for f in obj.fichas.all().order_by('-data_entrevista', '-id')
+        ]
 
     def get_processos_resumo(self, obj):
         return [
@@ -109,8 +128,60 @@ class ProcessoSerializer(serializers.ModelSerializer):
     tempo_para_entrevista = serializers.IntegerField(read_only=True)
     tempo_retorno_candidato = serializers.IntegerField(read_only=True)
     etapa = serializers.CharField(read_only=True)  # sempre derivada em Processo.save()
+    ficha_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Processo
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at', 'etapa']
+
+    def get_ficha_id(self, obj):
+        """Ficha F-018 mais recente do processo -- ``null`` quando ainda não existe."""
+        fichas = sorted(
+            obj.fichas.all(),
+            key=lambda f: (f.data_entrevista or f.created_at.date(), f.id),
+            reverse=True,
+        )
+        return fichas[0].id if fichas else None
+
+
+class FichaEntrevistaListSerializer(serializers.ModelSerializer):
+    """Linha da listagem de fichas -- sem os blocos de texto longo."""
+
+    candidato_nome = serializers.CharField(source='candidato.nome', read_only=True)
+    candidato_cidade = serializers.CharField(source='candidato.cidade', read_only=True)
+    candidato_telefone = serializers.CharField(source='candidato.telefone_principal', read_only=True)
+    vaga_descricao = serializers.CharField(source='vaga.descricao', read_only=True)
+
+    class Meta:
+        model = FichaEntrevista
+        fields = [
+            'id', 'candidato', 'candidato_nome', 'candidato_cidade', 'candidato_telefone',
+            'processo', 'vaga', 'vaga_descricao', 'data_entrevista',
+            'cargo_funcao', 'setor', 'atende_requisitos', 'resultado',
+            'avaliador_1', 'created_at', 'updated_at',
+        ]
+
+
+class FichaEntrevistaSerializer(serializers.ModelSerializer):
+    """Ficha completa -- formulário da tela e PDF do F-018."""
+
+    candidato_nome = serializers.CharField(source='candidato.nome', read_only=True)
+    candidato_cidade = serializers.CharField(source='candidato.cidade', read_only=True)
+    candidato_telefone = serializers.CharField(source='candidato.telefone_principal', read_only=True)
+    vaga_descricao = serializers.CharField(source='vaga.descricao', read_only=True)
+    vaga_requisitante = serializers.CharField(source='vaga.requisitante', read_only=True)
+
+    class Meta:
+        model = FichaEntrevista
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
+
+    def validate(self, attrs):
+        processo = attrs.get('processo', getattr(self.instance, 'processo', None))
+        candidato = attrs.get('candidato', getattr(self.instance, 'candidato', None))
+        if processo and candidato and processo.candidato_id != candidato.id:
+            raise serializers.ValidationError(
+                {'processo': 'O processo selecionado é de outro candidato.'}
+            )
+        return attrs

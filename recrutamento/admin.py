@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AreaInteresse, Candidato, Processo, Vaga
+from .models import AreaInteresse, Candidato, FichaEntrevista, Processo, Vaga
 
 
 @admin.register(AreaInteresse)
@@ -31,3 +31,12 @@ class ProcessoAdmin(admin.ModelAdmin):
     list_filter = ['etapa', 'parecer', 'contratado', 'compareceu']
     search_fields = ['candidato__nome', 'vaga__descricao']
     autocomplete_fields = ['candidato', 'vaga']
+
+
+@admin.register(FichaEntrevista)
+class FichaEntrevistaAdmin(admin.ModelAdmin):
+    list_display = ['id', 'nome', 'cargo_funcao', 'setor', 'data_entrevista', 'resultado', 'avaliador_1']
+    list_filter = ['resultado', 'atende_requisitos', 'setor', 'disponibilidade_horario']
+    search_fields = ['nome', 'candidato__nome', 'cargo_funcao', 'setor', 'avaliador_1']
+    autocomplete_fields = ['candidato', 'vaga']
+    date_hierarchy = 'data_entrevista'

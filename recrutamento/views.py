@@ -9,12 +9,14 @@ from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.response import Response
 
-from .models import AreaInteresse, Candidato, Processo, Vaga
+from .models import AreaInteresse, Candidato, FichaEntrevista, Processo, Vaga
 from .permissions import IsRH
 from .serializers import (
     AreaInteresseSerializer,
     CandidatoListSerializer,
     CandidatoSerializer,
+    FichaEntrevistaListSerializer,
+    FichaEntrevistaSerializer,
     ProcessoSerializer,
     VagaSerializer,
 )
@@ -73,13 +75,33 @@ class CandidatoViewSet(ProtegeExclusaoMixin, viewsets.ModelViewSet):
     ordering_fields = ['nome', 'data_recebimento', 'cidade', 'escolaridade', 'created_at']
 
     def get_queryset(self):
-        qs = Candidato.objects.prefetch_related('areas_interesse', 'processos__vaga')
+        qs = Candidato.objects.prefetch_related('areas_interesse', 'processos__vaga', 'fichas__vaga')
         if self.action == 'list':
-            qs = qs.annotate(total_processos=Count('processos', distinct=True))
+            qs = qs.annotate(
+                total_processos=Count('processos', distinct=True),
+                total_fichas=Count('fichas', distinct=True),
+            )
         return qs
 
     def get_serializer_class(self):
         return CandidatoListSerializer if self.action == 'list' else CandidatoSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Exclui o currículo. Com ``?cascata=1`` leva junto processos e fichas.
+
+        Sem a cascata o ``PROTECT`` do ``Processo`` impede apagar quem já foi
+        entrevistado -- o que é a proteção certa no dia a dia, mas deixava sem
+        saída os registros trazidos da planilha (importações repetidas, nomes
+        duplicados). A cascata é explícita justamente para não ser acidental.
+        """
+        if str(request.query_params.get('cascata', '')).lower() in ('1', 'true', 'sim'):
+            candidato = self.get_object()
+            FichaEntrevista.objects.filter(candidato=candidato).delete()
+            Processo.objects.filter(candidato=candidato).delete()
+            candidato.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'])
     def duplicados(self, request):
@@ -177,7 +199,8 @@ class ProcessoViewSet(ProtegeExclusaoMixin, viewsets.ModelViewSet):
     ordering_fields = ['data_contato', 'data_entrevista', 'data_contratacao', 'created_at']
 
     def get_queryset(self):
-        return Processo.objects.select_related('candidato', 'vaga')
+        # ``fichas`` vem no prefetch para o ``ficha_id`` do serializer não gerar N+1.
+        return Processo.objects.select_related('candidato', 'vaga').prefetch_related('fichas')
 
     @action(detail=False, methods=['get'])
     def responsaveis(self, request):
@@ -185,6 +208,111 @@ class ProcessoViewSet(ProtegeExclusaoMixin, viewsets.ModelViewSet):
             v for v in Processo.objects.exclude(responsavel_contato__exact='')
             .order_by().values_list('responsavel_contato', flat=True).distinct() if v
         ))
+
+
+class FichaEntrevistaViewSet(viewsets.ModelViewSet):
+    """Fichas de entrevista F-018 (versão 7.1 do formulário impresso)."""
+
+    permission_classes = [IsRH]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['candidato', 'processo', 'vaga', 'resultado', 'atende_requisitos',
+                        'avaliador_1', 'setor']
+    search_fields = ['candidato__nome', 'nome', 'cargo_funcao', 'setor', 'avaliador_1',
+                     'parecer_recrutador', 'observacoes', 'vaga__descricao']
+    ordering_fields = ['data_entrevista', 'created_at', 'resultado']
+
+    def get_queryset(self):
+        qs = FichaEntrevista.objects.select_related('candidato', 'vaga', 'processo')
+        inicio = self.request.query_params.get('inicio')
+        fim = self.request.query_params.get('fim')
+        if inicio:
+            qs = qs.filter(data_entrevista__gte=inicio)
+        if fim:
+            qs = qs.filter(data_entrevista__lte=fim)
+        return qs
+
+    def get_serializer_class(self):
+        return FichaEntrevistaListSerializer if self.action == 'list' else FichaEntrevistaSerializer
+
+    @action(detail=False, methods=['get'])
+    def avaliadores(self, request):
+        """Nomes já usados como avaliador -- alimenta o autocomplete da ficha."""
+        nomes = set()
+        for campo in ('avaliador_1', 'avaliador_2', 'avaliador_3'):
+            nomes.update(
+                v for v in FichaEntrevista.objects.exclude(**{f'{campo}__exact': ''})
+                .order_by().values_list(campo, flat=True).distinct() if v
+            )
+        return Response(sorted(nomes))
+
+    @action(detail=False, methods=['get'])
+    def setores(self, request):
+        return Response(sorted(
+            v for v in FichaEntrevista.objects.exclude(setor__exact='')
+            .order_by().values_list('setor', flat=True).distinct() if v
+        ))
+
+    @action(detail=False, methods=['get'])
+    def rascunho(self, request):
+        """
+        Devolve a ficha pré-preenchida com o que já existe no cadastro.
+
+        A tela chama isto ao abrir uma ficha nova (``?candidato=<id>`` e,
+        opcionalmente, ``?processo=<id>``) para o RH não redigitar identificação,
+        escolaridade e experiências que o currículo já tem.
+        """
+        try:
+            candidato = Candidato.objects.get(pk=request.query_params.get('candidato'))
+        except (Candidato.DoesNotExist, ValueError, TypeError):
+            return Response({'detail': 'Informe um candidato válido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        processo = None
+        processo_id = request.query_params.get('processo')
+        if processo_id:
+            processo = Processo.objects.select_related('vaga').filter(
+                pk=processo_id, candidato=candidato,
+            ).first()
+
+        cursos = ' | '.join(filter(None, [
+            ' '.join(filter(None, [candidato.curso_1, candidato.curso_1_local, candidato.curso_1_ano])).strip(),
+            ' '.join(filter(None, [candidato.curso_2, candidato.curso_2_local, candidato.curso_2_ano])).strip(),
+        ]))
+        informatica = ' | '.join(filter(None, [
+            f'Office: {candidato.nivel_office}' if candidato.nivel_office else '',
+            f'Internet: {candidato.nivel_internet}' if candidato.nivel_internet else '',
+        ]))
+
+        return Response({
+            'candidato': candidato.id,
+            'processo': processo.id if processo else None,
+            'vaga': processo.vaga_id if processo else None,
+            'data_entrevista': processo.data_entrevista if processo else date.today(),
+            'cargo_funcao': (processo.vaga.descricao if processo and processo.vaga else '') or candidato.funcao_desejada,
+            'setor': (processo.vaga.area.nome if processo and processo.vaga and processo.vaga.area else ''),
+            'nome': candidato.nome,
+            'data_nascimento': candidato.data_nascimento,
+            'endereco': candidato.endereco,
+            'cidade': candidato.cidade,
+            'telefone': candidato.telefone_principal,
+            'telefone_contato': candidato.telefone_contato,
+            'cnh_categoria': candidato.cnh_categoria,
+            'email': candidato.email,
+            'estado_civil': candidato.estado_civil,
+            'escolaridade': candidato.escolaridade,
+            'instituicao': candidato.instituicao_ensino,
+            'data_conclusao': candidato.data_conclusao,
+            'cursos_complementares': cursos,
+            'nocoes_informatica': informatica,
+            'esta_estudando': candidato.local_estudo if candidato.estuda_atualmente else '',
+            'exp1_empresa': candidato.ultima_empresa,
+            'exp1_atividades': candidato.ultima_empresa_funcao,
+            'exp1_tempo': candidato.ultima_empresa_periodo,
+            'exp2_empresa': candidato.penultima_empresa,
+            'exp2_atividades': candidato.penultima_empresa_funcao,
+            'exp2_tempo': candidato.penultima_empresa_periodo,
+            'conhece_alguem_empresa': candidato.conhece_funcionario,
+            'avaliador_1': processo.avaliador if processo and processo.avaliador else '',
+        })
 
 
 class IndicadoresViewSet(viewsets.ViewSet):
