@@ -38,9 +38,6 @@ WHATSAPP_PHONE_NUMBER_ID = os.environ.get('WHATSAPP_PHONE_NUMBER_ID')
 WHATSAPP_VERIFY_TOKEN = os.environ.get('WHATSAPP_VERIFY_TOKEN')
 WHATSAPP_APP_SECRET = os.environ.get('WHATSAPP_APP_SECRET')
 WHATSAPP_API_VERSION = os.environ.get('WHATSAPP_API_VERSION', 'v21.0')
-# Id da WhatsApp Business Account (a WABA, não o número). Só é usado para listar
-# os templates aprovados; sem ele a tela mostra a lista vazia em vez de quebrar.
-WHATSAPP_BUSINESS_ACCOUNT_ID = os.environ.get('WHATSAPP_BUSINESS_ACCOUNT_ID')
 # ─────────────────────────────────────────────────────────────────────────
 
 #VARIAVEIS DE AMBIENTE DA OPENAI
@@ -208,7 +205,6 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
-
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.0/topics/i18n/
