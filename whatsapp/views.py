@@ -16,12 +16,13 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import graph_api
 from .models import Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
 from .serializers import (
     FilaSerializer, ConversaListSerializer, ConversaDetailSerializer,
     MensagemSerializer, WhatsAppNotificacaoSerializer,
 )
-from .tasks import processar_webhook_whatsapp, enviar_mensagem_whatsapp
+from .tasks import processar_webhook_whatsapp, enviar_mensagem_whatsapp, enviar_template_whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,56 @@ class ConversaViewSet(viewsets.ModelViewSet):
         qs = self.get_queryset().filter(responsavel=request.user)
         return Response(ConversaListSerializer(qs, many=True).data)
 
+    @action(detail=False, methods=['get'])
+    def templates(self, request):
+        """Templates aprovados na conta, para a tela oferecer só o que existe."""
+        try:
+            todos = graph_api.listar_templates()
+        except Exception:
+            logger.exception('Falha ao listar templates do WhatsApp')
+            return Response(
+                {'detail': 'Não foi possível consultar os templates na Meta.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        # Só APPROVED: oferecer um template em análise ou reprovado só gera erro
+        # na hora do envio.
+        return Response([t for t in todos if t.get('status') == 'APPROVED'])
+
+    @action(detail=True, methods=['post'], url_path='enviar-template')
+    def enviar_template(self, request, pk=None):
+        """
+        Envia um template aprovado para reabrir o contato.
+
+        Diferente do envio comum, isto é permitido FORA da janela de 24h — é
+        justamente para isso que o template existe. Por isso não passa pela
+        checagem de janela do MensagemViewSet.
+        """
+        conversa = self.get_object()
+        if not conversa.fila or not conversa.fila.membros.filter(pk=request.user.pk).exists():
+            raise PermissionDenied('Você não pertence à fila desta conversa.')
+
+        nome_template = (request.data.get('template') or '').strip()
+        if not nome_template:
+            return Response({'detail': 'Informe o template.'}, status=status.HTTP_400_BAD_REQUEST)
+        idioma = (request.data.get('idioma') or 'pt_BR').strip()
+        componentes = request.data.get('componentes') or None
+
+        # O texto guardado é só o rastro para o histórico: o corpo real do
+        # template mora na Meta, e pode ser alterado lá sem passar por aqui.
+        mensagem = Mensagem.objects.create(
+            conversa=conversa, direcao='SAIDA', tipo='TEXTO', autor=request.user,
+            texto=request.data.get('previa') or f'[template: {nome_template}]',
+            template_nome=nome_template, status_entrega='PENDENTE',
+            payload_bruto={'template': nome_template, 'idioma': idioma, 'componentes': componentes},
+        )
+        conversa.ultima_mensagem_em = timezone.now()
+        # `ultima_mensagem_cliente_em` NÃO é tocado de propósito: template não
+        # reabre a janela de 24h — só uma resposta do cliente reabre.
+        conversa.save(update_fields=['ultima_mensagem_em'])
+
+        enviar_template_whatsapp.delay(mensagem.id, nome_template, idioma, componentes)
+        return Response(MensagemSerializer(mensagem).data, status=status.HTTP_201_CREATED)
+
 
 class JanelaExpirada(APIException):
     status_code = status.HTTP_409_CONFLICT
@@ -173,12 +224,18 @@ class MensagemViewSet(viewsets.ModelViewSet):
             raise JanelaExpirada()
 
         anexo = serializer.validated_data.pop('anexo', None)
+        mime = getattr(anexo, 'content_type', '') if anexo else ''
+        nome = getattr(anexo, 'name', '') if anexo else ''
+
         mensagem = serializer.save(
             conversa=conversa, direcao='SAIDA', autor=self.request.user,
-            tipo='TEXTO' if not anexo else 'DOCUMENTO', status_entrega='PENDENTE',
+            # O tipo sai do arquivo: marcar tudo como DOCUMENTO fazia foto virar
+            # anexo genérico no histórico e na tela do cliente.
+            tipo=graph_api.tipo_interno_da_midia(mime, nome) if anexo else 'TEXTO',
+            status_entrega='PENDENTE',
         )
         if anexo:
-            MensagemAnexo.objects.create(mensagem=mensagem, arquivo=anexo)
+            MensagemAnexo.objects.create(mensagem=mensagem, arquivo=anexo, mime_type=mime)
         conversa.ultima_mensagem_em = timezone.now()
         conversa.save(update_fields=['ultima_mensagem_em'])
         enviar_mensagem_whatsapp.delay(mensagem.id)

@@ -98,6 +98,10 @@ class Mensagem(models.Model):
     wa_message_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     status_entrega = models.CharField(max_length=10, choices=STATUS_ENTREGA_CHOICES, default='PENDENTE')
     erro_detalhe = models.TextField(blank=True)
+    template_nome = models.CharField(
+        max_length=120, blank=True,
+        help_text='Preenchido quando a saída foi por template aprovado (fora da janela de 24h).',
+    )
     payload_bruto = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 

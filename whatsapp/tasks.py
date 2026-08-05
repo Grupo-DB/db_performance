@@ -123,17 +123,93 @@ def baixar_midia_whatsapp(mensagem_id: int, wa_media_id: str):
         logger.exception('Falha ao baixar mídia do WhatsApp (media_id=%s)', wa_media_id)
 
 
+def _marcar_enviada(mensagem: Mensagem, resposta: dict):
+    mensagem.wa_message_id = resposta.get('messages', [{}])[0].get('id')
+    mensagem.status_entrega = 'ENVIADA'
+    mensagem.save(update_fields=['wa_message_id', 'status_entrega'])
+
+
+def _marcar_falha(mensagem: Mensagem, exc: Exception, contexto: str):
+    logger.exception('%s (mensagem_id=%s)', contexto, mensagem.id)
+    mensagem.status_entrega = 'FALHOU'
+    # A mensagem da Meta vem no corpo da resposta, não no texto da exceção do
+    # requests ("400 Client Error"). Sem ela o atendente não sabe o que corrigir.
+    detalhe = str(exc)
+    resposta = getattr(exc, 'response', None)
+    if resposta is not None:
+        try:
+            erro = resposta.json().get('error', {})
+            detalhe = f"{erro.get('message', detalhe)} (code {erro.get('code')})"
+        except ValueError:
+            detalhe = f'{detalhe} — {resposta.text[:300]}'
+    mensagem.erro_detalhe = detalhe
+    mensagem.save(update_fields=['status_entrega', 'erro_detalhe'])
+
+
 @shared_task
 def enviar_mensagem_whatsapp(mensagem_id: int):
+    """
+    Entrega ao WhatsApp a mensagem que o atendente escreveu.
+
+    Com anexo o caminho é outro: sobe o arquivo, pega o `media_id` e manda a
+    mensagem referenciando esse id. Antes esta task só chamava
+    `enviar_mensagem_texto`, então o anexo era gravado no servidor e nunca saía —
+    o atendente via o arquivo na tela e o cliente não recebia nada.
+    """
+    mensagem = Mensagem.objects.select_related('conversa').prefetch_related('anexos').get(id=mensagem_id)
+    telefone = mensagem.conversa.contato_telefone
+    anexo = mensagem.anexos.first()
+
+    if anexo is None:
+        try:
+            _marcar_enviada(mensagem, graph_api.enviar_mensagem_texto(telefone, mensagem.texto))
+        except Exception as exc:
+            _marcar_falha(mensagem, exc, 'Falha ao enviar texto do WhatsApp')
+        return
+
+    try:
+        nome = anexo.nome_original or anexo.arquivo.name.rsplit('/', 1)[-1]
+        with anexo.arquivo.open('rb') as arquivo:
+            conteudo = arquivo.read()
+
+        categoria = graph_api.categoria_da_midia(anexo.mime_type, nome)
+        media_id = graph_api.upload_midia(conteudo, nome, anexo.mime_type)
+        anexo.wa_media_id = media_id
+        anexo.save(update_fields=['wa_media_id'])
+
+        resposta = graph_api.enviar_midia(
+            telefone, media_id, categoria, legenda=mensagem.texto, nome_arquivo=nome,
+        )
+        _marcar_enviada(mensagem, resposta)
+    except Exception as exc:
+        _marcar_falha(mensagem, exc, 'Falha ao enviar mídia do WhatsApp')
+        return
+
+    # Áudio não aceita legenda na Cloud API. Em vez de descartar o que o atendente
+    # escreveu, o texto sai como mensagem própria, logo depois do áudio.
+    if mensagem.texto and categoria not in graph_api.CATEGORIAS_COM_LEGENDA:
+        try:
+            graph_api.enviar_mensagem_texto(telefone, mensagem.texto)
+        except Exception:
+            logger.exception(
+                'Mídia enviada, mas a legenda avulsa falhou (mensagem_id=%s)', mensagem_id,
+            )
+
+
+@shared_task
+def enviar_template_whatsapp(mensagem_id: int, nome_template: str, idioma: str, componentes: list | None):
+    """
+    Envia um template aprovado — o único caminho fora da janela de 24h.
+
+    Fica em task separada porque o payload é outro e porque a falha aqui é
+    diferente: template não aprovado, nome errado ou idioma inexistente devolvem
+    erro da Meta que o atendente precisa ler para corrigir.
+    """
     mensagem = Mensagem.objects.select_related('conversa').get(id=mensagem_id)
     try:
-        resposta = graph_api.enviar_mensagem_texto(mensagem.conversa.contato_telefone, mensagem.texto)
-        wa_id = resposta.get('messages', [{}])[0].get('id')
-        mensagem.wa_message_id = wa_id
-        mensagem.status_entrega = 'ENVIADA'
-        mensagem.save(update_fields=['wa_message_id', 'status_entrega'])
+        resposta = graph_api.enviar_template(
+            mensagem.conversa.contato_telefone, nome_template, idioma, componentes,
+        )
+        _marcar_enviada(mensagem, resposta)
     except Exception as exc:
-        logger.exception('Falha ao enviar mensagem do WhatsApp (mensagem_id=%s)', mensagem_id)
-        mensagem.status_entrega = 'FALHOU'
-        mensagem.erro_detalhe = str(exc)
-        mensagem.save(update_fields=['status_entrega', 'erro_detalhe'])
+        _marcar_falha(mensagem, exc, 'Falha ao enviar template do WhatsApp')

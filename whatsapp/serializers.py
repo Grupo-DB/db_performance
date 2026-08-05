@@ -42,10 +42,11 @@ class MensagemSerializer(serializers.ModelSerializer):
         model = Mensagem
         fields = [
             'id', 'conversa', 'direcao', 'tipo', 'texto', 'autor', 'anexos', 'anexo',
-            'wa_message_id', 'status_entrega', 'erro_detalhe', 'created_at',
+            'template_nome', 'wa_message_id', 'status_entrega', 'erro_detalhe', 'created_at',
         ]
         read_only_fields = [
-            'conversa', 'direcao', 'tipo', 'wa_message_id', 'status_entrega', 'erro_detalhe', 'created_at', 'autor',
+            'conversa', 'direcao', 'tipo', 'template_nome', 'wa_message_id',
+            'status_entrega', 'erro_detalhe', 'created_at', 'autor',
         ]
 
 
@@ -53,12 +54,17 @@ class ConversaListSerializer(serializers.ModelSerializer):
     fila = FilaSerializer(read_only=True)
     responsavel = UserMinSerializer(read_only=True)
     ultima_mensagem_texto = serializers.SerializerMethodField()
+    # A janela vem já na listagem porque é ela que decide se a tela mostra o
+    # campo de resposta livre ou o botão de template — sem isso o atendente só
+    # descobre que a janela fechou depois de digitar e tomar 409.
+    dentro_da_janela_24h = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Conversa
         fields = [
             'id', 'contato_telefone', 'contato_nome', 'fila', 'responsavel',
-            'status', 'estado_menu', 'ultima_mensagem_em', 'ultima_mensagem_texto', 'created_at',
+            'status', 'estado_menu', 'ultima_mensagem_em', 'ultima_mensagem_texto',
+            'ultima_mensagem_cliente_em', 'dentro_da_janela_24h', 'created_at',
         ]
 
     def get_ultima_mensagem_texto(self, obj):
