@@ -47,22 +47,16 @@ Sem dependência externa (CSS embutido): o CSP e a rede do revisor não interfer
         table { width: 100%; border-collapse: collapse; margin: 0.8rem 0; font-size: 0.94rem; }
         th, td { border: 1px solid var(--borda); padding: 0.55rem 0.7rem; text-align: left; vertical-align: top; }
         th { background: var(--fundo); font-weight: 600; }
-        /* Campos que a empresa precisa preencher antes de publicar: ficam visíveis
-           de propósito, para não passarem batidos. */
+        /* Sem uso no texto atual — os dois documentos estão preenchidos. Mantido
+           de propósito: quem acrescentar uma cláusula com dado pendente marca com
+           <span class="preencher">, e o campo salta aos olhos em vez de ir ao ar
+           disfarçado de texto normal (foi o que aconteceu na primeira publicação). */
         .preencher {
             background: #fef3c7;
             border-bottom: 1px dashed #b45309;
             padding: 0 0.2rem;
             font-weight: 600;
             white-space: nowrap;
-        }
-        .aviso {
-            background: #fffbeb;
-            border: 1px solid #fcd34d;
-            border-radius: 8px;
-            padding: 0.9rem 1.1rem;
-            margin-bottom: 1.5rem;
-            font-size: 0.92rem;
         }
         footer { margin-top: 2rem; font-size: 0.85rem; color: var(--texto-suave); text-align: center; }
         footer a { color: var(--acento); }

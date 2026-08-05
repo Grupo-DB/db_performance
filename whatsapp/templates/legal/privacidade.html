@@ -5,18 +5,10 @@
 
 {% block conteudo %}
 
-<div class="aviso">
-    <strong>Antes de publicar:</strong> os campos destacados em amarelo precisam ser
-    preenchidos com os dados da empresa e revisados pelo jurídico. Este texto descreve o
-    funcionamento real do canal de atendimento por WhatsApp, mas não substitui a análise
-    de um advogado.
-</div>
-
 <h2>1. Quem trata os seus dados</h2>
 <p>
-    Esta política descreve como a <span class="preencher">[RAZÃO SOCIAL]</span>, inscrita no
-    CNPJ sob o nº <span class="preencher">[CNPJ]</span>, com sede em
-    <span class="preencher">[ENDEREÇO COMPLETO]</span> (doravante "{{ empresa_nome }}", "nós"),
+    Esta política descreve como a <strong>{{ razao_social }}</strong>, inscrita no
+    CNPJ sob o nº {{ cnpj }}, com sede em {{ endereco }} (doravante "{{ empresa_nome }}", "nós"),
     trata dados pessoais no seu <strong>canal de atendimento por WhatsApp</strong>.
 </p>
 <p>
@@ -139,7 +131,7 @@
 <h2>7. Por quanto tempo guardamos</h2>
 <p>
     Conversas, mensagens e anexos são mantidos por
-    <span class="preencher">[PRAZO — ex.: 24 meses]</span> a contar do encerramento do atendimento,
+    <strong>{{ retencao }}</strong> a contar do encerramento do atendimento,
     ou por prazo maior quando necessário para cumprir obrigação legal ou para defesa em processo.
     Depois disso, são eliminados ou anonimizados.
 </p>
@@ -168,7 +160,7 @@
 </ul>
 <p>
     Para exercer qualquer um desses direitos, escreva para
-    <span class="preencher">[E-MAIL DE CONTATO — ex.: privacidade@grupodb.com.br]</span>.
+    <a href="mailto:{{ dpo_email }}">{{ dpo_email }}</a>.
     Responderemos no prazo legal. Podemos pedir dados para confirmar a sua identidade antes de atender
     ao pedido — é uma proteção para você.
 </p>
@@ -195,10 +187,10 @@
 <h2>13. Contato</h2>
 <p>
     Dúvidas sobre esta política ou sobre o tratamento dos seus dados:<br>
-    <strong>Encarregado pelo tratamento de dados (DPO):</strong> <span class="preencher">[NOME DO ENCARREGADO]</span><br>
-    <strong>E-mail:</strong> <span class="preencher">[E-MAIL DE CONTATO]</span><br>
-    <strong>Telefone:</strong> <span class="preencher">[TELEFONE]</span><br>
-    <strong>Endereço:</strong> <span class="preencher">[ENDEREÇO COMPLETO]</span>
+    <strong>Encarregado pelo tratamento de dados (DPO):</strong> {{ dpo_nome }}<br>
+    <strong>E-mail:</strong> <a href="mailto:{{ dpo_email }}">{{ dpo_email }}</a><br>
+    <strong>Telefone:</strong> {{ dpo_telefone }}<br>
+    <strong>Endereço:</strong> {{ endereco }}
 </p>
 
 {% endblock %}

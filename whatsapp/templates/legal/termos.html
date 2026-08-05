@@ -5,16 +5,10 @@
 
 {% block conteudo %}
 
-<div class="aviso">
-    <strong>Antes de publicar:</strong> os campos destacados em amarelo precisam ser
-    preenchidos com os dados da empresa e revisados pelo jurídico. Este texto descreve o
-    funcionamento real do canal, mas não substitui a análise de um advogado.
-</div>
-
 <h2>1. Sobre estes termos</h2>
 <p>
     Estes Termos de Uso regem o atendimento oferecido pela
-    <span class="preencher">[RAZÃO SOCIAL]</span>, CNPJ <span class="preencher">[CNPJ]</span>
+    <strong>{{ razao_social }}</strong>, CNPJ {{ cnpj }}
     (doravante "{{ empresa_nome }}", "nós"), por meio do <strong>WhatsApp</strong>.
 </p>
 <p>
@@ -44,7 +38,7 @@
 
 <h2>4. Horário e prazo de resposta</h2>
 <p>
-    O atendimento humano funciona em <span class="preencher">[HORÁRIO — ex.: seg. a sex., 8h às 18h]</span>.
+    O atendimento humano funciona de <strong>{{ horario_atendimento }}</strong>.
     Mensagens recebidas fora desse período são respondidas no próximo dia útil. Não garantimos prazo
     específico de resposta, salvo compromisso assumido de forma expressa.
 </p>
@@ -127,16 +121,16 @@
 <h2>14. Lei aplicável e foro</h2>
 <p>
     Estes termos são regidos pelas leis da República Federativa do Brasil. Fica eleito o foro da
-    comarca de <span class="preencher">[CIDADE/UF]</span> para resolver controvérsias, ressalvado, no
+    comarca de {{ foro }} para resolver controvérsias, ressalvado, no
     caso de relação de consumo, o direito do consumidor de demandar no foro do seu domicílio.
 </p>
 
 <h2>15. Contato</h2>
 <p>
-    <strong>{{ empresa_nome }}</strong><br>
-    <strong>E-mail:</strong> <span class="preencher">[E-MAIL DE CONTATO]</span><br>
-    <strong>Telefone:</strong> <span class="preencher">[TELEFONE]</span><br>
-    <strong>Endereço:</strong> <span class="preencher">[ENDEREÇO COMPLETO]</span>
+    <strong>{{ razao_social }}</strong> — CNPJ {{ cnpj }}<br>
+    <strong>E-mail:</strong> <a href="mailto:{{ dpo_email }}">{{ dpo_email }}</a><br>
+    <strong>Telefone:</strong> {{ dpo_telefone }}<br>
+    <strong>Endereço:</strong> {{ endereco }}
 </p>
 
 {% endblock %}
