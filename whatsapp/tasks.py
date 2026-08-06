@@ -4,7 +4,7 @@ from celery import shared_task
 from django.core.files.base import ContentFile
 from django.utils import timezone
 
-from . import graph_api, services
+from . import audio, graph_api, services
 from .models import Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
 
 logger = logging.getLogger(__name__)
@@ -179,7 +179,14 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
             conteudo = arquivo.read()
 
         categoria = graph_api.categoria_da_midia(anexo.mime_type, nome)
-        media_id = graph_api.upload_midia(conteudo, nome, anexo.mime_type)
+        mime_envio = anexo.mime_type
+        if categoria == graph_api.CATEGORIA_AUDIO:
+            # O arquivo guardado continua sendo o original — é o que a central
+            # toca para o atendente, e o navegador dele lê webm sem problema.
+            # A conversão vale só para o que sobe à Meta.
+            conteudo, mime_envio, nome = audio.preparar_para_whatsapp(conteudo, anexo.mime_type, nome)
+
+        media_id = graph_api.upload_midia(conteudo, nome, mime_envio)
         anexo.wa_media_id = media_id
         anexo.save(update_fields=['wa_media_id'])
 
