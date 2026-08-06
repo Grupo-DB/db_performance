@@ -155,14 +155,20 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
     mensagem referenciando esse id. Antes esta task só chamava
     `enviar_mensagem_texto`, então o anexo era gravado no servidor e nunca saía —
     o atendente via o arquivo na tela e o cliente não recebia nada.
+
+    O texto que vai para o cliente não é o mesmo que está gravado: leva o nome do
+    atendente na frente (ver `services.assinar_para_cliente`). O cálculo é feito
+    uma vez só, antes do envio, porque ele depende de qual foi a última saída da
+    conversa — e esta mensagem passa a ser a última assim que sai.
     """
-    mensagem = Mensagem.objects.select_related('conversa').prefetch_related('anexos').get(id=mensagem_id)
+    mensagem = Mensagem.objects.select_related('conversa', 'autor').prefetch_related('anexos').get(id=mensagem_id)
     telefone = mensagem.conversa.contato_telefone
     anexo = mensagem.anexos.first()
+    texto_para_cliente = services.assinar_para_cliente(mensagem.texto, mensagem)
 
     if anexo is None:
         try:
-            _marcar_enviada(mensagem, graph_api.enviar_mensagem_texto(telefone, mensagem.texto))
+            _marcar_enviada(mensagem, graph_api.enviar_mensagem_texto(telefone, texto_para_cliente))
         except Exception as exc:
             _marcar_falha(mensagem, exc, 'Falha ao enviar texto do WhatsApp')
         return
@@ -178,7 +184,7 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
         anexo.save(update_fields=['wa_media_id'])
 
         resposta = graph_api.enviar_midia(
-            telefone, media_id, categoria, legenda=mensagem.texto, nome_arquivo=nome,
+            telefone, media_id, categoria, legenda=texto_para_cliente, nome_arquivo=nome,
         )
         _marcar_enviada(mensagem, resposta)
     except Exception as exc:
@@ -187,9 +193,14 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
 
     # Áudio não aceita legenda na Cloud API. Em vez de descartar o que o atendente
     # escreveu, o texto sai como mensagem própria, logo depois do áudio.
-    if mensagem.texto and categoria not in graph_api.CATEGORIAS_COM_LEGENDA:
+    #
+    # A condição olha o texto JÁ assinado: num áudio sem legenda que seria a
+    # primeira fala do atendente, o que sobra é só o nome — e ele precisa sair,
+    # senão o cliente nunca fica sabendo quem mandou o áudio e a mensagem seguinte
+    # já não assina mais (esta aqui passa a ser a última saída da conversa).
+    if texto_para_cliente and categoria not in graph_api.CATEGORIAS_COM_LEGENDA:
         try:
-            graph_api.enviar_mensagem_texto(telefone, mensagem.texto)
+            graph_api.enviar_mensagem_texto(telefone, texto_para_cliente)
         except Exception:
             logger.exception(
                 'Mídia enviada, mas a legenda avulsa falhou (mensagem_id=%s)', mensagem_id,

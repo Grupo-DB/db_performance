@@ -1,5 +1,6 @@
 """Regras de negócio desacopladas da ingestão do webhook (fácil de trocar por NLP no futuro)."""
 import logging
+from datetime import timedelta
 
 from django.utils import timezone
 
@@ -11,9 +12,74 @@ logger = logging.getLogger(__name__)
 # Quantas vezes o menu é mandado antes de jogar o cliente na fila padrão.
 TENTATIVAS_MAXIMAS = 3
 
+# Depois desse tempo sem o atendente falar, a próxima mensagem volta a ser
+# assinada. Sem isso, uma conversa retomada no dia seguinte continuaria sem nome
+# só porque o último a falar foi a mesma pessoa.
+INTERVALO_REASSINATURA = timedelta(hours=4)
+
 
 def _filas_ativas():
     return list(Fila.objects.filter(ativa=True).order_by('ordem', 'nome'))
+
+
+# ── Assinatura do atendente ──────────────────────────────────────────────────
+# A Cloud API entrega tudo pelo número da empresa: o cliente vê "Grupo DB" e não
+# tem como saber com quem está falando. O nome só chega se for junto do conteúdo.
+
+def nome_do_atendente(usuario) -> str:
+    """Primeiro nome do atendente; cai no username quando o cadastro está vazio."""
+    if usuario is None:
+        return ''
+    return (usuario.first_name or '').strip() or usuario.username
+
+
+def _deve_assinar(mensagem) -> bool:
+    """
+    Assina só quando o nome acrescenta informação: na primeira fala do atendente,
+    quando outra pessoa assume, ou quando a conversa ficou parada.
+
+    Repetir o nome em toda linha polui o histórico do cliente — numa sequência de
+    cinco mensagens seguidas ele lê o mesmo "*Jian:*" cinco vezes.
+    """
+    if mensagem.autor_id is None:
+        return False  # bot: menu de setores, confirmação de roteamento
+
+    anterior = (
+        Mensagem.objects
+        .filter(
+            conversa_id=mensagem.conversa_id,
+            direcao='SAIDA',
+            autor__isnull=False,
+            created_at__lt=mensagem.created_at,
+        )
+        # Uma mensagem que não saiu não apresentou ninguém: contá-la faria a
+        # próxima tentativa ir sem nome.
+        .exclude(status_entrega='FALHOU')
+        .exclude(pk=mensagem.pk)
+        .order_by('-created_at')
+        .first()
+    )
+    if anterior is None or anterior.autor_id != mensagem.autor_id:
+        return True
+    return (mensagem.created_at - anterior.created_at) > INTERVALO_REASSINATURA
+
+
+def assinar_para_cliente(texto: str, mensagem) -> str:
+    """
+    Devolve o texto como o cliente deve recebê-lo, com o nome do atendente na
+    frente quando for o caso.
+
+    Aplicado só na saída para a Meta, de propósito: gravar o prefixo em
+    `Mensagem.texto` duplicaria o nome na central, que já mostra o autor embaixo
+    da bolha, e sujaria o resumo que vira tarefa no Kanban.
+    """
+    if not _deve_assinar(mensagem):
+        return texto
+    nome = nome_do_atendente(mensagem.autor)
+    if not nome:
+        return texto
+    # Sem texto é legenda de mídia: aí o nome vai sozinho, sem os dois-pontos.
+    return f'*{nome}:*\n{texto}' if (texto or '').strip() else f'*{nome}*'
 
 
 def montar_texto_menu(filas=None) -> str:
