@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from .models import Fila, Mensagem, WhatsAppNotificacao
+from .models import ConfiguracaoAtendimento, Fila, Mensagem, WhatsAppNotificacao
 from . import graph_api
 
 logger = logging.getLogger(__name__)
@@ -84,10 +84,23 @@ def assinar_para_cliente(texto: str, mensagem) -> str:
 
 def montar_texto_menu(filas=None) -> str:
     filas = filas if filas is not None else _filas_ativas()
-    linhas = ["Olá! Para qual setor você deseja falar? Responda com o número:"]
+    linhas = [ConfiguracaoAtendimento.carregar().texto_menu]
     for i, fila in enumerate(filas, start=1):
         linhas.append(f"{i} - {fila.nome}")
     return "\n".join(linhas)
+
+
+def montar_texto_roteamento(fila) -> str:
+    """
+    Confirmação de "você caiu no setor X", com o nome do setor no lugar de {setor}.
+
+    Substituição literal em vez de `str.format`: o texto é digitado por gente no
+    admin, e uma chave solta ou um `{Setor}` com maiúscula derrubariam o envio com
+    KeyError — no meio de uma task do Celery, onde ninguém vê o erro. Sem o
+    marcador o texto simplesmente sai como foi escrito.
+    """
+    modelo = ConfiguracaoAtendimento.carregar().texto_roteamento
+    return modelo.replace('{setor}', fila.nome)
 
 
 def responder_automatico(conversa, texto: str) -> None:
@@ -201,10 +214,7 @@ def resolver_fila_por_texto(texto: str, conversa) -> None:
     conversa.estado_menu = 'EM_ATENDIMENTO'
     conversa.save(update_fields=['fila', 'estado_menu', 'tentativas_menu'])
 
-    responder_automatico(
-        conversa,
-        f"Você foi direcionado ao setor {fila_encontrada.nome}. Em breve alguém vai te atender."
-    )
+    responder_automatico(conversa, montar_texto_roteamento(fila_encontrada))
     _notificar_membros(
         conversa, fila_encontrada, 'CONVERSA_ATRIBUIDA',
         f"Nova conversa de {conversa.contato_nome or conversa.contato_telefone}"

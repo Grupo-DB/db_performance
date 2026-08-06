@@ -1,6 +1,48 @@
 from django.contrib import admin
 
-from .models import Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
+from .models import (
+    ConfiguracaoAtendimento, Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao,
+)
+
+
+@admin.register(ConfiguracaoAtendimento)
+class ConfiguracaoAtendimentoAdmin(admin.ModelAdmin):
+    """
+    Tela única dos textos automáticos — sem lista, sem "adicionar", sem "excluir".
+
+    O `changelist` redireciona direto para o formulário do registro 1: uma lista
+    com uma linha só não ajuda ninguém, e a entrada do menu passa a abrir o que a
+    pessoa veio editar.
+    """
+    readonly_fields = ('atualizado_em', 'atualizado_por')
+    fieldsets = (
+        ('Menu de setores', {
+            'fields': ('texto_menu',),
+            'description': 'Os setores saem numerados abaixo desta linha, na ordem definida em Filas.',
+        }),
+        ('Confirmação de setor', {
+            'fields': ('texto_roteamento',),
+            'description': 'Escreva <code>{setor}</code> onde o nome do setor deve entrar.',
+        }),
+        ('Última alteração', {'fields': ('atualizado_em', 'atualizado_por')}),
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        from django.shortcuts import redirect
+        from django.urls import reverse
+
+        config = ConfiguracaoAtendimento.carregar()
+        return redirect(reverse('admin:whatsapp_configuracaoatendimento_change', args=[config.pk]))
+
+    def save_model(self, request, obj, form, change):
+        obj.atualizado_por = request.user
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(Fila)

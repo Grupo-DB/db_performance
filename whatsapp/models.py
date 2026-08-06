@@ -137,6 +137,56 @@ class MensagemAnexo(models.Model):
         return self.nome_original or f"Anexo {self.pk}"
 
 
+class ConfiguracaoAtendimento(models.Model):
+    """
+    Textos que o robô manda sozinho, editáveis sem deploy.
+
+    Existe porque eram literais dentro de `services.py`: trocar uma vírgula da
+    saudação exigia subir código e reiniciar o worker do Celery. É um registro
+    único (singleton) — `carregar()` é o único jeito previsto de obtê-lo, e o
+    admin não deixa criar um segundo nem apagar o que existe.
+    """
+
+    texto_menu = models.TextField(
+        default='Olá! Para qual setor você deseja falar? Responda com o número:',
+        help_text='Primeira linha do menu. Os setores são listados numerados logo abaixo, '
+                  'a partir das Filas ativas.',
+    )
+    texto_roteamento = models.TextField(
+        default='Você foi direcionado ao setor {setor}. Em breve alguém vai te atender.',
+        help_text='Confirmação enviada quando o cliente escolhe o setor. '
+                  'Use {setor} onde o nome do setor deve aparecer.',
+    )
+    atualizado_em = models.DateTimeField(auto_now=True)
+    atualizado_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='configuracoes_whatsapp_editadas',
+    )
+
+    class Meta:
+        verbose_name = 'Configuração do atendimento'
+        verbose_name_plural = 'Configuração do atendimento'
+
+    def __str__(self):
+        return 'Textos automáticos do atendimento'
+
+    def save(self, *args, **kwargs):
+        # Trava o singleton no banco, e não só na tela: qualquer caminho que
+        # tente criar um segundo registro sobrescreve o primeiro.
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        # Apagar deixaria o atendimento sem texto nenhum até alguém recriar.
+        raise ValueError('A configuração do atendimento não pode ser excluída.')
+
+    @classmethod
+    def carregar(cls):
+        """Devolve a configuração, criando-a com os textos padrão na primeira vez."""
+        config, _ = cls.objects.get_or_create(pk=1)
+        return config
+
+
 class WhatsAppNotificacao(models.Model):
     TIPO_CHOICES = [
         ('NOVA_MENSAGEM', 'Nova Mensagem'),
