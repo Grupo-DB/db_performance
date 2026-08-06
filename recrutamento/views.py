@@ -7,6 +7,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from .models import AreaInteresse, Candidato, FichaEntrevista, Processo, Vaga
@@ -102,6 +103,43 @@ class CandidatoViewSet(ProtegeExclusaoMixin, viewsets.ModelViewSet):
             candidato.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
         return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post', 'delete'], url_path='anexo',
+            parser_classes=[MultiPartParser, FormParser])
+    def anexo(self, request, pk=None):
+        """
+        Anexa (POST, multipart, campo ``arquivo``) ou remove (DELETE) o arquivo
+        do currículo.
+
+        Endpoint separado do PUT do cadastro porque a tela salva o candidato em
+        JSON: mandar arquivo no mesmo payload exigiria multipart em todo o
+        formulário, e trocar o currículo não deveria depender de reenviar os 60
+        campos do cadastro.
+        """
+        candidato = self.get_object()
+
+        if request.method == 'DELETE':
+            if candidato.anexo:
+                # delete(save=True) já grava o campo vazio; apaga o arquivo do disco.
+                candidato.anexo.delete(save=True)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        arquivo = request.FILES.get('arquivo') or request.FILES.get('anexo')
+        if not arquivo:
+            return Response({'detail': 'Envie o arquivo no campo "arquivo".'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if arquivo.size > 20 * 1024 * 1024:
+            return Response({'detail': 'Arquivo maior que 20 MB.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Substituir sem apagar o anterior deixaria órfãos acumulando em
+        # media/recrutamento/curriculos/ a cada troca.
+        if candidato.anexo:
+            candidato.anexo.delete(save=False)
+        candidato.anexo = arquivo
+        candidato.save(update_fields=['anexo', 'updated_at'])
+        serializer = CandidatoSerializer(candidato, context=self.get_serializer_context())
+        return Response(serializer.data)
 
     @action(detail=False, methods=['get'])
     def duplicados(self, request):

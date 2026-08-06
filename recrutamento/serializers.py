@@ -11,10 +11,33 @@ class AreaInteresseSerializer(serializers.ModelSerializer):
         fields = ['id', 'nome', 'ativo', 'ordem', 'total_candidatos']
 
 
-class CandidatoListSerializer(serializers.ModelSerializer):
+class AnexoCurriculoMixin:
+    """
+    Expõe o arquivo do currículo como URL + nome legível.
+
+    Fica fora do campo `anexo` de propósito: `anexo` só aceita upload
+    (multipart), e a tela salva o cadastro em JSON — se o valor lido fosse o
+    mesmo campo, o PUT devolveria a URL como se fosse arquivo e o DRF recusaria.
+    """
+
+    def get_anexo_url(self, obj):
+        if not obj.anexo:
+            return None
+        pedido = self.context.get('request')
+        # URL absoluta quando há request: o front roda em outra origem no
+        # desenvolvimento e um caminho relativo apontaria para o lugar errado.
+        return pedido.build_absolute_uri(obj.anexo.url) if pedido else obj.anexo.url
+
+    def get_anexo_nome(self, obj):
+        return obj.anexo.name.rsplit('/', 1)[-1] if obj.anexo else None
+
+
+class CandidatoListSerializer(AnexoCurriculoMixin, serializers.ModelSerializer):
     """Versão enxuta para a listagem do banco de talentos (2.300+ registros)."""
 
     idade = serializers.IntegerField(read_only=True)
+    anexo_url = serializers.SerializerMethodField()
+    anexo_nome = serializers.SerializerMethodField()
     areas_interesse_nomes = serializers.SerializerMethodField()
     total_processos = serializers.IntegerField(read_only=True)
     total_fichas = serializers.IntegerField(read_only=True)
@@ -27,7 +50,7 @@ class CandidatoListSerializer(serializers.ModelSerializer):
             'id', 'id_legado', 'nome', 'cidade', 'telefone_principal', 'telefone_contato',
             'sexo', 'ano_nascimento', 'data_nascimento', 'idade', 'escolaridade',
             'funcao_desejada', 'pcd', 'ja_trabalhou_db', 'data_recebimento',
-            'pasta_arquivo', 'observacoes', 'ativo',
+            'pasta_arquivo', 'anexo_url', 'anexo_nome', 'observacoes', 'ativo',
             'areas_interesse', 'areas_interesse_nomes', 'total_processos',
             'total_fichas', 'ultimo_parecer', 'contratado_alguma_vez',
         ]
@@ -53,18 +76,22 @@ class CandidatoListSerializer(serializers.ModelSerializer):
         return any(p.contratado for p in obj.processos.all())
 
 
-class CandidatoSerializer(serializers.ModelSerializer):
+class CandidatoSerializer(AnexoCurriculoMixin, serializers.ModelSerializer):
     """Currículo completo -- usado no detalhe, no formulário e no PDF."""
 
     idade = serializers.IntegerField(read_only=True)
     areas_interesse_nomes = serializers.SerializerMethodField()
     processos_resumo = serializers.SerializerMethodField()
     fichas_resumo = serializers.SerializerMethodField()
+    anexo_url = serializers.SerializerMethodField()
+    anexo_nome = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidato
         fields = '__all__'
-        read_only_fields = ['created_at', 'updated_at']
+        # `anexo` só entra pelo endpoint /anexo/ (multipart). Deixá-lo gravável
+        # aqui quebraria o PUT da tela, que manda o cadastro inteiro em JSON.
+        read_only_fields = ['created_at', 'updated_at', 'anexo']
 
     def get_areas_interesse_nomes(self, obj):
         return [a.nome for a in obj.areas_interesse.all()]

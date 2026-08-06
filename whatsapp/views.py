@@ -10,7 +10,7 @@ from django.db.models import Q
 from django.http import HttpResponse
 from django.utils import timezone
 
-from rest_framework import viewsets, status
+from rest_framework import mixins, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException, PermissionDenied
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -78,9 +78,19 @@ class FilaViewSet(viewsets.ModelViewSet):
         serializer.save(criado_por=self.request.user)
 
 
-class ConversaViewSet(viewsets.ModelViewSet):
+class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
+                      mixins.UpdateModelMixin, viewsets.GenericViewSet):
+    """
+    Conversa nasce do webhook do WhatsApp, nunca de um POST da tela — daí os
+    mixins em vez de ModelViewSet (fica sem create e sem destroy).
+
+    Isso antes era feito com `http_method_names = ['get', 'patch', ...]`, que
+    derrubava também os POSTs das @action: assumir, encerrar, criar-tarefa e
+    enviar-template respondiam 405 'Method "POST" not allowed'. As ações são
+    rotas do MESMO viewset e passam pela mesma checagem de método, que não sabe
+    distinguir "criar conversa" de "encerrar conversa". Não voltar a usá-la aqui.
+    """
     permission_classes = [IsAuthenticated]
-    http_method_names = ['get', 'patch', 'head', 'options']
 
     def get_queryset(self):
         return Conversa.objects.filter(fila__membros=self.request.user).distinct()
