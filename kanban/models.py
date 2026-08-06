@@ -45,6 +45,15 @@ class KanbanTask(models.Model):
     coluna = models.ForeignKey(KanbanColumn, on_delete=models.CASCADE, related_name='tasks')
     ordem = models.PositiveIntegerField(default=0)
     dono = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tasks_criadas')
+    # Origem da tarefa, quando ela nasceu de um atendimento no WhatsApp. Fica aqui
+    # (e não do lado da conversa) porque uma conversa pode gerar várias tarefas ao
+    # longo do atendimento, e cada tarefa vem de no máximo uma conversa.
+    # SET_NULL para que apagar a conversa não leve junto o trabalho registrado.
+    conversa_whatsapp = models.ForeignKey(
+        'whatsapp.Conversa', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tarefas_kanban',
+        help_text='Conversa que originou esta tarefa.',
+    )
     responsavel = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='tasks_responsavel'

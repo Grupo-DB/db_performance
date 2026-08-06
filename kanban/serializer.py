@@ -38,6 +38,8 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
     )
     esta_atrasada = serializers.SerializerMethodField()
     anexos = KanbanAnexoSerializer(many=True, read_only=True)
+    origem_whatsapp = serializers.SerializerMethodField()
+
     class Meta:
         model = KanbanTask
         fields = [
@@ -45,9 +47,20 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
             'titulo', 'descricao', 'prioridade', 'tags', 'ordem',
             'data_inicio', 'prazo', 'concluido_em','anexos',
             'esta_atrasada', 'criado_em', 'atualizado_em','recorrente', 'recorrencia',
-
+            'conversa_whatsapp', 'origem_whatsapp',
         ]
         read_only_fields = ['dono', 'ordem', 'criado_em', 'atualizado_em']
+
+    def get_origem_whatsapp(self, obj):
+        """Contato de origem, para o cartão mostrar de onde a tarefa veio."""
+        conversa = obj.conversa_whatsapp
+        if not conversa:
+            return None
+        return {
+            'conversa_id': conversa.id,
+            'contato_nome': conversa.contato_nome,
+            'contato_telefone': conversa.contato_telefone,
+        }
 
     def get_esta_atrasada(self, obj):
         from django.utils import timezone

@@ -2,8 +2,10 @@ import hmac
 import hashlib
 import json
 import logging
+from datetime import date
 
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.db.models import Q
 from django.http import HttpResponse
 from django.utils import timezone
@@ -147,6 +149,94 @@ class ConversaViewSet(viewsets.ModelViewSet):
     def recebidas(self, request):
         qs = self.get_queryset().filter(responsavel=request.user)
         return Response(ConversaListSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='criar-tarefa')
+    def criar_tarefa(self, request, pk=None):
+        """
+        Abre uma tarefa no Kanban a partir desta conversa.
+
+        Existe para o pedido que chega pelo WhatsApp não morrer quando o
+        atendimento é encerrado: o que ficou pendente vira cartão no quadro, com
+        link de volta para a conversa que o originou.
+
+        A descrição é montada aqui, e não no navegador, para pegar o histórico
+        real da conversa — a tela só tem em memória o que já foi rolado.
+        """
+        from kanban.models import KanbanColumn, KanbanTask
+
+        conversa = self.get_object()
+        if not conversa.fila or not conversa.fila.membros.filter(pk=request.user.pk).exists():
+            raise PermissionDenied('Você não pertence à fila desta conversa.')
+
+        try:
+            coluna = KanbanColumn.objects.select_related('quadro').get(pk=request.data.get('coluna_id'))
+        except (KanbanColumn.DoesNotExist, ValueError, TypeError):
+            return Response({'detail': 'Lista do Kanban inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Mesma regra do KanbanTaskViewSet: só quem é dono ou membro do quadro.
+        quadro = coluna.quadro
+        if request.user != quadro.criado_por and not quadro.membros.filter(pk=request.user.pk).exists():
+            return Response({'detail': 'Você não é membro deste quadro.'}, status=status.HTTP_403_FORBIDDEN)
+
+        titulo = (request.data.get('titulo') or '').strip()
+        if not titulo:
+            titulo = f'WhatsApp — {conversa.contato_nome or conversa.contato_telefone}'
+
+        descricao = (request.data.get('descricao') or '').strip()
+        if not descricao:
+            descricao = self._resumo_da_conversa(conversa)
+
+        # Um id de usuário inexistente estouraria IntegrityError (500); aqui vira 400.
+        responsavel_id = request.data.get('responsavel_id') or None
+        if responsavel_id and not User.objects.filter(pk=responsavel_id).exists():
+            return Response({'detail': 'Responsável inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        prazo = request.data.get('prazo') or None
+        if prazo:
+            try:
+                prazo = date.fromisoformat(str(prazo)[:10])
+            except ValueError:
+                return Response({'detail': 'Prazo inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        prioridade = request.data.get('prioridade') or 'media'
+        if prioridade not in dict(KanbanTask.PRIORIDADE_CHOICES):
+            prioridade = 'media'
+
+        ultima = KanbanTask.objects.filter(coluna=coluna).order_by('-ordem').values_list('ordem', flat=True).first()
+        tarefa = KanbanTask.objects.create(
+            coluna=coluna,
+            ordem=(ultima or 0) + 1,
+            dono=request.user,
+            responsavel_id=responsavel_id,
+            titulo=titulo[:255],
+            descricao=descricao,
+            prioridade=prioridade,
+            prazo=prazo,
+            conversa_whatsapp=conversa,
+        )
+        return Response({
+            'id': tarefa.id,
+            'titulo': tarefa.titulo,
+            'quadro_id': quadro.id,
+            'quadro_nome': quadro.nome,
+            'coluna_id': coluna.id,
+            'coluna_titulo': coluna.titulo,
+        }, status=status.HTTP_201_CREATED)
+
+    @staticmethod
+    def _resumo_da_conversa(conversa, limite=15):
+        """Cabeçalho de contato + as últimas mensagens, em ordem cronológica."""
+        linhas = [
+            f'Contato: {conversa.contato_nome or "sem nome"} — {conversa.contato_telefone}',
+            f'Fila: {conversa.fila.nome if conversa.fila else "sem fila"}',
+            '',
+        ]
+        recentes = list(conversa.mensagens.order_by('-created_at')[:limite])
+        for m in reversed(recentes):
+            marcador = '>' if m.direcao == 'ENTRADA' else '<'
+            texto = (m.texto or '').strip() or f'[{m.get_tipo_display()}]'
+            linhas.append(f'{marcador} {m.created_at:%d/%m %H:%M} {texto}')
+        return '\n'.join(linhas)
 
     @action(detail=False, methods=['get'])
     def templates(self, request):

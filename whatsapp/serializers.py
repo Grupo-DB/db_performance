@@ -77,13 +77,27 @@ class ConversaDetailSerializer(serializers.ModelSerializer):
     responsavel = UserMinSerializer(read_only=True)
     mensagens = MensagemSerializer(many=True, read_only=True)
     dentro_da_janela_24h = serializers.BooleanField(read_only=True)
+    tarefas_kanban = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversa
         fields = [
             'id', 'contato_telefone', 'contato_nome', 'fila', 'responsavel',
             'status', 'estado_menu', 'ultima_mensagem_em', 'ultima_mensagem_cliente_em',
-            'dentro_da_janela_24h', 'mensagens', 'created_at',
+            'dentro_da_janela_24h', 'mensagens', 'tarefas_kanban', 'created_at',
+        ]
+
+    def get_tarefas_kanban(self, obj):
+        """Tarefas abertas a partir desta conversa, para a tela não criar duplicadas."""
+        return [
+            {
+                'id': t.id,
+                'titulo': t.titulo,
+                'quadro_nome': t.coluna.quadro.nome,
+                'coluna_titulo': t.coluna.titulo,
+                'concluida': t.concluido_em is not None,
+            }
+            for t in obj.tarefas_kanban.select_related('coluna', 'coluna__quadro').order_by('-criado_em')
         ]
 
 
