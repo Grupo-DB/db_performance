@@ -47,7 +47,7 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
             'titulo', 'descricao', 'prioridade', 'tags', 'ordem',
             'data_inicio', 'prazo', 'concluido_em','anexos',
             'esta_atrasada', 'criado_em', 'atualizado_em','recorrente', 'recorrencia',
-            'conversa_whatsapp', 'origem_whatsapp',
+            'conversa_whatsapp', 'origem_whatsapp', 'notificar_whatsapp',
         ]
         read_only_fields = ['dono', 'ordem', 'criado_em', 'atualizado_em']
 
@@ -67,6 +67,20 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
         if obj.prazo and not obj.concluido_em:
             return obj.prazo < timezone.now().date()
         return False
+
+    def validate_notificar_whatsapp(self, ligado):
+        """
+        Sem conversa de origem não há para quem avisar — ligar a chave criaria uma
+        tarefa que promete uma mensagem que nunca sai.
+
+        `conversa_whatsapp` não é editável pela tela, então o valor válido é
+        sempre o que já está gravado (nulo em tarefa criada direto no quadro).
+        """
+        if ligado and not (self.instance and self.instance.conversa_whatsapp_id):
+            raise serializers.ValidationError(
+                'Só é possível avisar pelo WhatsApp em tarefa criada a partir de uma conversa.'
+            )
+        return ligado
 
     def validate_coluna_id(self, coluna):
         request = self.context['request']

@@ -42,6 +42,24 @@ class MidiaMuitoGrande(Exception):
     """Arquivo acima do limite que a Cloud API aceita para aquela categoria."""
 
 
+def detalhe_do_erro(exc: Exception) -> str:
+    """
+    Motivo legível de uma falha de envio, para gravar em `Mensagem.erro_detalhe`.
+
+    O texto da exceção do requests é só "400 Client Error": a explicação da Meta
+    (e o `code` que se procura na documentação) vem no corpo da resposta. Sem
+    abrir esse corpo, o atendente vê um "falhou" mudo e não sabe o que corrigir.
+    """
+    resposta = getattr(exc, 'response', None)
+    if resposta is None:
+        return str(exc)
+    try:
+        erro = resposta.json().get('error', {})
+    except ValueError:
+        return f'{exc} — {resposta.text[:300]}'
+    return f"{erro.get('message', str(exc))} (code {erro.get('code')})"
+
+
 def _base_url():
     return f"https://graph.facebook.com/{settings.WHATSAPP_API_VERSION}"
 

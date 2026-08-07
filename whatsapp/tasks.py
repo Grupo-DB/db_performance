@@ -100,6 +100,24 @@ def _notificar_nova_mensagem(conversa: Conversa, preview: str):
         WhatsAppNotificacao.objects.bulk_create(notificacoes)
 
 
+def _motivo_da_falha(status: dict) -> str:
+    """
+    Texto legível a partir do array `errors` do status.
+
+    Cada erro traz `title` (curto), `error_data.details` (a explicação de verdade)
+    e `code`, que é o que se procura na documentação da Meta.
+    """
+    partes = []
+    for erro in status.get('errors') or []:
+        titulo = erro.get('title') or erro.get('message') or ''
+        detalhes = (erro.get('error_data') or {}).get('details') or ''
+        # title e details costumam repetir a mesma frase; só vale juntar se diferem.
+        texto = titulo if detalhes.strip() == titulo.strip() else ' — '.join(x for x in (titulo, detalhes) if x)
+        codigo = erro.get('code')
+        partes.append(f'{texto} (code {codigo})' if codigo else texto)
+    return ' | '.join(p for p in partes if p.strip())
+
+
 def _processar_status(status: dict):
     wa_message_id = status.get('id')
     novo_status = {
@@ -108,7 +126,19 @@ def _processar_status(status: dict):
     }.get(status.get('status'))
     if not novo_status:
         return
-    Mensagem.objects.filter(wa_message_id=wa_message_id).update(status_entrega=novo_status)
+
+    campos = {'status_entrega': novo_status}
+    if novo_status == 'FALHOU':
+        # Sem isto a mensagem virava um "falhou" mudo na tela: a recusa da Meta é
+        # assíncrona, então o envio não levanta exceção nenhuma e o único lugar
+        # onde o motivo existe é este payload — que antes era descartado.
+        campos['erro_detalhe'] = (
+            _motivo_da_falha(status)
+            or 'O WhatsApp recusou a mensagem e não informou o motivo.'
+        )
+        logger.warning('WhatsApp recusou a mensagem %s: %s', wa_message_id, status)
+
+    Mensagem.objects.filter(wa_message_id=wa_message_id).update(**campos)
 
 
 @shared_task
@@ -132,17 +162,7 @@ def _marcar_enviada(mensagem: Mensagem, resposta: dict):
 def _marcar_falha(mensagem: Mensagem, exc: Exception, contexto: str):
     logger.exception('%s (mensagem_id=%s)', contexto, mensagem.id)
     mensagem.status_entrega = 'FALHOU'
-    # A mensagem da Meta vem no corpo da resposta, não no texto da exceção do
-    # requests ("400 Client Error"). Sem ela o atendente não sabe o que corrigir.
-    detalhe = str(exc)
-    resposta = getattr(exc, 'response', None)
-    if resposta is not None:
-        try:
-            erro = resposta.json().get('error', {})
-            detalhe = f"{erro.get('message', detalhe)} (code {erro.get('code')})"
-        except ValueError:
-            detalhe = f'{detalhe} — {resposta.text[:300]}'
-    mensagem.erro_detalhe = detalhe
+    mensagem.erro_detalhe = graph_api.detalhe_do_erro(exc)
     mensagem.save(update_fields=['status_entrega', 'erro_detalhe'])
 
 
@@ -231,3 +251,32 @@ def enviar_template_whatsapp(mensagem_id: int, nome_template: str, idioma: str, 
         _marcar_enviada(mensagem, resposta)
     except Exception as exc:
         _marcar_falha(mensagem, exc, 'Falha ao enviar template do WhatsApp')
+
+
+@shared_task
+def notificar_andamento_tarefa(tarefa_id: int):
+    """
+    Avisa o cliente que a tarefa nascida do atendimento dele mudou de andamento.
+
+    Enfileirada pelo signal em `kanban/signals.py`, já depois do commit — a
+    decisão de o que mandar (texto livre ou template) fica em `services`, aqui só
+    o que depende de I/O e do estado atual do banco.
+
+    A tarefa é relida em vez de receber os dados por parâmetro: entre o commit e a
+    execução ela pode ter sido movida de novo, e o que interessa ao cliente é onde
+    ela está agora, não o passo intermediário que disparou a fila.
+    """
+    from kanban.models import KanbanTask
+
+    tarefa = (
+        KanbanTask.objects
+        .select_related('conversa_whatsapp', 'coluna')
+        .filter(pk=tarefa_id)
+        .first()
+    )
+    # Apagada, desvinculada ou com o aviso desligado entre o commit e agora.
+    if tarefa is None or tarefa.conversa_whatsapp is None or not tarefa.notificar_whatsapp:
+        return
+
+    andamento = 'Concluída' if tarefa.concluido_em else tarefa.coluna.titulo
+    services.avisar_andamento_tarefa(tarefa.conversa_whatsapp, tarefa.titulo, andamento)

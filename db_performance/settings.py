@@ -38,6 +38,14 @@ WHATSAPP_PHONE_NUMBER_ID = os.environ.get('WHATSAPP_PHONE_NUMBER_ID')
 WHATSAPP_VERIFY_TOKEN = os.environ.get('WHATSAPP_VERIFY_TOKEN')
 WHATSAPP_APP_SECRET = os.environ.get('WHATSAPP_APP_SECRET')
 WHATSAPP_API_VERSION = os.environ.get('WHATSAPP_API_VERSION', 'v21.0')
+# Id da WABA (conta comercial), não do número. É o que responde por
+# /message_templates — sem ele a tela de templates fica vazia.
+WHATSAPP_BUSINESS_ACCOUNT_ID = os.environ.get('WHATSAPP_BUSINESS_ACCOUNT_ID')
+# Template aprovado usado para avisar o cliente do andamento de uma tarefa do
+# Kanban fora da janela de 24h. Espera dois parâmetros no corpo:
+# {{1}} = título da tarefa, {{2}} = situação atual.
+WHATSAPP_TEMPLATE_ANDAMENTO_TAREFA = os.environ.get('WHATSAPP_TEMPLATE_ANDAMENTO_TAREFA')
+WHATSAPP_TEMPLATE_IDIOMA = os.environ.get('WHATSAPP_TEMPLATE_IDIOMA', 'pt_BR')
 # ─────────────────────────────────────────────────────────────────────────
 
 #VARIAVEIS DE AMBIENTE DA OPENAI

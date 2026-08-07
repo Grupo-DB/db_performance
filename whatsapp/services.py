@@ -1,7 +1,9 @@
 """Regras de negócio desacopladas da ingestão do webhook (fácil de trocar por NLP no futuro)."""
 import logging
+import re
 from datetime import timedelta
 
+from django.conf import settings
 from django.utils import timezone
 
 from .models import ConfiguracaoAtendimento, Fila, Mensagem, WhatsAppNotificacao
@@ -103,6 +105,41 @@ def montar_texto_roteamento(fila) -> str:
     return modelo.replace('{setor}', fila.nome)
 
 
+def _registrar_saida_automatica(conversa, texto: str, envio, contexto: str, **campos) -> None:
+    """
+    Grava uma fala do robô no histórico e tenta entregá-la.
+
+    O registro vem antes do envio de propósito: uma entrega que falha precisa
+    deixar rastro na central, senão vira silêncio — o cliente não recebe nada e
+    ninguém entende por quê.
+
+    `envio` é a chamada ao Graph, passada como função porque o payload muda
+    conforme o caminho (texto livre ou template). `autor` fica nulo em todos os
+    casos — é o que distingue a fala do robô da de um atendente, sem precisar de
+    campo novo no modelo.
+
+    `ultima_mensagem_cliente_em` NÃO é tocado: só uma resposta do cliente reabre
+    a janela de 24h, e nada que saia daqui conta como tal.
+    """
+    agora = timezone.now()
+    mensagem = Mensagem.objects.create(
+        conversa=conversa, direcao='SAIDA', tipo='TEXTO', texto=texto,
+        autor=None, status_entrega='PENDENTE', **campos,
+    )
+    try:
+        resposta = envio()
+        mensagem.wa_message_id = resposta.get('messages', [{}])[0].get('id')
+        mensagem.status_entrega = 'ENVIADA'
+    except Exception as exc:
+        logger.exception('%s (conversa_id=%s)', contexto, conversa.id)
+        mensagem.status_entrega = 'FALHOU'
+        mensagem.erro_detalhe = graph_api.detalhe_do_erro(exc)
+    mensagem.save(update_fields=['wa_message_id', 'status_entrega', 'erro_detalhe'])
+
+    conversa.ultima_mensagem_em = agora
+    conversa.save(update_fields=['ultima_mensagem_em'])
+
+
 def responder_automatico(conversa, texto: str) -> None:
     """
     Manda o texto pelo Graph e grava no histórico da conversa.
@@ -110,33 +147,12 @@ def responder_automatico(conversa, texto: str) -> None:
     Antes o bot chamava `graph_api.enviar_mensagem_texto` direto: o cliente
     recebia o menu, mas nada disso virava `Mensagem`. O atendente abria a central
     e via só as respostas do cliente ("1", "2"), sem a pergunta correspondente.
-
-    `autor` fica nulo de propósito — é o que distingue a fala do bot da fala de
-    um atendente, sem precisar de campo novo no modelo.
     """
-    agora = timezone.now()
-    mensagem = Mensagem.objects.create(
-        conversa=conversa,
-        direcao='SAIDA',
-        tipo='TEXTO',
-        texto=texto,
-        autor=None,
-        status_entrega='PENDENTE',
+    _registrar_saida_automatica(
+        conversa, texto,
+        lambda: graph_api.enviar_mensagem_texto(conversa.contato_telefone, texto),
+        'Falha ao enviar resposta automática',
     )
-    try:
-        resposta = graph_api.enviar_mensagem_texto(conversa.contato_telefone, texto)
-        mensagem.wa_message_id = resposta.get('messages', [{}])[0].get('id')
-        mensagem.status_entrega = 'ENVIADA'
-    except Exception as exc:
-        # Sem o registro da falha, um menu que não saiu vira silêncio: o cliente
-        # não responde e ninguém na central entende por quê.
-        logger.exception('Falha ao enviar resposta automática (conversa_id=%s)', conversa.id)
-        mensagem.status_entrega = 'FALHOU'
-        mensagem.erro_detalhe = str(exc)
-    mensagem.save(update_fields=['wa_message_id', 'status_entrega', 'erro_detalhe'])
-
-    conversa.ultima_mensagem_em = agora
-    conversa.save(update_fields=['ultima_mensagem_em'])
 
 
 def _enviar_menu(conversa, filas) -> None:
@@ -218,4 +234,77 @@ def resolver_fila_por_texto(texto: str, conversa) -> None:
     _notificar_membros(
         conversa, fila_encontrada, 'CONVERSA_ATRIBUIDA',
         f"Nova conversa de {conversa.contato_nome or conversa.contato_telefone}"
+    )
+
+
+# ── Aviso de andamento de tarefa do Kanban ───────────────────────────────────
+# Disparado pelo signal de `kanban.KanbanTask`, não por um atendente — por isso a
+# mensagem sai sem assinatura, como as demais falas do robô.
+
+# A Meta recusa parâmetro de template com quebra de linha, tab ou espaços
+# seguidos. Título de tarefa é texto digitado por gente, então passa por aqui
+# antes de virar {{1}} — senão o template inteiro é rejeitado no envio.
+_ESPACOS_SEGUIDOS = re.compile(r'\s+')
+LIMITE_PARAMETRO_TEMPLATE = 200
+
+
+def _parametro_template(texto: str) -> str:
+    return _ESPACOS_SEGUIDOS.sub(' ', (texto or '').strip())[:LIMITE_PARAMETRO_TEMPLATE]
+
+
+def avisar_andamento_tarefa(conversa, titulo_tarefa: str, andamento: str) -> None:
+    """
+    Conta ao cliente que a tarefa aberta a partir do atendimento dele mudou de estado.
+
+    O caminho depende da janela de 24h: dentro dela vale texto livre; fora, só
+    template aprovado. Uma tarefa costuma andar dias depois do atendimento, então
+    o segundo caso é a regra e não a exceção — é por isso que a falta de template
+    configurado é tratada aqui como situação prevista, e não como erro.
+    """
+    if conversa.dentro_da_janela_24h:
+        responder_automatico(
+            conversa,
+            f'Atualização da sua solicitação:\n*{titulo_tarefa}*\nSituação: {andamento}',
+        )
+        return
+
+    # O texto guardado é só o rastro para o histórico: o corpo real do template
+    # mora na Meta e pode ser alterado lá sem passar por aqui.
+    previa = f'[andamento] {titulo_tarefa} — {andamento}'
+    nome_template = getattr(settings, 'WHATSAPP_TEMPLATE_ANDAMENTO_TAREFA', None)
+
+    if not nome_template:
+        # Gravado como falha, e não apenas logado: quem ligou o aviso na tarefa
+        # precisa ver na própria conversa que o cliente não foi avisado, e por quê.
+        logger.warning(
+            'Tarefa mudou de andamento fora da janela de 24h e '
+            'WHATSAPP_TEMPLATE_ANDAMENTO_TAREFA não está configurado (conversa_id=%s)',
+            conversa.id,
+        )
+        Mensagem.objects.create(
+            conversa=conversa, direcao='SAIDA', tipo='TEXTO', texto=previa, autor=None,
+            status_entrega='FALHOU',
+            erro_detalhe=(
+                'Fora da janela de 24h e nenhum template configurado em '
+                'WHATSAPP_TEMPLATE_ANDAMENTO_TAREFA — o cliente não foi avisado.'
+            ),
+        )
+        return
+
+    idioma = getattr(settings, 'WHATSAPP_TEMPLATE_IDIOMA', 'pt_BR')
+    componentes = [{
+        'type': 'body',
+        'parameters': [
+            {'type': 'text', 'text': _parametro_template(titulo_tarefa)},
+            {'type': 'text', 'text': _parametro_template(andamento)},
+        ],
+    }]
+    _registrar_saida_automatica(
+        conversa, previa,
+        lambda: graph_api.enviar_template(
+            conversa.contato_telefone, nome_template, idioma, componentes,
+        ),
+        'Falha ao enviar template de andamento de tarefa',
+        template_nome=nome_template,
+        payload_bruto={'template': nome_template, 'idioma': idioma, 'componentes': componentes},
     )

@@ -223,6 +223,9 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             prioridade=prioridade,
             prazo=prazo,
             conversa_whatsapp=conversa,
+            # Opt-in explícito: o atendente acabou de falar com o cliente e é quem
+            # sabe se ele pediu acompanhamento. Ausente no payload = não avisar.
+            notificar_whatsapp=bool(request.data.get('notificar_whatsapp')),
         )
         return Response({
             'id': tarefa.id,
@@ -231,6 +234,7 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             'quadro_nome': quadro.nome,
             'coluna_id': coluna.id,
             'coluna_titulo': coluna.titulo,
+            'notificar_whatsapp': tarefa.notificar_whatsapp,
         }, status=status.HTTP_201_CREATED)
 
     @staticmethod

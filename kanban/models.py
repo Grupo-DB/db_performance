@@ -54,6 +54,15 @@ class KanbanTask(models.Model):
         related_name='tarefas_kanban',
         help_text='Conversa que originou esta tarefa.',
     )
+    # Desligado por padrão de propósito: nem todo cartão vindo do WhatsApp é algo
+    # que o cliente pediu para acompanhar, e avisar quem não pediu é o caminho
+    # mais curto para o cliente bloquear o número — o que derruba a qualidade da
+    # conta na Meta. Quem cria a tarefa decide, cartão a cartão.
+    notificar_whatsapp = models.BooleanField(
+        default=False,
+        help_text='Avisa o contato de origem, pelo WhatsApp, quando esta tarefa mudar de lista '
+                  'ou for concluída. Exige uma conversa de origem vinculada.',
+    )
     responsavel = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='tasks_responsavel'
