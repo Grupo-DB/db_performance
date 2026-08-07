@@ -2075,7 +2075,7 @@ def calculos_comissoes(request):
     # ---- 3. Vergilino Antonio Dutra ----
     _agro_debug['vergilino_base'] = round(float(venda_agro_total_geral), 2)
 
-    _vergilino_fixo = p('VERGILINO_FIXO', 5747.50)
+    _vergilino_fixo = p('VERGILINO_FIXO', 6365.92)
     _vergilino_taxa = p('VERGILINO_TAXA', 0.0015)
     resultado['VERGILINO ANTONIO DUTRA'] = {
         'comissao': round(venda_agro_total_geral * _vergilino_taxa + _vergilino_fixo, 2),

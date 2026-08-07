@@ -19,6 +19,8 @@ from datetime import date
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 
 
 class AreaInteresse(models.Model):
@@ -534,3 +536,59 @@ class FichaEntrevista(models.Model):
         if self.processo_id and not self.vaga_id:
             self.vaga_id = self.processo.vaga_id
         super().save(*args, **kwargs)
+
+
+class FichaAnexo(models.Model):
+    """
+    Arquivo avulso preso a uma ficha de entrevista.
+
+    A entrevista raramente produz um documento só: teste aplicado, redação,
+    cópia de documento e resultado de dinâmica costumam vir juntos. Por isso é
+    um modelo à parte, e não um ``FileField`` na ficha como o do currículo
+    (``Candidato.anexo``, que é um arquivo por candidato).
+    """
+
+    ficha = models.ForeignKey(FichaEntrevista, on_delete=models.CASCADE, related_name='anexos')
+    arquivo = models.FileField(upload_to='recrutamento/fichas/%Y/%m/')
+    descricao = models.CharField(
+        max_length=180, blank=True,
+        help_text='O que é o arquivo (ex.: teste de raciocínio, redação, cópia do RG).',
+    )
+    enviado_por = models.CharField(max_length=120, blank=True)
+    enviado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Anexo da ficha de entrevista'
+        verbose_name_plural = 'Anexos da ficha de entrevista'
+        ordering = ['enviado_em', 'id']
+
+    def __str__(self):
+        return self.nome or f'anexo {self.pk}'
+
+    @property
+    def nome(self):
+        """Nome do arquivo sem o caminho — é o que a tela mostra."""
+        return self.arquivo.name.rsplit('/', 1)[-1] if self.arquivo else ''
+
+    @property
+    def tamanho(self):
+        # O arquivo pode ter sumido do disco (restore parcial, limpeza de media):
+        # devolver 0 é melhor do que derrubar a listagem inteira da ficha.
+        try:
+            return self.arquivo.size
+        except (OSError, ValueError):
+            return 0
+
+
+@receiver(post_delete, sender=FichaAnexo)
+def _apaga_arquivo_do_anexo(sender, instance, **kwargs):
+    """
+    Apaga o arquivo do disco quando o anexo some do banco.
+
+    É sinal, e não ``delete()`` no modelo: apagar a ficha (ou o candidato, que
+    apaga as fichas em cascata) remove os anexos por queryset, que não chama o
+    ``delete()`` de cada objeto — e os arquivos ficariam órfãos em media/.
+    O ``post_delete``, esse sim, o Django dispara também nas cascatas.
+    """
+    if instance.arquivo:
+        instance.arquivo.delete(save=False)

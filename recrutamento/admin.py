@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AreaInteresse, Candidato, FichaEntrevista, Processo, Vaga
+from .models import AreaInteresse, Candidato, FichaAnexo, FichaEntrevista, Processo, Vaga
 
 
 @admin.register(AreaInteresse)
@@ -33,6 +33,12 @@ class ProcessoAdmin(admin.ModelAdmin):
     autocomplete_fields = ['candidato', 'vaga']
 
 
+class FichaAnexoInline(admin.TabularInline):
+    model = FichaAnexo
+    extra = 0
+    readonly_fields = ['enviado_por', 'enviado_em']
+
+
 @admin.register(FichaEntrevista)
 class FichaEntrevistaAdmin(admin.ModelAdmin):
     list_display = ['id', 'nome', 'cargo_funcao', 'setor', 'data_entrevista', 'resultado', 'avaliador_1']
@@ -40,3 +46,4 @@ class FichaEntrevistaAdmin(admin.ModelAdmin):
     search_fields = ['nome', 'candidato__nome', 'cargo_funcao', 'setor', 'avaliador_1']
     autocomplete_fields = ['candidato', 'vaga']
     date_hierarchy = 'data_entrevista'
+    inlines = [FichaAnexoInline]

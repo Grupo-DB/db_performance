@@ -7,15 +7,16 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from .models import AreaInteresse, Candidato, FichaEntrevista, Processo, Vaga
+from .models import AreaInteresse, Candidato, FichaAnexo, FichaEntrevista, Processo, Vaga
 from .permissions import IsRH
 from .serializers import (
     AreaInteresseSerializer,
     CandidatoListSerializer,
     CandidatoSerializer,
+    FichaAnexoSerializer,
     FichaEntrevistaListSerializer,
     FichaEntrevistaSerializer,
     ProcessoSerializer,
@@ -261,6 +262,11 @@ class FichaEntrevistaViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = FichaEntrevista.objects.select_related('candidato', 'vaga', 'processo')
+        if self.action == 'list':
+            # A listagem só mostra o contador; puxar os anexos inteiros seria N+1.
+            qs = qs.annotate(total_anexos=Count('anexos'))
+        else:
+            qs = qs.prefetch_related('anexos')
         inicio = self.request.query_params.get('inicio')
         fim = self.request.query_params.get('fim')
         if inicio:
@@ -271,6 +277,72 @@ class FichaEntrevistaViewSet(viewsets.ModelViewSet):
 
     def get_serializer_class(self):
         return FichaEntrevistaListSerializer if self.action == 'list' else FichaEntrevistaSerializer
+
+    # Mesmo teto do currículo: o que passa disso costuma ser foto de documento
+    # sem compressão, e o nginx da VM corta o upload antes de chegar no Django.
+    TAMANHO_MAX_ANEXO = 20 * 1024 * 1024
+
+    @action(detail=True, methods=['get', 'post'], url_path='anexos',
+            parser_classes=[MultiPartParser, FormParser, JSONParser])
+    def anexos(self, request, pk=None):
+        """
+        Lista (GET) ou anexa (POST, multipart, campo ``arquivo``) documentos da
+        entrevista: teste aplicado, redação, cópia de documento.
+
+        Endpoint separado do PUT da ficha porque a tela salva os ~70 campos em
+        JSON — mandar arquivo no mesmo payload obrigaria o formulário inteiro a
+        virar multipart.
+        """
+        ficha = self.get_object()
+
+        if request.method == 'GET':
+            serializer = FichaAnexoSerializer(
+                ficha.anexos.all(), many=True, context=self.get_serializer_context()
+            )
+            return Response(serializer.data)
+
+        arquivos = request.FILES.getlist('arquivo') or request.FILES.getlist('arquivos')
+        if not arquivos:
+            return Response({'detail': 'Envie o arquivo no campo "arquivo".'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        grandes = [a.name for a in arquivos if a.size > self.TAMANHO_MAX_ANEXO]
+        if grandes:
+            return Response(
+                {'detail': f'Arquivo maior que 20 MB: {", ".join(grandes)}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        descricao = (request.data.get('descricao') or '').strip()
+        enviado_por = (request.user.get_full_name() or request.user.username) if request.user.is_authenticated else ''
+        criados = [
+            FichaAnexo.objects.create(
+                ficha=ficha, arquivo=arquivo, descricao=descricao, enviado_por=enviado_por,
+            )
+            for arquivo in arquivos
+        ]
+        serializer = FichaAnexoSerializer(criados, many=True, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['patch', 'delete'], url_path=r'anexos/(?P<anexo_id>\d+)')
+    def anexo(self, request, pk=None, anexo_id=None):
+        """Renomeia a descrição (PATCH) ou remove (DELETE) um anexo da ficha."""
+        ficha = self.get_object()
+        try:
+            anexo = ficha.anexos.get(pk=anexo_id)
+        except FichaAnexo.DoesNotExist:
+            return Response({'detail': 'Anexo não encontrado nesta ficha.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == 'DELETE':
+            # O delete() do modelo apaga o arquivo do disco junto.
+            anexo.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        anexo.descricao = (request.data.get('descricao') or '').strip()
+        anexo.save(update_fields=['descricao'])
+        serializer = FichaAnexoSerializer(anexo, context=self.get_serializer_context())
+        return Response(serializer.data)
 
     @action(detail=False, methods=['get'])
     def avaliadores(self, request):

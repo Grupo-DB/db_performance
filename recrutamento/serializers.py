@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import AreaInteresse, Candidato, FichaEntrevista, Processo, Vaga
+from .models import AreaInteresse, Candidato, FichaAnexo, FichaEntrevista, Processo, Vaga
 
 
 class AreaInteresseSerializer(serializers.ModelSerializer):
@@ -179,6 +179,7 @@ class FichaEntrevistaListSerializer(serializers.ModelSerializer):
     candidato_cidade = serializers.CharField(source='candidato.cidade', read_only=True)
     candidato_telefone = serializers.CharField(source='candidato.telefone_principal', read_only=True)
     vaga_descricao = serializers.CharField(source='vaga.descricao', read_only=True)
+    total_anexos = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = FichaEntrevista
@@ -186,8 +187,29 @@ class FichaEntrevistaListSerializer(serializers.ModelSerializer):
             'id', 'candidato', 'candidato_nome', 'candidato_cidade', 'candidato_telefone',
             'processo', 'vaga', 'vaga_descricao', 'data_entrevista',
             'cargo_funcao', 'setor', 'atende_requisitos', 'resultado',
-            'avaliador_1', 'created_at', 'updated_at',
+            'avaliador_1', 'total_anexos', 'created_at', 'updated_at',
         ]
+
+
+class FichaAnexoSerializer(serializers.ModelSerializer):
+    """Anexo da ficha lido pela tela: URL para baixar + nome e tamanho legíveis."""
+
+    url = serializers.SerializerMethodField()
+    nome = serializers.CharField(read_only=True)
+    tamanho = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = FichaAnexo
+        fields = ['id', 'ficha', 'url', 'nome', 'tamanho', 'descricao', 'enviado_por', 'enviado_em']
+        read_only_fields = ['ficha', 'enviado_por', 'enviado_em']
+
+    def get_url(self, obj):
+        if not obj.arquivo:
+            return None
+        pedido = self.context.get('request')
+        # Absoluta quando há request: no desenvolvimento o front roda em outra
+        # origem e o caminho relativo apontaria para o servidor errado.
+        return pedido.build_absolute_uri(obj.arquivo.url) if pedido else obj.arquivo.url
 
 
 class FichaEntrevistaSerializer(serializers.ModelSerializer):
@@ -198,6 +220,9 @@ class FichaEntrevistaSerializer(serializers.ModelSerializer):
     candidato_telefone = serializers.CharField(source='candidato.telefone_principal', read_only=True)
     vaga_descricao = serializers.CharField(source='vaga.descricao', read_only=True)
     vaga_requisitante = serializers.CharField(source='vaga.requisitante', read_only=True)
+    # Só leitura: o arquivo entra pelo endpoint /anexos/ (multipart), porque a
+    # tela salva a ficha inteira em JSON.
+    anexos = FichaAnexoSerializer(many=True, read_only=True)
 
     class Meta:
         model = FichaEntrevista

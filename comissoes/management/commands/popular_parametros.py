@@ -58,7 +58,7 @@ PARAMETROS_DEFAULT = [
     ('AGRO_FIXO_REP',       'Salário fixo reps externos agro (Ildomar/Everton)', 8225.000000),
     # ── Agronegócio — Vergilino ─────────────────────────────────────────────
     ('VERGILINO_TAXA',      'Taxa variável Vergilino agro (0,15%)',           0.001500),
-    ('VERGILINO_FIXO',      'Salário fixo Vergilino',                         5747.500000),
+    ('VERGILINO_FIXO',      'Salário fixo Vergilino',                         6365.920000),
 ]
 
 
