@@ -103,6 +103,7 @@ INSTALLED_APPS = [
     'controleQualidade.amostra',
     'controleQualidade.analise',
     'controleQualidade.visitaTecnica',
+    'controleQualidade.boletimSemanal',
     'horasExtras.registros',
     'kanban',
     'apuracaoCustos',
