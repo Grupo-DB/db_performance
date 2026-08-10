@@ -15,7 +15,7 @@ class IndicadorBoletimSerializer(serializers.ModelSerializer):
             'peneira_malha', 'peneira_metrica',
             'material', 'tipo_amostra', 'local_coleta', 'finalidade', 'produtos', 'campo_data',
             'unidade', 'casas_decimais', 'tipo_limite', 'valor_limite',
-            'producao_codigos', 'producao_etapa', 'observacao', 'componentes_nomes',
+            'producao_codigos', 'producao_local', 'producao_etapa', 'observacao', 'componentes_nomes',
         ]
 
     def get_componentes_nomes(self, obj):

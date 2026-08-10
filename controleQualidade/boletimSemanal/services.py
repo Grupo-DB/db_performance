@@ -297,19 +297,27 @@ def _valores_de_campo_especial(indicador, analises) -> dict[int, float]:
 
 # ── Produção (ERP) ───────────────────────────────────────────────────────────
 
-def producao_por_semana(codigos: list[int], etapa, ano: int) -> dict[int, float]:
+def producao_por_semana(codigos: list[int], locais: list[int], etapa, ano: int) -> dict[int, float]:
     """
-    Toneladas produzidas por semana ISO, somando os códigos de estoque informados.
+    Toneladas produzidas por semana ISO.
+
+    Dois recortes, porque o ERP separa as coisas de formas diferentes:
+      - `codigos` = ESTQCOD, o item de estoque → separa PRODUTO (CH-II, hidráulica);
+      - `locais` = EQPLOC, a localização do equipamento → separa FÁBRICA
+        (23 = FCM I, 24 = FCM II, 25 = FCM III), que é como o painel do calcário
+        soma o volume de cada moinho.
+    Podem ser usados juntos; sem nenhum dos dois não há o que consultar.
 
     Consulta o SQL Server do ERP — a mesma base dos painéis de produção. Os
     endpoints de lá só aceitam "atual/mensal/anual", então a consulta é própria,
     com intervalo de datas; o `engine` é importado de lá para não duplicar
     credencial de banco em mais um arquivo.
 
-    Devolve {} em qualquer falha: a produção é um ENFEITE do boletim (serve para
-    ponderar), e o laboratório não pode ficar sem a tela porque a rede do ERP caiu.
+    Devolve {} em qualquer falha: sem produção o boletim ainda funciona (o ponderado
+    cai para média simples), e o laboratório não pode ficar sem a tela porque a rede
+    do ERP caiu.
     """
-    if not codigos:
+    if not codigos and not locais:
         return {}
     try:
         import pandas as pd
@@ -318,8 +326,13 @@ def producao_por_semana(codigos: list[int], etapa, ano: int) -> dict[int, float]
         logger.exception('Não foi possível preparar a consulta de produção do ERP')
         return {}
 
-    lista_codigos = ','.join(str(c) for c in codigos)
-    filtro_etapa = f"AND BPROEP = {int(etapa)}" if etapa else ''
+    filtros = []
+    if codigos:
+        filtros.append(f"AND IBPROREF IN ({','.join(str(c) for c in codigos)})")
+    if locais:
+        filtros.append(f"AND EQPLOC IN ({','.join(str(l) for l in locais)})")
+    if etapa:
+        filtros.append(f'AND BPROEP = {int(etapa)}')
     # A janela do dia de produção começa 07:10 (mesma convenção dos painéis).
     inicio = f'{ano - 1}-12-25 07:10:00'
     fim = f'{ano + 1}-01-05 07:10:00'
@@ -328,15 +341,20 @@ def producao_por_semana(codigos: list[int], etapa, ano: int) -> dict[int, float]
           FROM BAIXAPRODUCAO
           JOIN ITEMBAIXAPRODUCAO ON BPROCOD = IBPROBPRO
           JOIN ESTOQUE ON ESTQCOD = IBPROREF
+          -- LEFT JOIN, e não INNER: baixa sem equipamento apontado continua contando
+          -- quando o recorte é só por produto.
+          LEFT OUTER JOIN EQUIPAMENTO ON EQPCOD = BPROEQP
          WHERE CAST(BPRODATA1 AS datetime2) BETWEEN '{inicio}' AND '{fim}'
            AND BPROEMP = 1 AND BPROFIL = 0 AND BPROSIT = 1 AND IBPROTIPO = 'D'
-           AND IBPROREF IN ({lista_codigos})
-           {filtro_etapa}
+           {' '.join(filtros)}
     """
     try:
         df = pd.read_sql(sql, engine)
     except Exception:
-        logger.exception('Falha ao consultar produção do ERP (codigos=%s, etapa=%s)', lista_codigos, etapa)
+        logger.exception(
+            'Falha ao consultar produção do ERP (codigos=%s, locais=%s, etapa=%s)',
+            codigos, locais, etapa,
+        )
         return {}
 
     por_semana: dict[int, float] = {}
@@ -415,9 +433,13 @@ class SerieIndicador:
                 self.calculado[semana] = _media(valores)
                 self.medicoes[semana] = len(valores)
 
-        codigos = self.indicador.codigos_producao()
-        if codigos:
-            self.producao = producao_por_semana(codigos, self.indicador.producao_etapa, self.ano)
+        if self.indicador.tem_producao_configurada():
+            self.producao = producao_por_semana(
+                self.indicador.codigos_producao(),
+                self.indicador.locais_producao(),
+                self.indicador.producao_etapa,
+                self.ano,
+            )
         # Produção digitada vence a do ERP: quem digitou sabia de algo que o ERP não sabe.
         for semana, dados in self.manual.items():
             if dados.get('producao') is not None:

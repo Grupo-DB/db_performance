@@ -126,11 +126,19 @@ class IndicadorBoletim(models.Model):
     producao_codigos = models.CharField(
         max_length=120, blank=True,
         help_text='Códigos de estoque do ERP (ESTQCOD) separados por vírgula, somados como a '
-                  'produção deste componente. Ex.: 2737 (CH-II), 2738 (hidráulica).',
+                  'produção deste componente. Ex.: 2737 (CH-II), 2738 (hidráulica). '
+                  'É assim que se separa PRODUTO.',
+    )
+    producao_local = models.CharField(
+        max_length=120, blank=True,
+        help_text='Localizações de equipamento do ERP (EQPLOC) separadas por vírgula. É assim '
+                  'que se separa FÁBRICA: 23 = FCM I, 24 = FCM II, 25 = FCM III. '
+                  'Pode ser usado junto com os códigos de estoque (os dois filtram).',
     )
     producao_etapa = models.PositiveSmallIntegerField(
         null=True, blank=True,
-        help_text='Etapa de produção no ERP (BPROEP). Cal: 2 calcinação, 3 beneficiamento, 5 ensacamento.',
+        help_text='Etapa de produção no ERP (BPROEP). Cal: 2 calcinação, 3 beneficiamento, '
+                  '5 ensacamento. Calcário moído (FCM): 6.',
     )
 
     observacao = models.CharField(
@@ -150,13 +158,24 @@ class IndicadorBoletim(models.Model):
     def eh_componente(self) -> bool:
         return self.pai_id is not None
 
+    @staticmethod
+    def _inteiros(texto: str) -> list[int]:
+        """
+        Só os inteiros da lista separada por vírgula.
+
+        A validação é o que permite montar a consulta do ERP por interpolação sem
+        abrir brecha de injeção: o que não é dígito não entra.
+        """
+        return [p.strip() and int(p.strip()) for p in (texto or '').split(',') if p.strip().isdigit()]
+
     def codigos_producao(self) -> list[int]:
-        codigos = []
-        for parte in (self.producao_codigos or '').split(','):
-            parte = parte.strip()
-            if parte.isdigit():
-                codigos.append(int(parte))
-        return codigos
+        return self._inteiros(self.producao_codigos)
+
+    def locais_producao(self) -> list[int]:
+        return self._inteiros(self.producao_local)
+
+    def tem_producao_configurada(self) -> bool:
+        return bool(self.codigos_producao() or self.locais_producao())
 
 
 class ResultadoBoletim(models.Model):

@@ -38,9 +38,11 @@ class IndicadorBoletimAdmin(admin.ModelAdmin):
             'description': 'O limite vai na mesma unidade do resultado: 5 (e não 0,05) para 5%.',
         }),
         ('Produção para ponderar', {
-            'fields': ('producao_codigos', 'producao_etapa'),
+            'fields': ('producao_codigos', 'producao_local', 'producao_etapa'),
             'description': 'Só nos <b>componentes</b> de um indicador ponderado. Sem produção, o pai '
-                           'cai para média simples e a tela marca a célula.',
+                           'cai para média simples e a tela marca a célula.<br>'
+                           '<b>Código de estoque</b> separa produto (2737 CH-II, 2738 hidráulica, etapa 3); '
+                           '<b>local</b> separa fábrica (23 FCM I, 24 FCM II, 25 FCM III, etapa 6).',
         }),
     )
 
