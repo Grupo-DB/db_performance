@@ -127,6 +127,7 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                 return Response(ConversaDetailSerializer(conversa).data)
             Conversa.objects.filter(pk=conversa.pk).update(responsavel=request.user)
             conversa.refresh_from_db(fields=['responsavel'])
+            services.marcar_avisos_lidos(conversa, usuario=request.user)
             if anterior_id:
                 # Quem perdeu o chamado precisa saber: ele estava respondendo.
                 WhatsAppNotificacao.objects.create(
@@ -142,6 +143,8 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         atualizados = Conversa.objects.filter(pk=conversa.pk, responsavel__isnull=True).update(responsavel=request.user)
         if not atualizados:
             return Response({'detail': 'Conversa já foi assumida por outro usuário.'}, status=status.HTTP_409_CONFLICT)
+        # Quem assume está com a conversa aberta na frente: são avisos lidos.
+        services.marcar_avisos_lidos(conversa, usuario=request.user)
         return Response(ConversaDetailSerializer(self.get_object()).data)
 
     @action(detail=True, methods=['post'])
@@ -174,6 +177,10 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         conversa = self.get_object()
         conversa.status = 'ENCERRADA'
         conversa.save(update_fields=['status'])
+        # Quem encerrou leu. Colega que nunca abriu esta conversa continua com o aviso
+        # (o `lido` é pessoal) e a encontra no arquivo da fila, ou zera a fila inteira
+        # pelo badge da Central.
+        services.marcar_avisos_lidos(conversa, usuario=request.user)
         return Response(ConversaDetailSerializer(conversa).data)
 
     @action(detail=True, methods=['post'])
@@ -378,6 +385,9 @@ class MensagemViewSet(viewsets.ModelViewSet):
             MensagemAnexo.objects.create(mensagem=mensagem, arquivo=anexo, mime_type=mime)
         conversa.ultima_mensagem_em = timezone.now()
         conversa.save(update_fields=['ultima_mensagem_em'])
+        # Quem responde leu o que o cliente escreveu. Vale só para ele: o aviso do
+        # colega é a leitura DELE, e some quando ele abrir a conversa.
+        services.marcar_avisos_lidos(conversa, usuario=self.request.user)
         enviar_mensagem_whatsapp.delay(mensagem.id)
 
 
@@ -433,8 +443,27 @@ class WhatsAppNotificacaoViewSet(viewsets.ReadOnlyModelViewSet):
         conversa_id = request.data.get('conversa_id')
         if not conversa_id:
             return Response({'detail': 'Informe a conversa.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Baixa pessoal: quem abriu leu. Os colegas continuam com o aviso até alguém
+        # assumir, responder ou encerrar (ver services.marcar_avisos_lidos).
         atualizadas = WhatsAppNotificacao.objects.filter(
             usuario_notificado=request.user, conversa_id=conversa_id, lido=False,
+        ).update(lido=True)
+        return Response({'marcadas': atualizadas})
+
+    @action(detail=False, methods=['post'], url_path='marcar-fila-lida')
+    def marcar_fila_lida(self, request):
+        """
+        Zera os meus avisos de uma fila inteira — o "marcar tudo como lido" dela.
+
+        Existe porque `lido` é pessoal: um aviso de conversa que outro atendente já
+        encerrou não sai abrindo a lista de conversas abertas (a encerrada não está
+        lá). Sem esta saída, o badge dessa fila ficaria aceso para sempre.
+        """
+        fila_id = request.data.get('fila_id')
+        if not fila_id:
+            return Response({'detail': 'Informe a fila.'}, status=status.HTTP_400_BAD_REQUEST)
+        atualizadas = WhatsAppNotificacao.objects.filter(
+            usuario_notificado=request.user, conversa__fila_id=fila_id, lido=False,
         ).update(lido=True)
         return Response({'marcadas': atualizadas})
 

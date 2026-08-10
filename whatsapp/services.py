@@ -32,6 +32,26 @@ def eh_gestor(usuario) -> bool:
     return usuario.is_staff or usuario.groups.filter(name=GRUPO_GESTOR).exists()
 
 
+def marcar_avisos_lidos(conversa, usuario=None) -> int:
+    """
+    Dá baixa nos avisos pendentes de uma conversa.
+
+    `lido` é pessoal: o badge de cada um conta o que ELE não leu, mesmo que um colega
+    da mesma fila já tenha respondido. É por isso que todas as chamadas de dentro do
+    atendimento passam `usuario` — a baixa coletiva (sem `usuario`) ficou disponível
+    porque é o que faz sentido em manutenção/limpeza, não no fluxo do dia.
+
+    O efeito colateral da regra pessoal: quem nunca abriu uma conversa que já foi
+    encerrada continua com o aviso, e a conversa encerrada não aparece na lista de
+    abertas. A saída é ver o arquivo da fila (o botão da caixa na Central) ou zerar a
+    fila de uma vez em `marcar-fila-lida`.
+    """
+    qs = WhatsAppNotificacao.objects.filter(conversa=conversa, lido=False)
+    if usuario is not None:
+        qs = qs.filter(usuario_notificado=usuario)
+    return qs.update(lido=True)
+
+
 def pode_atender(usuario, conversa) -> bool:
     """
     Quem pode escrever, encerrar e abrir tarefa nesta conversa.
