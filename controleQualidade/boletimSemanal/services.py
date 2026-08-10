@@ -149,22 +149,26 @@ def _queryset_do_indicador(indicador, ano: int):
     return qs.distinct()
 
 
-def valores_por_semana(indicador, ano: int) -> dict[int, list[float]]:
+def valores_por_analise(indicador, ano: int):
     """
-    Todos os valores do indicador no ano, agrupados pela semana ISO.
+    Valor do indicador em cada análise do ano, com a análise ao lado.
+
+    Devolve `({analise_id: valor}, {analise_id: Analise})`. Separado do agrupamento
+    por semana porque a tela também precisa da lista nominal — "quais análises
+    entraram nesta média" é a primeira pergunta de quem vê um número estranho.
 
     Três consultas por indicador: as análises, os ensaios delas e — só para as que
-    não casaram — os cálculos compostos. É o suficiente para desenhar o ano inteiro.
+    não casaram — os cálculos compostos. É o suficiente para o ano inteiro.
     """
     analises = list(_queryset_do_indicador(indicador, ano))
     if not analises:
-        return {}
+        return {}, {}
 
     por_id = {a.id: a for a in analises}
     ensaio_id = indicador.ensaio_id
     ensaio_nome = (indicador.ensaio_nome or '').strip()
     if not ensaio_id and not ensaio_nome and not indicador.campo_especial:
-        return {}
+        return {}, por_id
 
     valores: dict[int, float] = {}
 
@@ -209,16 +213,57 @@ def valores_por_semana(indicador, ano: int) -> dict[int, list[float]]:
         if faltando:
             valores.update(_valores_de_campo_especial(indicador, [por_id[i] for i in faltando]))
 
+    return valores, por_id
+
+
+def _semana_da_analise(analise, indicador, ano: int):
+    """Semana ISO da análise, ou None quando ela cai fora do ano pedido."""
+    referencia = _data_de_referencia(analise, indicador.campo_data)
+    if not referencia:
+        return None
+    ano_iso, semana = semana_de(referencia)
+    # Virada de ano: 31/12 pode pertencer à semana 1 do ano seguinte.
+    return semana if ano_iso == ano else None
+
+
+def valores_por_semana(indicador, ano: int) -> dict[int, list[float]]:
+    """Os valores do ano agrupados pela semana ISO — é o que alimenta o boletim."""
+    valores, por_id = valores_por_analise(indicador, ano)
     por_semana: dict[int, list[float]] = {}
     for analise_id, valor in valores.items():
-        referencia = _data_de_referencia(por_id[analise_id], indicador.campo_data)
-        if not referencia:
-            continue
-        ano_iso, semana = semana_de(referencia)
-        if ano_iso != ano:
-            continue  # semana pertence a outro ano ISO (virada de ano)
-        por_semana.setdefault(semana, []).append(valor)
+        semana = _semana_da_analise(por_id[analise_id], indicador, ano)
+        if semana is not None:
+            por_semana.setdefault(semana, []).append(valor)
     return por_semana
+
+
+def analises_da_semana(indicador, ano: int, semana: int) -> list[dict]:
+    """
+    As análises que entraram no número de uma semana, com o que a tela precisa para
+    listá-las e abrir cada uma: número da amostra, valor, data e ponto de coleta.
+    """
+    valores, por_id = valores_por_analise(indicador, ano)
+    linhas = []
+    for analise_id, valor in valores.items():
+        analise = por_id[analise_id]
+        if _semana_da_analise(analise, indicador, ano) != semana:
+            continue
+        amostra = analise.amostra
+        produto = getattr(amostra, 'produto_amostra', None) if amostra else None
+        linhas.append({
+            'analise_id': analise_id,
+            'valor': valor,
+            'data': _data_de_referencia(analise, indicador.campo_data),
+            'amostra_numero': getattr(amostra, 'numero', '') if amostra else '',
+            'material': getattr(amostra, 'material', '') if amostra else '',
+            'tipo_amostra': getattr(amostra, 'tipo_amostra', '') if amostra else '',
+            'local_coleta': getattr(amostra, 'local_coleta', '') if amostra else '',
+            'produto': getattr(produto, 'nome', '') if produto else '',
+            'finalizada': analise.finalizada,
+        })
+    # Por data: é a ordem em que o laboratório lê o histórico da semana.
+    linhas.sort(key=lambda l: (l['data'] or date.min, l['analise_id']))
+    return linhas
 
 
 def _valores_de_campo_especial(indicador, analises) -> dict[int, float]:

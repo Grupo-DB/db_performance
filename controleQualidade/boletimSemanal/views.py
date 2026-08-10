@@ -157,6 +157,60 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
             'blocos': blocos,
         })
 
+    @action(detail=False, methods=['get'])
+    def analises(self, request):
+        """
+        As análises que formaram o número de uma célula.
+
+        Endpoint separado, e não um campo do boletim, de propósito: a lista nominal
+        multiplicada por 25 indicadores × 52 semanas viraria uma resposta de alguns
+        MB para uma informação que só interessa quando alguém desconfia de uma
+        célula específica.
+        """
+        try:
+            indicador = IndicadorBoletim.objects.get(pk=request.query_params.get('indicador'))
+        except (IndicadorBoletim.DoesNotExist, TypeError, ValueError):
+            return Response({'detail': 'Indicador inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            ano = int(request.query_params.get('ano'))
+            semana = int(request.query_params.get('semana'))
+        except (TypeError, ValueError):
+            return Response({'detail': 'Informe ano e semana.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Num ponderado o pai não tem análise própria: o que existe são as dos
+        # componentes, então a lista sai agrupada por componente.
+        if indicador.agregacao == 'PONDERADO':
+            grupos = [
+                {'indicador': c.id, 'nome': c.nome, 'analises': services.analises_da_semana(c, ano, semana)}
+                for c in indicador.componentes.filter(ativo=True).order_by('ordem', 'nome')
+            ]
+        else:
+            grupos = [{
+                'indicador': indicador.id, 'nome': indicador.nome,
+                'analises': services.analises_da_semana(indicador, ano, semana),
+            }]
+
+        return Response({
+            'indicador': indicador.id,
+            'nome': indicador.nome,
+            'unidade': indicador.unidade,
+            'casas_decimais': indicador.casas_decimais,
+            # De onde o número foi lido — responde "por que essa análise entrou?"
+            'origem': {
+                'ensaio': indicador.ensaio.descricao if indicador.ensaio else '',
+                'ensaio_nome': indicador.ensaio_nome,
+                'campo_especial': indicador.campo_especial,
+                'peneira_malha': indicador.peneira_malha,
+                'peneira_metrica': indicador.peneira_metrica,
+                'material': indicador.material,
+                'tipo_amostra': indicador.tipo_amostra,
+                'local_coleta': indicador.local_coleta,
+                'finalidade': indicador.finalidade,
+                'campo_data': indicador.campo_data,
+            },
+            'grupos': grupos,
+        })
+
     @staticmethod
     def _indicador_payload(serie, semana):
         indicador = serie.indicador
