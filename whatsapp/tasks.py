@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 
 from celery import shared_task
 from django.core.files.base import ContentFile
@@ -74,6 +75,10 @@ def _processar_mensagem_recebida(value: dict, msg: dict):
         wa_message_id=wa_message_id,
         status_entrega='ENTREGUE',
         payload_bruto=msg,
+        # Cliente respondendo uma mensagem específica: a Meta manda o id da citada
+        # em context.id. Guardar o vínculo é o que deixa a central mostrar "em
+        # resposta a" — sem isso um "sim" solto não diz a que ele se refere.
+        responde_a=_mensagem_citada(msg),
     )
 
     media_info = msg.get(tipo_msg) if tipo_msg in _TIPO_MEDIA_CAMPO else None
@@ -84,6 +89,19 @@ def _processar_mensagem_recebida(value: dict, msg: dict):
         _notificar_nova_mensagem(conversa, texto or f"[{tipo_interno.lower()}]")
     else:
         services.resolver_fila_por_texto(texto, conversa)
+
+
+def _mensagem_citada(msg: dict):
+    """
+    A mensagem que o cliente citou, quando ela existe no nosso histórico.
+
+    Devolve None sem drama quando o id não é conhecido: a citada pode ser
+    anterior à integração, ou ter sido enviada por outro canal.
+    """
+    citada_id = (msg.get('context') or {}).get('id')
+    if not citada_id:
+        return None
+    return Mensagem.objects.filter(wa_message_id=citada_id).first()
 
 
 def _notificar_nova_mensagem(conversa: Conversa, preview: str):
@@ -148,9 +166,32 @@ def baixar_midia_whatsapp(mensagem_id: int, wa_media_id: str):
         conteudo, content_type = graph_api.baixar_midia(url)
         mensagem = Mensagem.objects.get(id=mensagem_id)
         anexo = MensagemAnexo(mensagem=mensagem, wa_media_id=wa_media_id, mime_type=content_type)
-        anexo.arquivo.save(f"{wa_media_id}", ContentFile(conteudo), save=True)
+        # Com extensão: o arquivo é servido pelo nginx, que decide o Content-Type
+        # pelo nome. Sem ela a foto descia como octet-stream e o navegador não a
+        # tratava como imagem (nem no <img> da bolha, nem ao abrir em aba nova).
+        anexo.arquivo.save(f'{wa_media_id}{_extensao_da_midia(content_type)}', ContentFile(conteudo), save=True)
     except Exception:
         logger.exception('Falha ao baixar mídia do WhatsApp (media_id=%s)', wa_media_id)
+
+
+def _extensao_da_midia(content_type: str) -> str:
+    """
+    Extensão a partir do Content-Type que a Meta devolveu.
+
+    A tabela vem antes do `guess_extension` porque o palpite dele depende da tabela
+    de MIME do sistema operacional e varia entre versões do Python — no áudio do
+    WhatsApp, por exemplo, ele devolve '.oga' para audio/ogg, extensão que a lista
+    padrão do nginx não conhece. Aqui os tipos que sempre aparecem ficam fixos.
+    """
+    mime = (content_type or '').split(';')[0].strip().lower()
+    conhecidas = {
+        'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp',
+        'audio/ogg': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a',
+        'video/mp4': '.mp4', 'application/pdf': '.pdf',
+    }
+    if mime in conhecidas:
+        return conhecidas[mime]
+    return mimetypes.guess_extension(mime) or ''
 
 
 def _marcar_enviada(mensagem: Mensagem, resposta: dict):
@@ -181,14 +222,26 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
     uma vez só, antes do envio, porque ele depende de qual foi a última saída da
     conversa — e esta mensagem passa a ser a última assim que sai.
     """
-    mensagem = Mensagem.objects.select_related('conversa', 'autor').prefetch_related('anexos').get(id=mensagem_id)
+    mensagem = (
+        Mensagem.objects
+        .select_related('conversa', 'autor', 'responde_a')
+        .prefetch_related('anexos')
+        .get(id=mensagem_id)
+    )
     telefone = mensagem.conversa.contato_telefone
     anexo = mensagem.anexos.first()
     texto_para_cliente = services.assinar_para_cliente(mensagem.texto, mensagem)
+    # Só cita o que a Meta conhece: mensagem nossa que ainda não saiu (ou anterior
+    # à integração) não tem wa_message_id, e mandar `context` com id inválido faz
+    # a Meta recusar a mensagem inteira em vez de só ignorar a citação.
+    citando = (mensagem.responde_a.wa_message_id or '') if mensagem.responde_a_id else ''
 
     if anexo is None:
         try:
-            _marcar_enviada(mensagem, graph_api.enviar_mensagem_texto(telefone, texto_para_cliente))
+            _marcar_enviada(
+                mensagem,
+                graph_api.enviar_mensagem_texto(telefone, texto_para_cliente, citando=citando),
+            )
         except Exception as exc:
             _marcar_falha(mensagem, exc, 'Falha ao enviar texto do WhatsApp')
         return
@@ -211,7 +264,8 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
         anexo.save(update_fields=['wa_media_id'])
 
         resposta = graph_api.enviar_midia(
-            telefone, media_id, categoria, legenda=texto_para_cliente, nome_arquivo=nome,
+            telefone, media_id, categoria, legenda=texto_para_cliente,
+            nome_arquivo=nome, citando=citando,
         )
         _marcar_enviada(mensagem, resposta)
     except Exception as exc:

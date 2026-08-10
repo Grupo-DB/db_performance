@@ -19,29 +19,57 @@ TENTATIVAS_MAXIMAS = 3
 # só porque o último a falar foi a mesma pessoa.
 INTERVALO_REASSINATURA = timedelta(hours=4)
 
+# Grupo (django.contrib.auth.Group) que enxerga todas as filas e pode assumir
+# qualquer conversa, inclusive as que já estão com outro atendente. É o supervisor
+# do atendimento: sem isso, um chamado parado com alguém de folga só saía da
+# frente pelo admin do Django.
+GRUPO_GESTOR = 'GestorWhatsapp'
+
+
+def eh_gestor(usuario) -> bool:
+    if not usuario or not usuario.is_authenticated:
+        return False
+    return usuario.is_staff or usuario.groups.filter(name=GRUPO_GESTOR).exists()
+
+
+def pode_atender(usuario, conversa) -> bool:
+    """
+    Quem pode escrever, encerrar e abrir tarefa nesta conversa.
+
+    Regra normal é pertencer à fila. O gestor entra em qualquer uma — de nada
+    serviria ele assumir um chamado e depois não conseguir responder.
+    """
+    if eh_gestor(usuario):
+        return True
+    return bool(conversa.fila_id) and conversa.fila.membros.filter(pk=usuario.pk).exists()
+
 
 def _filas_ativas():
     return list(Fila.objects.filter(ativa=True).order_by('ordem', 'nome'))
 
 
-# ── Assinatura do atendente ──────────────────────────────────────────────────
+# ── Assinatura do atendimento ────────────────────────────────────────────────
 # A Cloud API entrega tudo pelo número da empresa: o cliente vê "Grupo DB" e não
-# tem como saber com quem está falando. O nome só chega se for junto do conteúdo.
+# tem como saber a que setor caiu. A assinatura só chega se for junto do conteúdo.
+#
+# A assinatura é do SETOR, não da pessoa: antes ia o primeiro nome de quem
+# respondeu, e o cliente passava a cobrar o atendente pelo nome (e a estranhar
+# quando outro respondia). O texto é editável no admin
+# (ConfiguracaoAtendimento.assinatura), então trocar não exige deploy.
 
-def nome_do_atendente(usuario) -> str:
-    """Primeiro nome do atendente; cai no username quando o cadastro está vazio."""
-    if usuario is None:
-        return ''
-    return (usuario.first_name or '').strip() or usuario.username
+def assinatura_do_atendimento() -> str:
+    """Assinatura configurada; vazia desliga a assinatura por completo."""
+    return (ConfiguracaoAtendimento.carregar().assinatura or '').strip()
 
 
 def _deve_assinar(mensagem) -> bool:
     """
-    Assina só quando o nome acrescenta informação: na primeira fala do atendente,
-    quando outra pessoa assume, ou quando a conversa ficou parada.
+    Assina na primeira fala do atendimento e depois de a conversa ficar parada.
 
-    Repetir o nome em toda linha polui o histórico do cliente — numa sequência de
-    cinco mensagens seguidas ele lê o mesmo "*Jian:*" cinco vezes.
+    Repetir a assinatura em toda linha polui o histórico do cliente — numa
+    sequência de cinco mensagens seguidas ele leria o mesmo rótulo cinco vezes.
+    Quem é o atendente não entra mais na conta: a assinatura é a mesma para
+    todos, então trocar de atendente não é motivo para reassinar.
     """
     if mensagem.autor_id is None:
         return False  # bot: menu de setores, confirmação de roteamento
@@ -55,32 +83,32 @@ def _deve_assinar(mensagem) -> bool:
             created_at__lt=mensagem.created_at,
         )
         # Uma mensagem que não saiu não apresentou ninguém: contá-la faria a
-        # próxima tentativa ir sem nome.
+        # próxima tentativa ir sem assinatura.
         .exclude(status_entrega='FALHOU')
         .exclude(pk=mensagem.pk)
         .order_by('-created_at')
         .first()
     )
-    if anterior is None or anterior.autor_id != mensagem.autor_id:
+    if anterior is None:
         return True
     return (mensagem.created_at - anterior.created_at) > INTERVALO_REASSINATURA
 
 
 def assinar_para_cliente(texto: str, mensagem) -> str:
     """
-    Devolve o texto como o cliente deve recebê-lo, com o nome do atendente na
-    frente quando for o caso.
+    Devolve o texto como o cliente deve recebê-lo, com a assinatura do
+    atendimento na frente quando for o caso.
 
     Aplicado só na saída para a Meta, de propósito: gravar o prefixo em
-    `Mensagem.texto` duplicaria o nome na central, que já mostra o autor embaixo
-    da bolha, e sujaria o resumo que vira tarefa no Kanban.
+    `Mensagem.texto` duplicaria o rótulo na central, que já mostra o autor
+    embaixo da bolha, e sujaria o resumo que vira tarefa no Kanban.
     """
     if not _deve_assinar(mensagem):
         return texto
-    nome = nome_do_atendente(mensagem.autor)
+    nome = assinatura_do_atendimento()
     if not nome:
         return texto
-    # Sem texto é legenda de mídia: aí o nome vai sozinho, sem os dois-pontos.
+    # Sem texto é legenda de mídia: aí a assinatura vai sozinha, sem os dois-pontos.
     return f'*{nome}:*\n{texto}' if (texto or '').strip() else f'*{nome}*'
 
 

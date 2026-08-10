@@ -95,8 +95,13 @@ def tipo_interno_da_midia(mime_type: str, nome_arquivo: str = '') -> str:
 
 # ── Envio ────────────────────────────────────────────────────────────────────
 
-def enviar_mensagem_texto(telefone: str, texto: str) -> dict:
-    """Envia mensagem de texto livre. Só é aceita pela Meta dentro da janela de 24h."""
+def enviar_mensagem_texto(telefone: str, texto: str, citando: str = '') -> dict:
+    """
+    Envia mensagem de texto livre. Só é aceita pela Meta dentro da janela de 24h.
+
+    `citando` é o `wa_message_id` da mensagem que deve aparecer citada acima da
+    resposta (o "Responder" do WhatsApp). Vazio manda mensagem solta.
+    """
     url = f"{_base_url()}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
     payload = {
         'messaging_product': 'whatsapp',
@@ -104,6 +109,8 @@ def enviar_mensagem_texto(telefone: str, texto: str) -> dict:
         'type': 'text',
         'text': {'body': texto},
     }
+    if citando:
+        payload['context'] = {'message_id': citando}
     resp = requests.post(url, json=payload, headers=_headers(), timeout=TIMEOUT_PADRAO)
     resp.raise_for_status()
     return resp.json()
@@ -149,6 +156,7 @@ def enviar_midia(
     categoria: str,
     legenda: str = '',
     nome_arquivo: str = '',
+    citando: str = '',
 ) -> dict:
     """Envia mídia já hospedada na Meta (`media_id` vindo de `upload_midia`)."""
     corpo: dict = {'id': media_id}
@@ -165,6 +173,8 @@ def enviar_midia(
         'type': categoria,
         categoria: corpo,
     }
+    if citando:
+        payload['context'] = {'message_id': citando}
     resp = requests.post(url, json=payload, headers=_headers(), timeout=TIMEOUT_MIDIA)
     resp.raise_for_status()
     return resp.json()
@@ -197,6 +207,56 @@ def enviar_template(
         'template': template,
     }
     resp = requests.post(url, json=payload, headers=_headers(), timeout=TIMEOUT_PADRAO)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def criar_template(
+    nome: str,
+    corpo: str,
+    exemplos: list[str] | None = None,
+    categoria: str = 'UTILITY',
+    idioma: str = 'pt_BR',
+) -> dict:
+    """
+    Cadastra um template na conta e o manda para revisão da Meta.
+
+    O template nasce em PENDING: a aprovação é da Meta e leva de minutos a algumas
+    horas. Enquanto não for APPROVED ele não aparece na Central (a tela lista só
+    aprovados) nem pode ser enviado.
+
+    `exemplos` são valores de amostra para {{1}}, {{2}}... — a Meta EXIGE um exemplo
+    por variável declarada e reprova o cadastro sem eles. Ela avalia o texto já
+    preenchido com esses exemplos, então valem valores realistas.
+
+    Categoria: UTILITY para acompanhamento de algo que o cliente pediu (é o caso
+    aqui, e é a mais barata); MARKETING para divulgação. Classificar como UTILITY
+    um texto de divulgação faz a Meta reprovar ou reclassificar.
+    """
+    waba_id = getattr(settings, 'WHATSAPP_BUSINESS_ACCOUNT_ID', None)
+    if not waba_id:
+        raise ValueError(
+            'WHATSAPP_BUSINESS_ACCOUNT_ID não configurado — é a conta (WABA) onde o '
+            'template é criado. O id fica no WhatsApp Manager, em Configurações da conta.'
+        )
+
+    componente: dict = {'type': 'BODY', 'text': corpo}
+    if exemplos:
+        # body_text é uma lista de CONJUNTOS de exemplos; um conjunto basta.
+        componente['example'] = {'body_text': [list(exemplos)]}
+
+    url = f"{_base_url()}/{waba_id}/message_templates"
+    resp = requests.post(
+        url,
+        headers=_headers(),
+        json={
+            'name': nome,
+            'language': idioma,
+            'category': categoria,
+            'components': [componente],
+        },
+        timeout=TIMEOUT_PADRAO,
+    )
     resp.raise_for_status()
     return resp.json()
 

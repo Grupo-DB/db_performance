@@ -33,8 +33,11 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
         queryset=User.objects.all(), source='responsavel',
         write_only=True, required=False, allow_null=True
     )
+    # Também de LEITURA: era write_only, então a tarefa voltava da API sem dizer
+    # a que lista pertence e o select "Lista" do modal de edição abria vazio.
+    # PrimaryKeyRelatedField devolve só a pk (PKOnlyObject), sem consulta extra.
     coluna_id = serializers.PrimaryKeyRelatedField(
-        queryset=KanbanColumn.objects.all(), source='coluna', write_only=True
+        queryset=KanbanColumn.objects.all(), source='coluna'
     )
     esta_atrasada = serializers.SerializerMethodField()
     anexos = KanbanAnexoSerializer(many=True, read_only=True)

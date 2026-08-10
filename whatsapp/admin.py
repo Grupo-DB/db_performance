@@ -24,6 +24,12 @@ class ConfiguracaoAtendimentoAdmin(admin.ModelAdmin):
             'fields': ('texto_roteamento',),
             'description': 'Escreva <code>{setor}</code> onde o nome do setor deve entrar.',
         }),
+        ('Assinatura das respostas', {
+            'fields': ('assinatura',),
+            'description': 'Vai na frente da primeira resposta do atendimento (e de novo se a '
+                           'conversa ficar horas parada). É a mesma para todos os atendentes — o '
+                           'cliente fala com a empresa, não com uma pessoa. Em branco não assina.',
+        }),
         ('Última alteração', {'fields': ('atualizado_em', 'atualizado_por')}),
     )
 

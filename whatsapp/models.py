@@ -95,6 +95,11 @@ class Mensagem(models.Model):
     tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, default='TEXTO')
     texto = models.TextField(blank=True)
     autor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='mensagens_whatsapp_enviadas')
+    responde_a = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='respostas',
+        help_text='Mensagem citada. Na saída vira o "reply" do WhatsApp; na entrada é o que '
+                  'o cliente citou (vem em context.id do webhook).',
+    )
     wa_message_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     status_entrega = models.CharField(max_length=10, choices=STATUS_ENTREGA_CHOICES, default='PENDENTE')
     erro_detalhe = models.TextField(blank=True)
@@ -128,7 +133,9 @@ class MensagemAnexo(models.Model):
 
     def save(self, *args, **kwargs):
         if self.arquivo and not self.nome_original:
-            self.nome_original = self.arquivo.name
+            # Só o nome do arquivo. Guardar `arquivo.name` inteiro fazia a Central
+            # exibir "whatsapp/anexos/2026/08/15654489…" como nome do anexo.
+            self.nome_original = self.arquivo.name.rsplit('/', 1)[-1]
         if self.arquivo and not self.tamanho:
             self.tamanho = self.arquivo.size
         super().save(*args, **kwargs)
@@ -156,6 +163,12 @@ class ConfiguracaoAtendimento(models.Model):
         default='Você foi direcionado ao setor {setor}. Em breve alguém vai te atender.',
         help_text='Confirmação enviada quando o cliente escolhe o setor. '
                   'Use {setor} onde o nome do setor deve aparecer.',
+    )
+    assinatura = models.CharField(
+        max_length=60, blank=True, default='Grupo DB TI',
+        help_text='Nome que o cliente vê no começo da resposta do atendente. É fixo de '
+                  'propósito: o cliente fala com a empresa, não com uma pessoa. '
+                  'Deixe em branco para não assinar nada.',
     )
     atualizado_em = models.DateTimeField(auto_now=True)
     atualizado_por = models.ForeignKey(

@@ -33,15 +33,36 @@ class MensagemAnexoSerializer(serializers.ModelSerializer):
         read_only_fields = ['nome_original', 'tamanho', 'mime_type', 'criado_em']
 
 
+class MensagemCitadaSerializer(serializers.ModelSerializer):
+    """
+    Resumo da mensagem citada — só o que a bolha precisa desenhar acima da
+    resposta. Deliberadamente raso: aninhar a mensagem inteira abriria uma
+    corrente de citações de citações.
+    """
+    autor = UserMinSerializer(read_only=True)
+
+    class Meta:
+        model = Mensagem
+        fields = ['id', 'direcao', 'tipo', 'texto', 'autor']
+
+
 class MensagemSerializer(serializers.ModelSerializer):
     autor = UserMinSerializer(read_only=True)
     anexos = MensagemAnexoSerializer(many=True, read_only=True)
     anexo = serializers.FileField(write_only=True, required=False)
+    # `responde_a` entra como id (o que a tela manda) e sai como `citada`, já
+    # resumida: são dois campos sobre o mesmo vínculo porque a tela precisa
+    # mostrar o texto citado sem uma segunda requisição.
+    responde_a = serializers.PrimaryKeyRelatedField(
+        queryset=Mensagem.objects.all(), write_only=True, required=False, allow_null=True,
+    )
+    citada = MensagemCitadaSerializer(source='responde_a', read_only=True)
 
     class Meta:
         model = Mensagem
         fields = [
             'id', 'conversa', 'direcao', 'tipo', 'texto', 'autor', 'anexos', 'anexo',
+            'responde_a', 'citada',
             'template_nome', 'wa_message_id', 'status_entrega', 'erro_detalhe', 'created_at',
         ]
         read_only_fields = [
@@ -102,6 +123,11 @@ class ConversaDetailSerializer(serializers.ModelSerializer):
 
 
 class WhatsAppNotificacaoSerializer(serializers.ModelSerializer):
+    # Fila da conversa: é o que permite à Central mostrar um badge por fila em vez
+    # de um total solto. Vem como id (a tela já tem os nomes das filas) e é nulo em
+    # conversa que ainda não escolheu setor.
+    fila = serializers.IntegerField(source='conversa.fila_id', read_only=True, allow_null=True)
+
     class Meta:
         model = WhatsAppNotificacao
-        fields = ['id', 'conversa', 'tipo', 'mensagem', 'lido', 'created_at']
+        fields = ['id', 'conversa', 'fila', 'tipo', 'mensagem', 'lido', 'created_at']

@@ -12,13 +12,13 @@ from django.utils import timezone
 
 from rest_framework import mixins, viewsets, status
 from rest_framework.decorators import action
-from rest_framework.exceptions import APIException, PermissionDenied
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import graph_api
+from . import graph_api, services
 from .models import Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
 from .serializers import (
     FilaSerializer, ConversaListSerializer, ConversaDetailSerializer,
@@ -71,7 +71,9 @@ class FilaViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Fila.objects.all() if user.is_staff else Fila.objects.filter(membros=user)
+        # Gestor do atendimento vê todas as filas: é a condição para ele assumir
+        # um chamado de qualquer setor (ver services.GRUPO_GESTOR).
+        qs = Fila.objects.all() if services.eh_gestor(user) else Fila.objects.filter(membros=user)
         return qs.distinct()
 
     def perform_create(self, serializer):
@@ -93,6 +95,8 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if services.eh_gestor(self.request.user):
+            return Conversa.objects.all()
         return Conversa.objects.filter(fila__membros=self.request.user).distinct()
 
     def get_serializer_class(self):
@@ -111,7 +115,31 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
 
     @action(detail=True, methods=['post'])
     def assumir(self, request, pk=None):
-        atualizados = Conversa.objects.filter(pk=pk, responsavel__isnull=True).update(responsavel=request.user)
+        # get_object antes do UPDATE para a checagem de acesso valer: sem ele, um
+        # pk conhecido deixaria assumir conversa de fila alheia.
+        conversa = self.get_object()
+
+        if services.eh_gestor(request.user):
+            # Gestor tira o chamado de quem estiver com ele — é justamente para
+            # isso que o grupo existe (atendente de folga, chamado parado).
+            anterior_id = conversa.responsavel_id
+            if anterior_id == request.user.pk:
+                return Response(ConversaDetailSerializer(conversa).data)
+            Conversa.objects.filter(pk=conversa.pk).update(responsavel=request.user)
+            conversa.refresh_from_db(fields=['responsavel'])
+            if anterior_id:
+                # Quem perdeu o chamado precisa saber: ele estava respondendo.
+                WhatsAppNotificacao.objects.create(
+                    conversa=conversa, usuario_notificado_id=anterior_id,
+                    tipo='CONVERSA_TRANSFERIDA',
+                    mensagem=f'{request.user.username} assumiu o atendimento de '
+                             f'{conversa.contato_nome or conversa.contato_telefone}'[:255],
+                )
+            return Response(ConversaDetailSerializer(conversa).data)
+
+        # UPDATE condicional em vez de ler-e-salvar: dois atendentes clicando no
+        # mesmo instante, só um leva.
+        atualizados = Conversa.objects.filter(pk=conversa.pk, responsavel__isnull=True).update(responsavel=request.user)
         if not atualizados:
             return Response({'detail': 'Conversa já foi assumida por outro usuário.'}, status=status.HTTP_409_CONFLICT)
         return Response(ConversaDetailSerializer(self.get_object()).data)
@@ -175,7 +203,7 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         from kanban.models import KanbanColumn, KanbanTask
 
         conversa = self.get_object()
-        if not conversa.fila or not conversa.fila.membros.filter(pk=request.user.pk).exists():
+        if not services.pode_atender(request.user, conversa):
             raise PermissionDenied('Você não pertence à fila desta conversa.')
 
         try:
@@ -277,7 +305,7 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         checagem de janela do MensagemViewSet.
         """
         conversa = self.get_object()
-        if not conversa.fila or not conversa.fila.membros.filter(pk=request.user.pk).exists():
+        if not services.pode_atender(request.user, conversa):
             raise PermissionDenied('Você não pertence à fila desta conversa.')
 
         nome_template = (request.data.get('template') or '').strip()
@@ -315,17 +343,25 @@ class MensagemViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        return Mensagem.objects.filter(
-            conversa_id=self.kwargs['conversa_pk'],
-            conversa__fila__membros=self.request.user,
-        ).distinct()
+        qs = Mensagem.objects.filter(conversa_id=self.kwargs['conversa_pk'])
+        if not services.eh_gestor(self.request.user):
+            qs = qs.filter(conversa__fila__membros=self.request.user)
+        # A citada e os anexos entram em toda bolha: sem o prefetch a listagem
+        # fazia duas consultas por mensagem do histórico.
+        return qs.select_related('autor', 'responde_a', 'responde_a__autor').prefetch_related('anexos').distinct()
 
     def perform_create(self, serializer):
         conversa = Conversa.objects.get(pk=self.kwargs['conversa_pk'])
-        if not conversa.fila or not conversa.fila.membros.filter(pk=self.request.user.pk).exists():
+        if not services.pode_atender(self.request.user, conversa):
             raise PermissionDenied('Você não pertence à fila desta conversa.')
         if not conversa.dentro_da_janela_24h:
             raise JanelaExpirada()
+
+        # Citar mensagem de outra conversa mandaria para a Meta um context de um
+        # telefone diferente — ela recusa a mensagem inteira.
+        citada = serializer.validated_data.get('responde_a')
+        if citada and citada.conversa_id != conversa.id:
+            raise ValidationError({'responde_a': 'A mensagem citada é de outra conversa.'})
 
         anexo = serializer.validated_data.pop('anexo', None)
         mime = getattr(anexo, 'content_type', '') if anexo else ''
@@ -350,13 +386,57 @@ class WhatsAppNotificacaoViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return WhatsAppNotificacao.objects.filter(usuario_notificado=self.request.user)
+        # select_related: o serializer lê a fila pela conversa, e sem isto seriam
+        # duas centenas de consultas por listagem.
+        return (
+            WhatsAppNotificacao.objects
+            .filter(usuario_notificado=self.request.user)
+            .select_related('conversa')
+        )
+
+    def list(self, request, *args, **kwargs):
+        """
+        Só as mais recentes, e por padrão só as NÃO lidas.
+
+        Cada mensagem recebida gera uma notificação por membro da fila, então em
+        alguns meses isto viraria uma lista de milhares de linhas — puxada a cada
+        15s por todo mundo logado, já que o aviso de mensagem nova vive no topo da
+        tela. Quem consome quer exatamente as pendentes: são elas que viram badge
+        por fila, bipe e popup.
+
+        `?lido=` aceita 'false' (padrão), 'true' ou 'todos'.
+        """
+        qs = self.filter_queryset(self.get_queryset())
+        lido = (request.query_params.get('lido') or 'false').lower()
+        if lido in ('false', '0'):
+            qs = qs.filter(lido=False)
+        elif lido in ('true', '1'):
+            qs = qs.filter(lido=True)
+        return Response(self.get_serializer(qs[:200], many=True).data)
 
     @action(detail=False, methods=['post'])
     def marcar_como_lido(self, request):
         ids = request.data.get('notificacao_ids', [])
         WhatsAppNotificacao.objects.filter(id__in=ids, usuario_notificado=request.user).update(lido=True)
         return Response({'status': 'notificacoes marcadas como lidas'})
+
+    @action(detail=False, methods=['post'], url_path='marcar-conversa-lida')
+    def marcar_conversa_lida(self, request):
+        """
+        Zera os avisos de uma conversa — abrir o atendimento é ler o aviso.
+
+        Por conversa, e não por lista de ids, porque a tela chama isto no clique
+        da conversa: nesse instante ela pode ainda não ter recebido a primeira
+        volta do polling, e não teria ids para mandar. Sem isso o sino ficava
+        vermelho para sempre e o bipe voltava a tocar a cada recarga.
+        """
+        conversa_id = request.data.get('conversa_id')
+        if not conversa_id:
+            return Response({'detail': 'Informe a conversa.'}, status=status.HTTP_400_BAD_REQUEST)
+        atualizadas = WhatsAppNotificacao.objects.filter(
+            usuario_notificado=request.user, conversa_id=conversa_id, lido=False,
+        ).update(lido=True)
+        return Response({'marcadas': atualizadas})
 
     @action(detail=False, methods=['get'])
     def nao_lidas(self, request):
