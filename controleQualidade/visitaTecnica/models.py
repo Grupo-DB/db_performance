@@ -35,7 +35,9 @@ class VisitaTecnica(models.Model):
     acompanhantes_db = models.CharField(max_length=500, null=True, blank=True)
     vendedor = models.CharField(max_length=255, null=True, blank=True)
     material_ensaiado = models.CharField(max_length=255, null=True, blank=True)
-    data_aplicacao = models.DateField(null=True, blank=True)
+    # Texto livre, e não data: a obra informa o mês ("Fev/2026"), não o dia. Como
+    # DateField, o técnico era obrigado a inventar um dia 1º para o campo aceitar.
+    data_aplicacao = models.CharField(max_length=100, blank=True, default='')
     data_ensaio = models.DateField(null=True, blank=True)
     ambiente = models.CharField(max_length=50, null=True, blank=True)  # Interno / Externo
 
@@ -73,6 +75,14 @@ class VisitaTecnica(models.Model):
     # ── 5 - Considerações ────────────────────────────────────────────────────
     consideracoes = models.TextField(null=True, blank=True)
     observacoes = models.TextField(null=True, blank=True)
+
+    # ── Observações complementares (fim do relatório) ────────────────────────
+    # A parte solta do relatório entregue ao cliente: texto livre (coleta de
+    # amostras, o que se concluiu), as fotos gerais e a tabela do módulo de
+    # elasticidade dinâmico das amostras levadas ao laboratório.
+    # {texto, resultados_texto, amostras: [{nome, comprimento, largura, altura,
+    #  massa, tempo}]} — densidade, velocidade e Ed são calculados.
+    complementares = models.JSONField(default=dict, blank=True)
 
     laboratorio = models.CharField(max_length=255, null=True, blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
