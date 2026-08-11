@@ -180,7 +180,7 @@ def _queryset_do_indicador(indicador, ano: int):
     return qs.distinct()
 
 
-def valores_por_analise(indicador, ano: int):
+def valores_por_analise(indicador, ano: int, ignorar_exclusoes: bool = False):
     """
     Valor do indicador em cada análise do ano, com a análise ao lado.
 
@@ -200,6 +200,17 @@ def valores_por_analise(indicador, ano: int):
     ensaio_nome = (indicador.ensaio_nome or '').strip()
     if not ensaio_id and not ensaio_nome and not indicador.campo_especial:
         return {}, por_id
+
+    # Análises que o laboratório tirou desta linha: saem antes de qualquer leitura,
+    # para não entrarem na média nem na contagem de amostras. `ignorar_exclusoes` é
+    # usado só para montar a lista da tela, que mostra as excluídas riscadas.
+    excluidas = set() if ignorar_exclusoes else set(indicador.exclusoes.values_list('analise_id', flat=True))
+    if excluidas:
+        for analise_id in list(por_id):
+            if analise_id in excluidas:
+                del por_id[analise_id]
+        if not por_id:
+            return {}, {}
 
     valores: dict[int, float] = {}
 
@@ -284,12 +295,21 @@ def valores_por_semana(indicador, ano: int) -> dict[int, list[float]]:
     return por_semana
 
 
-def analises_da_semana(indicador, ano: int, semana: int) -> list[dict]:
+def analises_da_semana(indicador, ano: int, semana: int, incluir_excluidas=True) -> list[dict]:
     """
     As análises que entraram no número de uma semana, com o que a tela precisa para
     listá-las e abrir cada uma: número da amostra, valor, data e ponto de coleta.
+
+    As que foram tiradas da conta vêm juntas, marcadas com `excluida`: é preciso vê-las
+    para poder devolvê-las — uma análise excluída que sumisse da lista viraria uma
+    decisão irreversível pela tela.
     """
     valores, por_id = valores_por_analise(indicador, ano)
+    if incluir_excluidas:
+        fora, por_id_fora = _valores_das_excluidas(indicador, ano)
+        valores = {**valores, **fora}
+        por_id = {**por_id, **por_id_fora}
+    excluidas = set(indicador.exclusoes.values_list('analise_id', flat=True))
     linhas = []
     for analise_id, valor in valores.items():
         analise = por_id[analise_id]
@@ -307,10 +327,23 @@ def analises_da_semana(indicador, ano: int, semana: int) -> list[dict]:
             'local_coleta': getattr(amostra, 'local_coleta', '') if amostra else '',
             'produto': getattr(produto, 'nome', '') if produto else '',
             'finalizada': analise.finalizada,
+            'excluida': analise_id in excluidas,
         })
     # Por data: é a ordem em que o laboratório lê o histórico da semana.
     linhas.sort(key=lambda l: (l['data'] or date.min, l['analise_id']))
     return linhas
+
+
+def _valores_das_excluidas(indicador, ano: int):
+    """Repete a leitura só para as excluídas, para a tela poder mostrá-las e devolvê-las."""
+    ids = set(indicador.exclusoes.values_list('analise_id', flat=True))
+    if not ids:
+        return {}, {}
+    valores, por_id = valores_por_analise(indicador, ano, ignorar_exclusoes=True)
+    return (
+        {i: v for i, v in valores.items() if i in ids},
+        {i: a for i, a in por_id.items() if i in ids},
+    )
 
 
 def _valores_de_campo_especial(indicador, analises) -> dict[int, float]:

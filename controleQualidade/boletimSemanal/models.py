@@ -185,6 +185,40 @@ class IndicadorBoletim(models.Model):
         return bool(self.codigos_producao() or self.locais_producao())
 
 
+class AnaliseExcluidaBoletim(models.Model):
+    """
+    Análise que o laboratório tirou da conta de um indicador.
+
+    Guardado como registro (e não como flag na análise) por dois motivos: a análise
+    continua válida para todo o resto do sistema — o que se está dizendo é "não
+    represente esta linha do boletim" —, e fica o rastro de quem tirou, quando e por
+    quê, que é o que se pergunta meses depois ao comparar com a planilha antiga.
+
+    A exclusão vale para UM indicador. A mesma análise de calcário alimenta PN, PRNT e
+    RE ao mesmo tempo, e um resultado fora da curva costuma ser de um ensaio só; tirar
+    dos três de uma vez seria decidir demais por quem clicou.
+    """
+    indicador = models.ForeignKey(IndicadorBoletim, on_delete=models.CASCADE, related_name='exclusoes')
+    analise = models.ForeignKey(
+        'analise.Analise', on_delete=models.CASCADE, related_name='exclusoes_boletim',
+    )
+    motivo = models.CharField(max_length=255, blank=True)
+    usuario = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Análise fora do boletim'
+        verbose_name_plural = 'Análises fora do boletim'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['indicador', 'analise'], name='boletim_uma_exclusao_por_analise',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.indicador} — análise {self.analise_id}'
+
+
 class ResultadoBoletim(models.Model):
     """
     Correção manual de uma célula do boletim.

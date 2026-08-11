@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import IndicadorBoletim, ResultadoBoletim
+from .models import AnaliseExcluidaBoletim, IndicadorBoletim, ResultadoBoletim
 
 
 @admin.register(IndicadorBoletim)
@@ -62,3 +62,12 @@ class ResultadoBoletimAdmin(admin.ModelAdmin):
     list_filter = ('ano', 'indicador__bloco')
     search_fields = ('indicador__nome', 'texto', 'observacao')
     ordering = ('-ano', '-semana')
+
+
+@admin.register(AnaliseExcluidaBoletim)
+class AnaliseExcluidaBoletimAdmin(admin.ModelAdmin):
+    """Rastro de quem tirou qual análise de qual linha, e por quê."""
+    list_display = ('indicador', 'analise', 'motivo', 'usuario', 'criado_em')
+    list_filter = ('indicador__bloco',)
+    search_fields = ('indicador__nome', 'motivo')
+    ordering = ('-criado_em',)

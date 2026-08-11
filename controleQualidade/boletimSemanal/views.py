@@ -212,6 +212,37 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
             'grupos': grupos,
         })
 
+    @action(detail=False, methods=['post'], url_path='excluir-analise')
+    def excluir_analise(self, request):
+        """
+        Tira (ou devolve) uma análise da conta de um indicador.
+
+        A análise continua válida no resto do sistema — o que se diz aqui é "não
+        represente esta linha do boletim". Vale para o indicador informado: a mesma
+        análise de calcário alimenta PN, PRNT e RE, e um resultado fora da curva
+        costuma ser de um ensaio só.
+        """
+        from .models import AnaliseExcluidaBoletim
+
+        try:
+            indicador = IndicadorBoletim.objects.get(pk=request.data.get('indicador'))
+            analise_id = int(request.data.get('analise'))
+        except (IndicadorBoletim.DoesNotExist, TypeError, ValueError):
+            return Response({'detail': 'Indicador ou análise inválidos.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        excluir = request.data.get('excluir')
+        excluir = True if excluir is None else bool(excluir)
+
+        if not excluir:
+            AnaliseExcluidaBoletim.objects.filter(indicador=indicador, analise_id=analise_id).delete()
+            return Response({'excluida': False})
+
+        AnaliseExcluidaBoletim.objects.update_or_create(
+            indicador=indicador, analise_id=analise_id,
+            defaults={'motivo': (request.data.get('motivo') or '').strip()[:255], 'usuario': request.user},
+        )
+        return Response({'excluida': True})
+
     @staticmethod
     def _indicador_payload(serie, semana):
         indicador = serie.indicador
