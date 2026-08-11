@@ -610,6 +610,15 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             else:
                 qs = qs.filter(amostra__finalidade__icontains=finalidade)
 
+        # Tipo de amostragem (Media / Pontual): é como a amostra foi colhida, e separa
+        # o acompanhamento de rotina do ponto isolado.
+        tipo_amostragem = data.get('tipo_amostragem')
+        if tipo_amostragem:
+            if isinstance(tipo_amostragem, list):
+                qs = qs.filter(amostra__tipo_amostragem__in=tipo_amostragem)
+            else:
+                qs = qs.filter(amostra__tipo_amostragem__icontains=tipo_amostragem)
+
         tipo = data.get('tipo')
         if tipo:
             if isinstance(tipo, list):
@@ -738,6 +747,7 @@ class AnaliseViewSet(viewsets.ModelViewSet):
           - material: string ou lista
           - fornecedor: string ou lista
           - finalidade: string ou lista
+          - tipo_amostragem: string ou lista (Media | Pontual)
         Estatísticas (opcionais):
           - ensaio_id: int — filtra por ID do ensaio
           - ensaio_nome: string — filtra por nome/descrição do ensaio (icontains)
@@ -782,6 +792,9 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                     # Usada pelo relatório PDF por classificação do dashboard de qualidade
                     # (agrupa por origem/produto/finalidade/local de coleta).
                     'finalidade': amostra.finalidade if amostra else None,
+                    # Vai junto para a tela poder MOSTRAR o que filtrou (Media/Pontual) —
+                    # o filtro é resolvido aqui, mas conferir sem ver o valor é adivinhação.
+                    'tipo_amostragem': amostra.tipo_amostragem if amostra else None,
                     'produto_amostra': {
                         'id': amostra.produto_amostra.id,
                         'nome': amostra.produto_amostra.nome,

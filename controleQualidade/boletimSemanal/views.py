@@ -204,6 +204,7 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
                 'peneira_metrica': indicador.peneira_metrica,
                 'material': indicador.material,
                 'tipo_amostra': indicador.tipo_amostra,
+                'tipo_amostragem': indicador.tipo_amostragem,
                 'local_coleta': indicador.local_coleta,
                 'finalidade': indicador.finalidade,
                 'campo_data': indicador.campo_data,

@@ -13,7 +13,7 @@ class IndicadorBoletimSerializer(serializers.ModelSerializer):
             'id', 'bloco', 'bloco_titulo', 'nome', 'ordem', 'ativo', 'agregacao', 'pai',
             'ensaio', 'ensaio_descricao', 'ensaio_nome', 'campo_especial',
             'peneira_malha', 'peneira_metrica',
-            'material', 'tipo_amostra', 'local_coleta', 'finalidade', 'produtos', 'campo_data',
+            'material', 'tipo_amostra', 'tipo_amostragem', 'local_coleta', 'finalidade', 'produtos', 'campo_data',
             'unidade', 'casas_decimais', 'tipo_limite', 'valor_limite',
             'producao_codigos', 'producao_local', 'producao_etapa', 'observacao', 'componentes_nomes',
         ]

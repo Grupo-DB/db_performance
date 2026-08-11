@@ -109,24 +109,55 @@ def _filtro_ou(campo: str, texto: str) -> Q:
     Necessário porque a mesma coisa é digitada de formas diferentes na amostra: a cal
     hidratada aparece como 'CH-II', 'HIDRATADA' e 'HIDRATADA EXTRA', e um único
     trecho não pega as três sem pegar também a 'HIDRÁULICA', que é outro produto.
+
+    Termo começando com `=` exige o valor EXATO. Existe porque a comparação por
+    trecho tem uma armadilha silenciosa: 'Fábrica I' está contido em 'Fábrica II' e
+    em 'Fábrica III', então o PN da Fábrica I estava somando as três fábricas (e a
+    'Fábrica I - Filler' junto). Com '=Fábrica I' só entra a Fábrica I.
+
+    Termo começando com `!` EXCLUI. É o que permite escrever "processo" na cal: o
+    produto final é o que está no saco, e processo é todo o resto — silo, hidratador,
+    moinho. Listar os pontos de processo um a um envelheceria a cada silo novo;
+    `!Saco` continua valendo.
+
+    Os positivos entram como OU entre si e as exclusões como E — `Silo,!Saco` lê-se
+    "que contenha Silo e não contenha Saco".
     """
-    filtro = Q()
+    positivos = Q()
+    negativos = Q()
+    tem_positivo = False
     for termo in (texto or '').split(','):
         termo = termo.strip()
-        if termo:
-            filtro |= Q(**{f'{campo}__icontains': termo})
-    return filtro
+        if not termo:
+            continue
+        if termo.startswith('!'):
+            resto = termo[1:].strip()
+            if resto.startswith('='):
+                negativos &= ~Q(**{f'{campo}__iexact': resto[1:].strip()})
+            elif resto:
+                negativos &= ~Q(**{f'{campo}__icontains': resto})
+        elif termo.startswith('='):
+            positivos |= Q(**{f'{campo}__iexact': termo[1:].strip()})
+            tem_positivo = True
+        else:
+            positivos |= Q(**{f'{campo}__icontains': termo})
+            tem_positivo = True
+    return (positivos & negativos) if tem_positivo else negativos
 
 
 def _queryset_do_indicador(indicador, ano: int):
     """Análises que alimentam este indicador no ano — um filtro só, para o ano todo."""
     qs = Analise.objects.select_related('amostra', 'amostra__produto_amostra')
 
+    # Sem filtro de `finalizada`/`aprovada` de propósito: o boletim considera a
+    # análise assim que ela tem resultado, aberta ou encerrada. A semana fecha antes
+    # de a OS ser encerrada, e esperar o encerramento atrasaria o acompanhamento.
     for campo, texto in [
         ('amostra__material', indicador.material),
         ('amostra__tipo_amostra', indicador.tipo_amostra),
         ('amostra__local_coleta', indicador.local_coleta),
         ('amostra__finalidade', indicador.finalidade),
+        ('amostra__tipo_amostragem', indicador.tipo_amostragem),
     ]:
         if texto:
             qs = qs.filter(_filtro_ou(campo, texto))

@@ -105,6 +105,13 @@ class IndicadorBoletim(models.Model):
     tipo_amostra = models.CharField(max_length=120, blank=True, help_text='Ex.: VIRGEM, CH-II, HIDRÁULICA.')
     local_coleta = models.CharField(max_length=120, blank=True, help_text='Ex.: Fábrica I, Silo 06, Saco.')
     finalidade = models.CharField(max_length=120, blank=True, help_text='Ex.: Controle de Qualidade.')
+    tipo_amostragem = models.CharField(
+        max_length=120, blank=True,
+        help_text='COMO a amostra foi colhida: "Media" (a composta do dia) ou "Pontual". '
+                  'Não confundir com "tipo amostra", que é o produto. No calcário cada fábrica '
+                  'tem uma amostra Media por dia — é ela que forma a média da semana; deixar '
+                  'em branco faria as pontuais entrarem junto e puxarem o número.',
+    )
     produtos = models.ManyToManyField(
         ProdutoAmostra, blank=True, related_name='indicadores_boletim',
         help_text='Restringe a produtos específicos. Vazio = qualquer produto que passe nos '

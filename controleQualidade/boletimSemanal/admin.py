@@ -13,7 +13,7 @@ class IndicadorBoletimAdmin(admin.ModelAdmin):
     """
     list_display = ('nome', 'bloco', 'ordem', 'agregacao', 'tipo_limite', 'valor_limite', 'pai', 'ativo')
     list_filter = ('bloco', 'agregacao', 'tipo_limite', 'ativo')
-    search_fields = ('nome', 'bloco_titulo', 'ensaio_nome', 'material', 'tipo_amostra', 'local_coleta')
+    search_fields = ('nome', 'bloco_titulo', 'ensaio_nome', 'material', 'tipo_amostra', 'tipo_amostragem', 'local_coleta')
     autocomplete_fields = ()
     filter_horizontal = ('produtos',)
     ordering = ('bloco', 'ordem', 'nome')
@@ -29,9 +29,13 @@ class IndicadorBoletimAdmin(admin.ModelAdmin):
                            'caso do CO₂ e dos óxidos não hidratados.',
         }),
         ('De quais amostras', {
-            'fields': ('material', 'tipo_amostra', 'local_coleta', 'finalidade', 'produtos'),
-            'description': 'Os textos comparam por trecho, sem diferenciar maiúsculas. Deixar em '
-                           'branco significa "não filtrar por isso".',
+            'fields': ('material', 'tipo_amostra', 'tipo_amostragem', 'local_coleta', 'finalidade', 'produtos'),
+            'description': 'Os textos comparam por trecho, sem diferenciar maiúsculas; vírgula = OU. '
+                           'Deixar em branco significa "não filtrar por isso".<br>'
+                           'Comece com <b>=</b> para exigir o valor exato — <code>=Fábrica I</code> '
+                           'não casa com "Fábrica II"/"Fábrica III", que é o que acontece sem o sinal.<br>'
+                           '<b>Tipo amostra</b> é o produto (VIRGEM, CH-II); <b>tipo amostragem</b> é '
+                           'como foi colhida (Media, Pontual).',
         }),
         ('Limite e apresentação', {
             'fields': ('unidade', 'casas_decimais', 'tipo_limite', 'valor_limite'),
