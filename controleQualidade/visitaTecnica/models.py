@@ -50,8 +50,19 @@ class VisitaTecnica(models.Model):
     condicoes = models.JSONField(default=dict, blank=True)
 
     # ── 4 - Resultados ───────────────────────────────────────────────────────
+    # Os ENSAIOS da visita. A obra faz várias baterias no mesmo dia — o relatório
+    # 2025.160 (Construtora Schama) saiu com três, "ensaio E" e "ensaio G" ao
+    # substrato e "ensaio F" superficial —, cada uma com seus 12 corpos de prova e
+    # sua prancha de fotos. Antes cabia uma bateria por visita, e o técnico abria
+    # uma visita por ensaio: o cliente recebia três relatórios do mesmo dia.
+    #
+    # Cada item: {rotulo, tipo, corpos, limite_ra, tipo_ruptura, resultados}.
+    ensaios = models.JSONField(default=list, blank=True)
     # Lista dos corpos de prova (12 no formulário). Cada item traz diâmetro, área,
     # carga e a resistência já calculada, mais as 7 formas de ruptura em %.
+    #
+    # Repete o PRIMEIRO ensaio. Mantido porque o app mobile, o admin e as visitas
+    # já gravadas leem daqui — visita de um ensaio só continua idêntica.
     corpos_prova = models.JSONField(default=list, blank=True)
     # media, desvio_padrao, maximo, minimo. Calculados no frontend
     # (core/utils/aderencia-externa.ts) e gravados aqui para o relatório reimprimir
@@ -91,11 +102,16 @@ class VisitaTecnicaImagem(models.Model):
     visita = models.ForeignKey(VisitaTecnica, on_delete=models.CASCADE, related_name='imagens')
     image = models.FileField(upload_to=upload_image_visita, blank=False, null=False)
     cp = models.PositiveSmallIntegerField(null=True, blank=True)
+    # A qual ensaio da visita a foto pertence (1 = o primeiro). Cada ensaio imprime
+    # a própria prancha "Figura N — Ensaio X". Nulo é foto anterior ao suporte a
+    # vários ensaios: pertence ao primeiro, que era o único que existia.
+    ensaio = models.PositiveSmallIntegerField(null=True, blank=True)
     descricao = models.CharField(max_length=255, null=True, blank=True)
     data_upload = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         verbose_name = 'Imagem da Visita Técnica'
         verbose_name_plural = 'Imagens da Visita Técnica'
-        # Fotos sem CP vão para o fim, mantendo a grade CP-1..CP-12 em ordem.
-        ordering = ['cp', 'id']
+        # Por ensaio e, dentro dele, na ordem da grade CP-1..CP-12. Foto sem CP vai
+        # para o fim do seu ensaio.
+        ordering = ['ensaio', 'cp', 'id']

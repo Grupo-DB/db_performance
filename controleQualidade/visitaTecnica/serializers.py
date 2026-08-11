@@ -32,21 +32,30 @@ class VisitaTecnicaSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False
     )
+    # E a qual ensaio (1 = o primeiro). Omitido = primeiro, que é como as fotos
+    # anteriores a vários ensaios ficaram gravadas.
+    ensaios_imagens = serializers.ListField(
+        child=serializers.IntegerField(allow_null=True),
+        write_only=True,
+        required=False
+    )
 
     class Meta:
         model = VisitaTecnica
         fields = '__all__'
 
-    def _criar_imagens(self, visita, arquivos, cps):
+    def _criar_imagens(self, visita, arquivos, cps, ensaios):
         for indice, arquivo in enumerate(arquivos):
             cp = cps[indice] if indice < len(cps) else None
-            VisitaTecnicaImagem.objects.create(visita=visita, image=arquivo, cp=cp)
+            ensaio = ensaios[indice] if indice < len(ensaios) else None
+            VisitaTecnicaImagem.objects.create(visita=visita, image=arquivo, cp=cp, ensaio=ensaio)
 
     def create(self, validated_data):
         arquivos = validated_data.pop('uploaded_images', [])
         cps = validated_data.pop('cps_imagens', [])
+        ensaios = validated_data.pop('ensaios_imagens', [])
         visita = super().create(validated_data)
-        self._criar_imagens(visita, arquivos, cps)
+        self._criar_imagens(visita, arquivos, cps, ensaios)
         return visita
 
     def update(self, instance, validated_data):
@@ -55,6 +64,7 @@ class VisitaTecnicaSerializer(serializers.ModelSerializer):
         # endpoint próprio de VisitaTecnicaImagem (DELETE).
         arquivos = validated_data.pop('uploaded_images', [])
         cps = validated_data.pop('cps_imagens', [])
+        ensaios = validated_data.pop('ensaios_imagens', [])
         visita = super().update(instance, validated_data)
-        self._criar_imagens(visita, arquivos, cps)
+        self._criar_imagens(visita, arquivos, cps, ensaios)
         return visita
