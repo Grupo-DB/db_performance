@@ -22,7 +22,27 @@ logger = logging.getLogger(__name__)
 # com codec Opus, e o tipo MIME do contêiner não diz qual codec tem dentro. Um
 # ogg/vorbis passaria por aqui e quebraria só lá na frente, com erro da Meta.
 # Reconverter um ogg que já era Opus custa poucos milissegundos.
-FORMATOS_ACEITOS = {'audio/aac', 'audio/amr', 'audio/mpeg', 'audio/mp4'}
+#
+# `audio/mp4` saiu daqui em 11/08/2026, e o motivo é concreto: o MediaRecorder do
+# Chrome passou a oferecer `audio/mp4` e grava um **MP4 fragmentado**. O arquivo é
+# um mp4 legítimo para tocar, mas o detector da Meta não o reconhece e devolve
+#
+#   "Audio file uploaded with mimetype as audio/mp4, however on processing it is
+#    of type application/octet-stream. Please choose a different file. (131053)"
+#
+# — com a mensagem inteira recusada. Como não dá para distinguir aqui um mp4 do
+# gravador de um m4a comum, todo mp4 passa pela conversão. É recodificação a mais
+# num anexo m4a raro, contra mensagem de voz que não sai.
+FORMATOS_ACEITOS = {'audio/aac', 'audio/amr', 'audio/mpeg'}
+
+# Assinatura dos contêineres que a Meta aceita, para conferir se o arquivo é mesmo
+# o que o navegador disse que era. O erro 131053 é exatamente a Meta fazendo esta
+# checagem do lado dela: se o tipo declarado não bate com o conteúdo, ela recusa.
+ASSINATURAS = {
+    'audio/mpeg': (b'ID3', b'\xff\xfb', b'\xff\xf3', b'\xff\xf2', b'\xff\xfa'),
+    'audio/aac': (b'\xff\xf1', b'\xff\xf9', b'ADIF'),
+    'audio/amr': (b'#!AMR',),
+}
 
 MIME_CONVERTIDO = 'audio/ogg'
 EXTENSAO_CONVERTIDA = '.ogg'
@@ -41,8 +61,22 @@ def _normalizar(mime: str) -> str:
     return (mime or '').lower().split(';')[0].strip()
 
 
-def precisa_converter(mime: str) -> bool:
-    return _normalizar(mime) not in FORMATOS_ACEITOS
+def precisa_converter(mime: str, conteudo: bytes = b'') -> bool:
+    """
+    Converte quando o tipo não é aceito — ou quando o conteúdo não confirma o tipo.
+
+    A segunda parte existe porque o tipo declarado é palpite do navegador (ou a
+    extensão do arquivo), e é o CONTEÚDO que a Meta inspeciona. Arquivo mp3 com
+    nome trocado subia como `audio/mpeg` e voltava com o mesmo 131053 do mp4
+    fragmentado.
+    """
+    tipo = _normalizar(mime)
+    if tipo not in FORMATOS_ACEITOS:
+        return True
+    assinaturas = ASSINATURAS.get(tipo)
+    if not assinaturas or not conteudo:
+        return False
+    return not any(conteudo.startswith(a) for a in assinaturas)
 
 
 def converter_para_opus(conteudo: bytes) -> bytes:
@@ -95,10 +129,11 @@ def preparar_para_whatsapp(conteudo: bytes, mime: str, nome: str) -> tuple[bytes
     """
     Devolve `(conteúdo, mime, nome)` prontos para o upload.
 
-    Áudio já em formato aceito passa direto — não faz sentido recodificar um mp3
-    que o atendente anexou e perder qualidade à toa.
+    Áudio já em formato aceito — e cujo conteúdo confirma o tipo — passa direto:
+    não faz sentido recodificar um mp3 que o atendente anexou e perder qualidade
+    à toa.
     """
-    if not precisa_converter(mime):
+    if not precisa_converter(mime, conteudo):
         return conteudo, _normalizar(mime), nome
 
     convertido = converter_para_opus(conteudo)

@@ -42,6 +42,19 @@ def semana_de(dia: date) -> tuple[int, int]:
     return ano, semana
 
 
+def anos_do_intervalo(inicio: date, fim: date) -> list[int]:
+    """
+    Os anos que precisam ser lidos para cobrir um intervalo livre de datas.
+
+    Entram o ano civil e o ano ISO das duas pontas: o cálculo é feito ano a ano
+    (`valores_por_dia` descarta o dia cujo ano ISO não é o pedido), e 31/12 pode
+    pertencer à semana 1 do ano seguinte. Sem isso, um período que cruza a virada
+    perderia os últimos dias em silêncio.
+    """
+    anos = {inicio.year, fim.year, inicio.isocalendar()[0], fim.isocalendar()[0]}
+    return sorted(anos)
+
+
 # ── Valor de uma análise ─────────────────────────────────────────────────────
 
 def _valor_no_json(ensaios_utilizados, ensaio_id, ensaio_nome):
@@ -295,6 +308,21 @@ def valores_por_semana(indicador, ano: int) -> dict[int, list[float]]:
     return por_semana
 
 
+def analises_do_periodo(indicador, inicio: date, fim: date, incluir_excluidas=True) -> list[dict]:
+    """
+    O mesmo que `analises_da_semana`, para um intervalo livre de datas.
+
+    Lê ano a ano (é assim que a consulta é montada) e junta: a mesma análise pode
+    voltar nos dois anos por causa da folga de 31 dias do recorte, daí a deduplicação
+    por id.
+    """
+    por_analise: dict[int, dict] = {}
+    for ano in anos_do_intervalo(inicio, fim):
+        for linha in _analises(indicador, ano, lambda d: bool(d) and inicio <= d <= fim, incluir_excluidas):
+            por_analise[linha['analise_id']] = linha
+    return sorted(por_analise.values(), key=lambda l: (l['data'] or date.min, l['analise_id']))
+
+
 def analises_da_semana(indicador, ano: int, semana: int, incluir_excluidas=True) -> list[dict]:
     """
     As análises que entraram no número de uma semana, com o que a tela precisa para
@@ -304,6 +332,11 @@ def analises_da_semana(indicador, ano: int, semana: int, incluir_excluidas=True)
     para poder devolvê-las — uma análise excluída que sumisse da lista viraria uma
     decisão irreversível pela tela.
     """
+    return _analises(indicador, ano, None, incluir_excluidas, semana=semana)
+
+
+def _analises(indicador, ano: int, aceita_data=None, incluir_excluidas=True, semana: int | None = None):
+    """Corpo comum: `aceita_data` filtra por data; `semana`, pela semana ISO."""
     valores, por_id = valores_por_analise(indicador, ano)
     if incluir_excluidas:
         fora, por_id_fora = _valores_das_excluidas(indicador, ano)
@@ -313,7 +346,10 @@ def analises_da_semana(indicador, ano: int, semana: int, incluir_excluidas=True)
     linhas = []
     for analise_id, valor in valores.items():
         analise = por_id[analise_id]
-        if _semana_da_analise(analise, indicador, ano) != semana:
+        if aceita_data is not None:
+            if not aceita_data(_data_de_referencia(analise, indicador.campo_data)):
+                continue
+        elif _semana_da_analise(analise, indicador, ano) != semana:
             continue
         amostra = analise.amostra
         produto = getattr(amostra, 'produto_amostra', None) if amostra else None
@@ -531,6 +567,10 @@ class SerieIndicador:
         # composta por dia, por fábrica, e o relatório mostra o dia a dia da semana
         # (como as abas PN/PRNT/RE PONDERADO da planilha, que são diárias).
         self.por_dia: dict = {}
+        # Os valores CRUS de cada dia, antes da média. O período livre precisa deles:
+        # a média de um intervalo é a média de todas as medições, e não a média das
+        # médias diárias — dia com 3 análises pesa mais do que dia com 1.
+        self.valores_dia: dict = {}
         self.producao: dict[int, float] = {}
         self.producao_dia: dict = {}
         self.manual: dict[int, dict] = {}
@@ -553,6 +593,7 @@ class SerieIndicador:
             por_semana: dict = {}
             for dia, valores in por_dia_bruto.items():
                 self.por_dia[dia] = _media(valores)
+                self.valores_dia[dia] = list(valores)
                 por_semana.setdefault(semana_de(dia)[1], []).extend(valores)
             for semana, valores in por_semana.items():
                 self.calculado[semana] = _media(valores)
@@ -650,15 +691,102 @@ class SerieIndicador:
         Só os dias COM medição: linha vazia de domingo e de dia parado só ocuparia
         espaço na folha.
         """
-        linhas = []
-        for dia in sorted(d for d in self.por_dia if semana_de(d) == (self.ano, semana)):
-            linhas.append({
+        return self._linhas_dos_dias(d for d in self.por_dia if semana_de(d) == (self.ano, semana))
+
+    def dias_periodo(self, inicio: date, fim: date) -> list:
+        """O mesmo dia a dia, para um intervalo livre de datas."""
+        return self._linhas_dos_dias(d for d in self.por_dia if inicio <= d <= fim)
+
+    def _linhas_dos_dias(self, dias) -> list:
+        return [
+            {
                 'data': dia,
                 'valor': self.por_dia[dia],
                 'producao': self.producao_dia.get(dia),
                 'situacao': situacao(self.indicador, self.por_dia[dia]),
-            })
-        return linhas
+            }
+            for dia in sorted(dias)
+        ]
+
+    # -- período livre --------------------------------------------------------
+
+    def _valores_do_periodo(self, inicio: date, fim: date) -> list:
+        """Todas as medições do intervalo, cruas — sem passar pela média do dia."""
+        valores: list = []
+        for dia, lista in self.valores_dia.items():
+            if inicio <= dia <= fim:
+                valores.extend(lista)
+        return valores
+
+    def producao_do_periodo(self, inicio: date, fim: date):
+        total = sum(p for d, p in self.producao_dia.items() if inicio <= d <= fim and p)
+        return total or None
+
+    def celula_periodo(self, inicio: date, fim: date) -> dict:
+        """
+        A célula de um intervalo livre de datas, no mesmo formato da célula da semana.
+
+        Duas diferenças que a tela precisa respeitar: a correção manual é gravada por
+        SEMANA (`ResultadoBoletim`), então aqui o número é sempre o calculado — não há
+        registro de "período 3/8 a 19/8" para aplicar —, e o ponderado é pesado pela
+        produção do intervalo inteiro, e não pela de cada semana.
+        """
+        simples = False
+        if self.indicador.agregacao == 'PONDERADO':
+            pares, medicoes = [], 0
+            for filho in self.componentes:
+                valores = filho._valores_do_periodo(inicio, fim)
+                if not valores:
+                    continue
+                pares.append((_media(valores), filho.producao_do_periodo(inicio, fim)))
+                medicoes += len(valores)
+            valor = producao = None
+            if pares:
+                pesos = [p for _, p in pares if p]
+                if len(pesos) == len(pares) and sum(pesos) > 0:
+                    valor = sum(v * p for v, p in pares) / sum(pesos)
+                    producao = sum(pesos)
+                else:
+                    valor = _media([v for v, _ in pares])
+                    simples = True
+        else:
+            valores = self._valores_do_periodo(inicio, fim)
+            valor = _media(valores) if valores else None
+            medicoes = len(valores)
+            producao = self.producao_do_periodo(inicio, fim)
+
+        return {
+            'semana': None,
+            'valor': valor,
+            'valor_calculado': valor,
+            'texto': '',
+            'observacao': '',
+            'origem': 'calculado',
+            'medicoes': medicoes,
+            'media_simples': simples,
+            'producao': producao,
+            'situacao': situacao(self.indicador, valor),
+        }
+
+    def absorver(self, outra: 'SerieIndicador'):
+        """
+        Junta os dias de outro ano do MESMO indicador.
+
+        Serve ao período que cruza a virada do ano: o cálculo é feito ano a ano, e o
+        intervalo 15/12 a 15/01 precisa dos dois. Só os mapas por dia são juntados —
+        a série por semana continua sendo a do ano pedido, que é o que o gráfico mostra.
+        """
+        self.valores_dia.update(outra.valores_dia)
+        self.por_dia.update(outra.por_dia)
+        self.producao_dia.update(outra.producao_dia)
+
+        por_id = {c.indicador.id: c for c in outra.componentes}
+        for filho in self.componentes:
+            gemeo = por_id.get(filho.indicador.id)
+            if gemeo:
+                filho.absorver(gemeo)
+        if self.indicador.agregacao == 'PONDERADO':
+            self._calcular_ponderado_diario()
 
     def celula(self, semana: int) -> dict:
         manual = self.manual.get(semana) or {}

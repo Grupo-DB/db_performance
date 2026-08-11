@@ -103,12 +103,34 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
     """Leitura montada: blocos, indicadores, série do ano e destaque da semana."""
     permission_classes = [IsAuthenticated]
 
+    @staticmethod
+    def _data(bruta):
+        """`AAAA-MM-DD` → date, ou None. Nada de `fromisoformat` com hora: é data só."""
+        try:
+            return date.fromisoformat(str(bruta)[:10])
+        except (TypeError, ValueError):
+            return None
+
     def list(self, request):
         hoje = date.today()
         try:
             ano = int(request.query_params.get('ano') or hoje.isocalendar()[0])
         except ValueError:
             return Response({'detail': 'Ano inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Período livre: quando vêm as duas datas, a coluna do resultado passa a ser o
+        # intervalo pedido em vez da semana. O resto da resposta (série do ano, gráfico,
+        # espelho) continua por semana — é o que o acompanhamento anual mostra.
+        inicio_periodo = self._data(request.query_params.get('inicio'))
+        fim_periodo = self._data(request.query_params.get('fim'))
+        periodo = bool(inicio_periodo and fim_periodo)
+        if periodo and inicio_periodo > fim_periodo:
+            inicio_periodo, fim_periodo = fim_periodo, inicio_periodo
+        if (request.query_params.get('inicio') or request.query_params.get('fim')) and not periodo:
+            return Response(
+                {'detail': 'Informe início E fim do período, no formato AAAA-MM-DD.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         semana_param = request.query_params.get('semana')
         try:
@@ -127,15 +149,28 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
         )
         manuais = list(ResultadoBoletim.objects.filter(ano=ano))
 
+        # Anos que o período alcança além do ano da tela — o intervalo pode cruzar a
+        # virada, e o cálculo é feito ano a ano.
+        anos_extras = (
+            [a for a in services.anos_do_intervalo(inicio_periodo, fim_periodo) if a != ano]
+            if periodo else []
+        )
+
+        def montar(indicador, ano_alvo, resultados_manuais):
+            serie = services.SerieIndicador(indicador, ano_alvo)
+            serie.componentes = [
+                services.SerieIndicador(c, ano_alvo) for c in indicador.componentes.all() if c.ativo
+            ]
+            serie.carregar(resultados_manuais)
+            return serie
+
         series = {}
         for indicador in indicadores:
             if indicador.pai_id:
                 continue  # componente entra pelo pai
-            serie = services.SerieIndicador(indicador, ano)
-            serie.componentes = [
-                services.SerieIndicador(c, ano) for c in indicador.componentes.all() if c.ativo
-            ]
-            serie.carregar(manuais)
+            serie = montar(indicador, ano, manuais)
+            for outro_ano in anos_extras:
+                serie.absorver(montar(indicador, outro_ano, []))
             series[indicador.id] = serie
 
         blocos = []
@@ -145,14 +180,20 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
             serie = series[indicador.id]
             if not blocos or blocos[-1]['bloco'] != indicador.bloco:
                 blocos.append({'bloco': indicador.bloco, 'titulo': indicador.bloco_titulo, 'indicadores': []})
-            blocos[-1]['indicadores'].append(self._indicador_payload(serie, semana))
+            blocos[-1]['indicadores'].append(
+                self._indicador_payload(serie, semana, inicio_periodo, fim_periodo)
+                if periodo else self._indicador_payload(serie, semana)
+            )
 
         inicio, fim = services.intervalo_da_semana(ano, min(semana, services.total_de_semanas(ano)))
         return Response({
             'ano': ano,
             'semana': semana,
-            'semana_inicio': inicio,
-            'semana_fim': fim,
+            # `semana_inicio/fim` é o intervalo MOSTRADO: no modo período são as datas
+            # escolhidas, para o cabeçalho da tela e do PDF não precisarem de outro campo.
+            'semana_inicio': inicio_periodo if periodo else inicio,
+            'semana_fim': fim_periodo if periodo else fim,
+            'modo': 'periodo' if periodo else 'semana',
             'total_semanas': services.total_de_semanas(ano),
             'blocos': blocos,
         })
@@ -171,23 +212,39 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
             indicador = IndicadorBoletim.objects.get(pk=request.query_params.get('indicador'))
         except (IndicadorBoletim.DoesNotExist, TypeError, ValueError):
             return Response({'detail': 'Indicador inválido.'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            ano = int(request.query_params.get('ano'))
-            semana = int(request.query_params.get('semana'))
-        except (TypeError, ValueError):
-            return Response({'detail': 'Informe ano e semana.'}, status=status.HTTP_400_BAD_REQUEST)
+        # A célula pode ser de uma semana ou de um período livre — a lista responde
+        # pelos dois, com o mesmo formato.
+        inicio = self._data(request.query_params.get('inicio'))
+        fim = self._data(request.query_params.get('fim'))
+        if inicio and fim:
+            if inicio > fim:
+                inicio, fim = fim, inicio
+            def listar(alvo):
+                return services.analises_do_periodo(alvo, inicio, fim)
+        else:
+            try:
+                ano = int(request.query_params.get('ano'))
+                semana = int(request.query_params.get('semana'))
+            except (TypeError, ValueError):
+                return Response(
+                    {'detail': 'Informe ano e semana, ou início e fim do período.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            def listar(alvo):
+                return services.analises_da_semana(alvo, ano, semana)
 
         # Num ponderado o pai não tem análise própria: o que existe são as dos
         # componentes, então a lista sai agrupada por componente.
         if indicador.agregacao == 'PONDERADO':
             grupos = [
-                {'indicador': c.id, 'nome': c.nome, 'analises': services.analises_da_semana(c, ano, semana)}
+                {'indicador': c.id, 'nome': c.nome, 'analises': listar(c)}
                 for c in indicador.componentes.filter(ativo=True).order_by('ordem', 'nome')
             ]
         else:
             grupos = [{
                 'indicador': indicador.id, 'nome': indicador.nome,
-                'analises': services.analises_da_semana(indicador, ano, semana),
+                'analises': listar(indicador),
             }]
 
         return Response({
@@ -244,8 +301,12 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
         return Response({'excluida': True})
 
     @staticmethod
-    def _indicador_payload(serie, semana):
+    def _indicador_payload(serie, semana, inicio=None, fim=None):
+        """`inicio`/`fim` presentes = modo período: a célula e o dia a dia são do intervalo."""
         indicador = serie.indicador
+        periodo = bool(inicio and fim)
+        celula = (lambda s: s.celula_periodo(inicio, fim)) if periodo else (lambda s: s.celula(semana))
+        dias = (lambda s: s.dias_periodo(inicio, fim)) if periodo else (lambda s: s.dias(semana))
         return {
             'id': indicador.id,
             'nome': indicador.nome,
@@ -255,10 +316,10 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
             'valor_limite': indicador.valor_limite,
             'agregacao': indicador.agregacao,
             'observacao': indicador.observacao,
-            'semana': serie.celula(semana),
+            'semana': celula(serie),
             # O dia a dia da semana escolhida (só dela: o ano inteiro em dias seria
             # uma resposta grande demais para algo que só o relatório da semana usa).
-            'dias': serie.dias(semana),
+            'dias': dias(serie),
             # O ano inteiro, indexado pela semana — é o que alimenta o gráfico e o
             # espelho da planilha sem uma segunda requisição.
             'serie': [serie.celula(s) for s in range(1, serie.semanas + 1)],
@@ -266,8 +327,8 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
                 {
                     'id': c.indicador.id,
                     'nome': c.indicador.nome,
-                    'semana': c.celula(semana),
-                    'dias': c.dias(semana),
+                    'semana': celula(c),
+                    'dias': dias(c),
                     'serie': [c.celula(s) for s in range(1, c.semanas + 1)],
                 }
                 for c in serie.componentes
