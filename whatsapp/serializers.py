@@ -127,7 +127,10 @@ class WhatsAppNotificacaoSerializer(serializers.ModelSerializer):
     # de um total solto. Vem como id (a tela já tem os nomes das filas) e é nulo em
     # conversa que ainda não escolheu setor.
     fila = serializers.IntegerField(source='conversa.fila_id', read_only=True, allow_null=True)
+    # Situação da conversa: aviso de conversa ENCERRADA não vira badge de fila, porque
+    # ela não está na lista de abertas — não há como abri-la para dar baixa.
+    conversa_status = serializers.CharField(source='conversa.status', read_only=True)
 
     class Meta:
         model = WhatsAppNotificacao
-        fields = ['id', 'conversa', 'fila', 'tipo', 'mensagem', 'lido', 'created_at']
+        fields = ['id', 'conversa', 'fila', 'conversa_status', 'tipo', 'mensagem', 'lido', 'created_at']

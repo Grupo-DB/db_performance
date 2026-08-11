@@ -177,10 +177,14 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         conversa = self.get_object()
         conversa.status = 'ENCERRADA'
         conversa.save(update_fields=['status'])
-        # Quem encerrou leu. Colega que nunca abriu esta conversa continua com o aviso
-        # (o `lido` é pessoal) e a encontra no arquivo da fila, ou zera a fila inteira
-        # pelo badge da Central.
-        services.marcar_avisos_lidos(conversa, usuario=request.user)
+        # Baixa para TODO MUNDO, e não só para quem encerrou.
+        #
+        # O `lido` é pessoal em todo o resto do atendimento, e aqui era também: o
+        # colega que nunca abriu a conversa ficava com o aviso. Só que a conversa
+        # encerrada sai da lista de abertas — o aviso apontava para um atendimento
+        # que ele não tinha como abrir e nem precisava mais atender. O resultado
+        # era badge aceso para sempre, que é o oposto do que ele serve.
+        services.marcar_avisos_lidos(conversa)
         return Response(ConversaDetailSerializer(conversa).data)
 
     @action(detail=True, methods=['post'])
