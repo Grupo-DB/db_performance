@@ -26,7 +26,12 @@ class IndicadorBoletimAdmin(admin.ModelAdmin):
                        'peneira_malha', 'peneira_metrica', 'campo_data'),
             'description': 'Informe <b>ensaio</b> (preferido) ou <b>ensaio_nome</b>. O nome também '
                            'encontra cálculo composto, que não está no catálogo de ensaios — é o '
-                           'caso do CO₂ e dos óxidos não hidratados.',
+                           'caso do CO₂.<br>'
+                           '<b>Campo especial</b> lê o que mora em JSON da análise: '
+                           '<code>peneiras_umidas</code>/<code>peneiras_secas</code> (com malha e '
+                           'métrica) ou <code>cal_completo:chave</code> — ex.: '
+                           '<code>cal_completo:oxidos_total_nao_hidratados</code>, que é o cartão '
+                           '"Ox T N/ Hidratados" da tela da análise.',
         }),
         ('De quais amostras', {
             'fields': ('material', 'tipo_amostra', 'tipo_amostragem', 'local_coleta', 'finalidade', 'produtos'),

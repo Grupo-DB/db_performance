@@ -225,6 +225,9 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
             'agregacao': indicador.agregacao,
             'observacao': indicador.observacao,
             'semana': serie.celula(semana),
+            # O dia a dia da semana escolhida (só dela: o ano inteiro em dias seria
+            # uma resposta grande demais para algo que só o relatório da semana usa).
+            'dias': serie.dias(semana),
             # O ano inteiro, indexado pela semana — é o que alimenta o gráfico e o
             # espelho da planilha sem uma segunda requisição.
             'serie': [serie.celula(s) for s in range(1, serie.semanas + 1)],
@@ -233,6 +236,7 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
                     'id': c.indicador.id,
                     'nome': c.indicador.nome,
                     'semana': c.celula(semana),
+                    'dias': c.dias(semana),
                     'serie': [c.celula(s) for s in range(1, c.semanas + 1)],
                 }
                 for c in serie.componentes

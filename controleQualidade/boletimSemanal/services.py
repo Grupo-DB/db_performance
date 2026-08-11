@@ -257,14 +257,30 @@ def _semana_da_analise(analise, indicador, ano: int):
     return semana if ano_iso == ano else None
 
 
-def valores_por_semana(indicador, ano: int) -> dict[int, list[float]]:
-    """Os valores do ano agrupados pela semana ISO — é o que alimenta o boletim."""
+def valores_por_dia(indicador, ano: int) -> dict:
+    """
+    Os valores do ano agrupados por DIA.
+
+    É a base das duas leituras: a semana soma os dias dela, e o relatório do
+    calcário mostra o dia a dia — lá sai uma amostra composta por dia, por fábrica,
+    e a média da semana existe só como resumo.
+    """
     valores, por_id = valores_por_analise(indicador, ano)
-    por_semana: dict[int, list[float]] = {}
+    por_dia: dict = {}
     for analise_id, valor in valores.items():
-        semana = _semana_da_analise(por_id[analise_id], indicador, ano)
-        if semana is not None:
-            por_semana.setdefault(semana, []).append(valor)
+        analise = por_id[analise_id]
+        if _semana_da_analise(analise, indicador, ano) is None:
+            continue  # fora do ano ISO pedido
+        referencia = _data_de_referencia(analise, indicador.campo_data)
+        por_dia.setdefault(referencia, []).append(valor)
+    return por_dia
+
+
+def valores_por_semana(indicador, ano: int) -> dict[int, list[float]]:
+    """Os valores do ano agrupados pela semana ISO."""
+    por_semana: dict[int, list[float]] = {}
+    for dia, valores in valores_por_dia(indicador, ano).items():
+        por_semana.setdefault(semana_de(dia)[1], []).extend(valores)
     return por_semana
 
 
@@ -299,18 +315,44 @@ def analises_da_semana(indicador, ano: int, semana: int) -> list[dict]:
 
 def _valores_de_campo_especial(indicador, analises) -> dict[int, float]:
     """
-    Valores que moram em campo JSON da análise (peneiras, por exemplo).
+    Valores que moram em campo JSON da análise: peneiras e o "cal completo".
 
-    Reaproveita o extrator do `filtrar-e-calcular` em vez de reescrever a leitura
-    da malha — é código sensível, cheio de variações de rótulo de peneira.
+    O cal completo (plano das análises completas de cal) é um dicionário com as
+    contas da caracterização — `oxidos_total_nao_hidratados` é uma delas. Escreve-se
+    `cal_completo:oxidos_total_nao_hidratados` no campo especial.
+
+    Peneira reaproveita o extrator do `filtrar-e-calcular` em vez de reescrever a
+    leitura da malha — é código sensível, cheio de variações de rótulo de peneira.
     """
+    campo = indicador.campo_especial or ''
+
+    if campo.startswith('cal_completo'):
+        # Chave depois dos dois-pontos; sem ela não há o que ler.
+        chave = campo.split(':', 1)[1].strip() if ':' in campo else ''
+        if not chave:
+            logger.warning('Indicador %s usa cal_completo sem informar a chave.', indicador.pk)
+            return {}
+        encontrados = {}
+        for analise in analises:
+            bruto = (analise.cal_completo or {}).get(chave)
+            try:
+                valor = float(bruto)
+            except (TypeError, ValueError):
+                continue
+            # Zero aqui é campo não preenchido, não resultado: o cal completo nasce
+            # com todas as contas zeradas e só as análises daquele plano o preenchem.
+            # Contar os zeros derrubaria a média da semana para perto de nada.
+            if valor:
+                encontrados[analise.id] = valor
+        return encontrados
+
     try:
         from controleQualidade.analise.views import _extrair_valor_peneira
     except ImportError:
         logger.warning('Extrator de peneira indisponível; campo_especial ignorado.')
         return {}
 
-    if indicador.campo_especial not in ('peneiras_secas', 'peneiras_umidas'):
+    if campo not in ('peneiras_secas', 'peneiras_umidas'):
         return {}
 
     encontrados = {}
@@ -328,9 +370,9 @@ def _valores_de_campo_especial(indicador, analises) -> dict[int, float]:
 
 # ── Produção (ERP) ───────────────────────────────────────────────────────────
 
-def producao_por_semana(codigos: list[int], locais: list[int], etapa, ano: int) -> dict[int, float]:
+def producao_por_dia(codigos: list[int], locais: list[int], etapa, ano: int) -> dict:
     """
-    Toneladas produzidas por semana ISO.
+    Toneladas produzidas por DIA.
 
     Dois recortes, porque o ERP separa as coisas de formas diferentes:
       - `codigos` = ESTQCOD, o item de estoque → separa PRODUTO (CH-II, hidráulica);
@@ -388,16 +430,24 @@ def producao_por_semana(codigos: list[int], locais: list[int], etapa, ano: int) 
         )
         return {}
 
-    por_semana: dict[int, float] = {}
+    por_dia: dict = {}
     for _, linha in df.iterrows():
         dia = linha['DIA']
         if dia is None:
             continue
         dia = dia.date() if hasattr(dia, 'date') else dia
-        ano_iso, semana = semana_de(dia)
-        if ano_iso != ano:
-            continue
-        por_semana[semana] = por_semana.get(semana, 0.0) + float(linha['PESO'] or 0)
+        if semana_de(dia)[0] != ano:
+            continue  # cai na virada do ano ISO
+        por_dia[dia] = por_dia.get(dia, 0.0) + float(linha['PESO'] or 0)
+    return por_dia
+
+
+def producao_por_semana(por_dia: dict) -> dict:
+    """Soma o diário por semana ISO — sem consultar o ERP de novo."""
+    por_semana: dict = {}
+    for dia, peso in por_dia.items():
+        semana = semana_de(dia)[1]
+        por_semana[semana] = por_semana.get(semana, 0.0) + peso
     return por_semana
 
 
@@ -442,7 +492,14 @@ class SerieIndicador:
         self.componentes: list['SerieIndicador'] = []
         self.calculado: dict[int, float] = {}
         self.medicoes: dict[int, int] = {}
+        # Semanas em que o ponderado caiu para média simples por falta de produção.
+        self.simples: set[int] = set()
+        # O valor de cada DIA. No calcário é ele que interessa: sai uma amostra
+        # composta por dia, por fábrica, e o relatório mostra o dia a dia da semana
+        # (como as abas PN/PRNT/RE PONDERADO da planilha, que são diárias).
+        self.por_dia: dict = {}
         self.producao: dict[int, float] = {}
+        self.producao_dia: dict = {}
         self.manual: dict[int, dict] = {}
 
     # -- carga ---------------------------------------------------------------
@@ -459,18 +516,23 @@ class SerieIndicador:
                 filho.carregar(resultados_manuais)
             self._calcular_ponderado()
         else:
-            por_semana = valores_por_semana(self.indicador, self.ano)
+            por_dia_bruto = valores_por_dia(self.indicador, self.ano)
+            por_semana: dict = {}
+            for dia, valores in por_dia_bruto.items():
+                self.por_dia[dia] = _media(valores)
+                por_semana.setdefault(semana_de(dia)[1], []).extend(valores)
             for semana, valores in por_semana.items():
                 self.calculado[semana] = _media(valores)
                 self.medicoes[semana] = len(valores)
 
         if self.indicador.tem_producao_configurada():
-            self.producao = producao_por_semana(
+            self.producao_dia = producao_por_dia(
                 self.indicador.codigos_producao(),
                 self.indicador.locais_producao(),
                 self.indicador.producao_etapa,
                 self.ano,
             )
+            self.producao = producao_por_semana(self.producao_dia)
         # Produção digitada vence a do ERP: quem digitou sabia de algo que o ERP não sabe.
         for semana, dados in self.manual.items():
             if dados.get('producao') is not None:
@@ -486,14 +548,19 @@ class SerieIndicador:
         """
         for semana in range(1, self.semanas + 1):
             pares = []
+            analises = 0
             for filho in self.componentes:
                 valor = filho.valor_final(semana)
                 if valor is None:
                     continue
                 pares.append((valor, filho.producao.get(semana)))
+                # A coluna "Amostras" conta ANÁLISE, não componente: o PN ponderado
+                # de uma semana vem de 21 amostras (7 dias × 3 fábricas), e mostrar
+                # "3" ali fazia parecer que a semana teve três medições.
+                analises += filho.medicoes.get(semana, 0)
             if not pares:
                 continue
-            self.medicoes[semana] = len(pares)
+            self.medicoes[semana] = analises or len(pares)
             pesos = [p for _, p in pares if p]
             if len(pesos) == len(pares) and sum(pesos) > 0:
                 total = sum(v * p for v, p in pares)
@@ -501,7 +568,36 @@ class SerieIndicador:
                 self.producao.setdefault(semana, sum(pesos))
             else:
                 self.calculado[semana] = _media([v for v, _ in pares])
-                self.medicoes[semana] = -len(pares)  # negativo = média simples (sem produção)
+                # Conjunto próprio, e não o sinal do número: a contagem virou o total
+                # de análises, então um "negativo" ali não teria mais como ser lido.
+                self.simples.add(semana)
+
+        self._calcular_ponderado_diario()
+
+    def _calcular_ponderado_diario(self):
+        """
+        Mesmo cálculo, dia a dia — é o que o relatório do calcário mostra.
+
+        A produção também é diária aqui (a consulta ao ERP já devolve por dia), então
+        o ponderado do dia usa o volume DAQUELE dia. Somar a produção da semana para
+        ponderar um dia daria peso errado a uma fábrica que parou no meio da semana.
+        """
+        dias = {d for filho in self.componentes for d in filho.por_dia}
+        for dia in dias:
+            pares = []
+            for filho in self.componentes:
+                valor = filho.por_dia.get(dia)
+                if valor is None:
+                    continue
+                pares.append((valor, filho.producao_dia.get(dia)))
+            if not pares:
+                continue
+            pesos = [p for _, p in pares if p]
+            if len(pesos) == len(pares) and sum(pesos) > 0:
+                self.por_dia[dia] = sum(v * p for v, p in pares) / sum(pesos)
+                self.producao_dia.setdefault(dia, sum(pesos))
+            else:
+                self.por_dia[dia] = _media([v for v, _ in pares])
 
     # -- leitura -------------------------------------------------------------
 
@@ -514,6 +610,23 @@ class SerieIndicador:
             return None
         return self.calculado.get(semana)
 
+    def dias(self, semana: int) -> list:
+        """
+        Uma linha por dia da semana que tem valor — o corpo do relatório do calcário.
+
+        Só os dias COM medição: linha vazia de domingo e de dia parado só ocuparia
+        espaço na folha.
+        """
+        linhas = []
+        for dia in sorted(d for d in self.por_dia if semana_de(d) == (self.ano, semana)):
+            linhas.append({
+                'data': dia,
+                'valor': self.por_dia[dia],
+                'producao': self.producao_dia.get(dia),
+                'situacao': situacao(self.indicador, self.por_dia[dia]),
+            })
+        return linhas
+
     def celula(self, semana: int) -> dict:
         manual = self.manual.get(semana) or {}
         valor = self.valor_final(semana)
@@ -525,8 +638,8 @@ class SerieIndicador:
             'texto': manual.get('texto') or '',
             'observacao': manual.get('observacao') or '',
             'origem': 'manual' if (manual.get('valor') is not None or manual.get('texto')) else 'calculado',
-            'medicoes': abs(medicoes),
-            'media_simples': medicoes < 0,
+            'medicoes': medicoes,
+            'media_simples': semana in self.simples,
             'producao': self.producao.get(semana),
             'situacao': situacao(self.indicador, valor),
         }
