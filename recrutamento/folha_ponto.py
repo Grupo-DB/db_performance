@@ -43,6 +43,7 @@ linha de totais em 4.151/4.152 colunas-cartão (a única divergência é 1 minut
 de arredondamento do próprio iPonto).
 """
 
+import io
 import os
 import re
 import shutil
@@ -412,6 +413,39 @@ def ler_zip(caminho_zip, destino_tmp):
             finally:
                 os.unlink(alvo)
     return cartoes
+
+
+def compactar(arquivos):
+    """
+    Junta os PDFs enviados num ZIP só, para o modelo guardar um arquivo por
+    competência (e o material original ficar arquivado para reprocessar).
+
+    Aceita só PDF: um ZIP dentro de outro ZIP não seria lido, porque ``ler_zip``
+    não desce um nível.
+    """
+    from django.core.files.uploadedfile import InMemoryUploadedFile
+
+    nomes = [getattr(a, 'name', '') or '' for a in arquivos]
+    fora = [n for n in nomes if not n.lower().endswith('.pdf')]
+    if fora:
+        raise ValueError(
+            'Ao enviar vários arquivos, todos precisam ser PDF de espelho de ponto. '
+            f'Fora do padrão: {", ".join(fora[:5])}.'
+        )
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as z:
+        for i, arquivo in enumerate(arquivos):
+            arquivo.seek(0)
+            # Prefixo numérico evita colisão se dois setores vierem com o mesmo
+            # nome de arquivo; o setor real sai de dentro do cartão, não do nome.
+            z.writestr(f'{i:03d}-{os.path.basename(nomes[i])}', arquivo.read())
+    buffer.seek(0)
+    tamanho = buffer.getbuffer().nbytes
+    return InMemoryUploadedFile(
+        buffer, None, f'folha-ponto-{len(arquivos)}-pdfs.zip',
+        'application/zip', tamanho, None,
+    )
 
 
 def competencia_de(cartoes):
@@ -796,6 +830,21 @@ def importar_arquivo(folha):
             raise ValueError(
                 'Nenhum cartão de ponto reconhecido no arquivo. Esperado o espelho '
                 'de ponto do iPonto em PDF (ou um ZIP com esses PDFs).'
+            )
+
+        # Guarda contra material de meses diferentes na mesma remessa: sem isso os
+        # cartões de outra competência entrariam calados no índice, e o número sai
+        # errado sem ninguém perceber.
+        periodos = Counter(c['periodo_fim'] for c in cartoes)
+        if len(periodos) > 1:
+            achados = ', '.join(
+                f'{fim.strftime("%m/%Y")} ({n} cartões)'
+                for fim, n in sorted(periodos.items())
+            )
+            raise ValueError(
+                'Os arquivos enviados são de mais de uma competência: '
+                f'{achados}. Envie uma competência por vez, senão o índice mistura '
+                'meses diferentes.'
             )
 
         competencia, ini, fim = competencia_de(cartoes)

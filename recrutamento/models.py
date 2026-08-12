@@ -15,6 +15,7 @@ Diferenças em relação à planilha de origem:
   acompanhamento em funil/kanban que a planilha não tinha.
 """
 
+import re
 from datetime import date
 
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -652,13 +653,18 @@ class FolhaPonto(models.Model):
 
     @property
     def rotulo(self):
-        """'jul/2026' -- é o que a tela mostra na coluna de competência."""
-        if not self.competencia:
+        """'jul/2026' -- é o que a tela mostra na coluna de competência.
+
+        Devolve vazio para a chave provisória ``pend-<hex>``, que é o valor
+        enquanto a leitura roda (e o que fica se ela falhar): a competência só é
+        conhecida depois de ler o cartão.
+        """
+        casado = re.fullmatch(r'(\d{4})-(0[1-9]|1[0-2])', self.competencia or '')
+        if not casado:
             return ''
-        ano, mes = self.competencia.split('-')
         nomes = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun',
                  'jul', 'ago', 'set', 'out', 'nov', 'dez']
-        return f'{nomes[int(mes) - 1]}/{ano}'
+        return f'{nomes[int(casado.group(2)) - 1]}/{casado.group(1)}'
 
 
 class CartaoPonto(models.Model):

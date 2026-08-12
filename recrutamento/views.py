@@ -647,9 +647,15 @@ class FolhaPontoViewSet(
     queryset = FolhaPonto.objects.all()
 
     def create(self, request, *args, **kwargs):
-        if 'arquivo' not in request.data:
+        # Aceita as três formas de o material chegar: o ZIP da competência, um PDF
+        # só, ou a pasta inteira selecionada de uma vez (34 PDFs, um por setor) --
+        # que é como fica depois de descompactar o e-mail do escritório.
+        enviados = request.FILES.getlist('arquivos')
+        if not enviados and 'arquivo' in request.data:
+            enviados = [request.data['arquivo']]
+        if not enviados:
             return Response(
-                {'arquivo': 'Envie o ZIP da competência (ou um PDF de espelho de ponto).'},
+                {'arquivo': 'Envie o ZIP da competência, ou os PDFs de espelho de ponto.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if not fponto.tem_pdftotext():
@@ -662,11 +668,22 @@ class FolhaPontoViewSet(
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
+        # Vários PDFs viram um ZIP aqui: o modelo guarda UM arquivo por
+        # competência, o que mantém o material original arquivado para reprocessar
+        # sem depender de o usuário reenviar.
+        if len(enviados) > 1:
+            try:
+                arquivo = fponto.compactar(enviados)
+            except ValueError as erro:
+                return Response({'arquivo': str(erro)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            arquivo = enviados[0]
+
         # A competência só é conhecida depois de ler o arquivo (sai do período de
         # referência impresso no cartão), então a linha nasce com chave provisória.
         folha = FolhaPonto.objects.create(
             competencia=f'pend-{uuid4().hex[:8]}',
-            arquivo=request.data['arquivo'],
+            arquivo=arquivo,
             status=FolhaPonto.PROCESSANDO,
             importado_por=(request.user.get_full_name() or request.user.username)[:120],
         )
