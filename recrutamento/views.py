@@ -1,17 +1,31 @@
 from collections import Counter, OrderedDict
 from datetime import date, timedelta
 from statistics import median
+from threading import Thread
+from uuid import uuid4
 
 from django.db.models import Count, ProtectedError, Q
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import status, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from .models import AreaInteresse, Candidato, FichaAnexo, FichaEntrevista, Processo, Vaga
+from sqlalchemy.exc import SQLAlchemyError
+
+from .models import (
+    AreaInteresse,
+    Candidato,
+    FichaAnexo,
+    FichaEntrevista,
+    FolhaPonto,
+    Processo,
+    Vaga,
+)
 from .permissions import IsRH
+from . import folha_ponto as fponto
+from .turnover import apurar as apurar_turnover
 from .serializers import (
     AreaInteresseSerializer,
     CandidatoListSerializer,
@@ -19,6 +33,7 @@ from .serializers import (
     FichaAnexoSerializer,
     FichaEntrevistaListSerializer,
     FichaEntrevistaSerializer,
+    FolhaPontoSerializer,
     ProcessoSerializer,
     VagaSerializer,
 )
@@ -563,3 +578,112 @@ class IndicadoresViewSet(viewsets.ViewSet):
                 'pcd': Candidato.objects.filter(pcd=True).count(),
             },
         })
+
+
+class TurnoverViewSet(viewsets.ViewSet):
+    """
+    Turnover (rotatividade) e absenteísmo.
+
+    Lê o ERP, não o banco do módulo: admissão e desligamento estão em
+    ``CONTRATOPESSOAL``. Ver ``recrutamento/turnover.py`` para a fonte, a
+    fórmula e as ressalvas de defasagem de registro.
+
+    ``GET /api/recrutamento/turnover/?anos=2022,2023&dias=90``
+    """
+
+    permission_classes = [IsRH]
+
+    def list(self, request):
+        anos = request.query_params.get('anos', '2022,2023')
+        try:
+            anos = tuple(
+                int(a) for a in anos.split(',')
+                if a.strip() and 2000 <= int(a) <= date.today().year
+            )
+        except ValueError:
+            anos = (2022, 2023)
+        if not anos:
+            anos = (2022, 2023)
+
+        try:
+            dias = int(request.query_params.get('dias', 90))
+        except ValueError:
+            dias = 90
+        dias = max(1, min(dias, 365 * 3))
+
+        try:
+            return Response(apurar_turnover(anos=anos, dias=dias))
+        except SQLAlchemyError as erro:
+            # O ERP fica noutra máquina: fora do ar, a tela precisa de um recado
+            # em vez de um 500 sem explicação.
+            return Response(
+                {'detail': f'Não foi possível consultar o ERP: {erro}'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+
+class FolhaPontoViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    """
+    Importação da folha ponto e o absenteísmo que sai dela.
+
+    ``POST   /api/recrutamento/folha-ponto/``            envia o ZIP da competência
+    ``GET    /api/recrutamento/folha-ponto/``            lista as competências e o status
+    ``DELETE /api/recrutamento/folha-ponto/<id>/``       remove uma competência
+    ``GET    /api/recrutamento/folha-ponto/absenteismo/`` o indicador apurado
+
+    ⚠️ Não use ``http_method_names`` para restringir os verbos: isso derruba as
+    ``@action`` do DRF e o POST volta 405 (já aconteceu em outro módulo). Os
+    mixins acima é que definem o que existe.
+    """
+
+    permission_classes = [IsRH]
+    serializer_class = FolhaPontoSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    queryset = FolhaPonto.objects.all()
+
+    def create(self, request, *args, **kwargs):
+        if 'arquivo' not in request.data:
+            return Response(
+                {'arquivo': 'Envie o ZIP da competência (ou um PDF de espelho de ponto).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not fponto.tem_pdftotext():
+            return Response(
+                {'detail': (
+                    'O servidor não tem o utilitário pdftotext (pacote poppler-utils), '
+                    'necessário para ler o espelho de ponto. Instale com: '
+                    'sudo apt-get install -y poppler-utils'
+                )},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        # A competência só é conhecida depois de ler o arquivo (sai do período de
+        # referência impresso no cartão), então a linha nasce com chave provisória.
+        folha = FolhaPonto.objects.create(
+            competencia=f'pend-{uuid4().hex[:8]}',
+            arquivo=request.data['arquivo'],
+            status=FolhaPonto.PROCESSANDO,
+            importado_por=(request.user.get_full_name() or request.user.username)[:120],
+        )
+
+        # Em thread: 34 PDFs de uma competência levam alguns segundos e não vale
+        # arriscar o timeout do nginx. A tela acompanha pelo status.
+        Thread(target=fponto.importar_arquivo, args=(folha,), daemon=True).start()
+
+        return Response(
+            self.get_serializer(folha).data, status=status.HTTP_202_ACCEPTED
+        )
+
+    @action(detail=False, methods=['get'])
+    def absenteismo(self, request):
+        try:
+            return Response(fponto.apurar_do_banco())
+        except fponto.PopplerAusente as erro:
+            return Response(
+                {'detail': str(erro)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )

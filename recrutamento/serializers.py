@@ -1,6 +1,14 @@
 from rest_framework import serializers
 
-from .models import AreaInteresse, Candidato, FichaAnexo, FichaEntrevista, Processo, Vaga
+from .models import (
+    AreaInteresse,
+    Candidato,
+    FichaAnexo,
+    FichaEntrevista,
+    FolhaPonto,
+    Processo,
+    Vaga,
+)
 
 
 class AreaInteresseSerializer(serializers.ModelSerializer):
@@ -237,3 +245,27 @@ class FichaEntrevistaSerializer(serializers.ModelSerializer):
                 {'processo': 'O processo selecionado é de outro candidato.'}
             )
         return attrs
+
+
+class FolhaPontoSerializer(serializers.ModelSerializer):
+    """Uma competência de folha ponto importada -- a tela lista e acompanha o
+    status por aqui."""
+
+    rotulo = serializers.CharField(read_only=True)
+    nome_arquivo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FolhaPonto
+        fields = [
+            'id', 'competencia', 'rotulo', 'periodo_inicio', 'periodo_fim',
+            'arquivo', 'nome_arquivo', 'status', 'mensagem', 'cartoes_lidos',
+            'cartoes_sem_controle', 'importado_por', 'importado_em', 'processado_em',
+        ]
+        read_only_fields = [
+            'competencia', 'periodo_inicio', 'periodo_fim', 'status', 'mensagem',
+            'cartoes_lidos', 'cartoes_sem_controle', 'importado_por',
+            'importado_em', 'processado_em',
+        ]
+
+    def get_nome_arquivo(self, obj):
+        return obj.arquivo.name.rsplit('/', 1)[-1] if obj.arquivo else ''

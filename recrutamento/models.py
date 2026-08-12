@@ -592,3 +592,157 @@ def _apaga_arquivo_do_anexo(sender, instance, **kwargs):
     """
     if instance.arquivo:
         instance.arquivo.delete(save=False)
+
+
+class FolhaPonto(models.Model):
+    """
+    Uma competência de folha ponto importada -- o ZIP que o escritório contábil
+    manda por mês, com um PDF por setor.
+
+    Existe porque o absenteísmo não tem fonte digital no ERP: o ponto
+    eletrônico (``PONTODIA``/``PONTOREG``) parou em 26/04/2023 e os afastamentos
+    (``RH_AFASTAMENTOS``) em 23/03/2023. O cálculo passou a depender do espelho
+    de ponto em PDF, e este modelo é onde ele fica.
+
+    A competência é o mês do FIM do período de referência, que vai de 26 a 25:
+    ``26/06 a 25/07/2026`` é a competência ``2026-07``.
+
+    Reimportar a mesma competência é permitido e substitui os cartões
+    (``unique`` na competência + apagar antes de gravar): erro de arquivo é
+    corrigido reenviando, sem passar por banco na mão.
+    """
+
+    PROCESSANDO = 'processando'
+    CONCLUIDA = 'concluida'
+    ERRO = 'erro'
+    STATUS = [
+        (PROCESSANDO, 'Processando'),
+        (CONCLUIDA, 'Concluída'),
+        (ERRO, 'Erro'),
+    ]
+
+    competencia = models.CharField(
+        max_length=7, unique=True,
+        help_text='AAAA-MM do mês do fim do período de referência (ex.: 2026-07).',
+    )
+    periodo_inicio = models.DateField(null=True, blank=True)
+    periodo_fim = models.DateField(null=True, blank=True)
+    arquivo = models.FileField(upload_to='recrutamento/folha-ponto/%Y/%m/')
+    status = models.CharField(max_length=12, choices=STATUS, default=PROCESSANDO)
+    mensagem = models.TextField(
+        blank=True,
+        help_text='O que deu errado, quando status = erro; ou o resumo da leitura.',
+    )
+    cartoes_lidos = models.IntegerField(default=0)
+    cartoes_sem_controle = models.IntegerField(
+        default=0,
+        help_text='Cartões de quem não bate ponto (tabela 000); ficam fora do índice.',
+    )
+    importado_por = models.CharField(max_length=120, blank=True)
+    importado_em = models.DateTimeField(auto_now_add=True)
+    processado_em = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Folha ponto importada'
+        verbose_name_plural = 'Folhas ponto importadas'
+        ordering = ['-competencia']
+
+    def __str__(self):
+        return f'Folha ponto {self.competencia}'
+
+    @property
+    def rotulo(self):
+        """'jul/2026' -- é o que a tela mostra na coluna de competência."""
+        if not self.competencia:
+            return ''
+        ano, mes = self.competencia.split('-')
+        nomes = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+                 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+        return f'{nomes[int(mes) - 1]}/{ano}'
+
+
+class CartaoPonto(models.Model):
+    """
+    O cartão de uma pessoa num mês, já lido e classificado.
+
+    Guarda o FECHAMENTO do próprio iPonto (``dias_trabalhados``, ``dias_falta``,
+    ``dsr``, ``folgas``) em vez de recontar da grade, porque é ele que decide o
+    que conta: um dia marcado ``Falta`` com horas em ``H. Abonada`` é falta
+    JUSTIFICADA e não entra em ``dias_falta`` -- nos primeiros 90 dias
+    importados isso era 75% das faltas (553 de 733). Recontar da grade daria um
+    número diferente do que o DP usa na folha de pagamento.
+
+    ``dias_por_categoria`` e ``minutos_por_motivo`` guardam a leitura da grade,
+    que é o que permite o índice amplo (falta + atestado + afastamento), já que
+    o fechamento sozinho só conhece a falta descontada.
+    """
+
+    folha = models.ForeignKey(FolhaPonto, on_delete=models.CASCADE, related_name='cartoes')
+
+    cracha = models.CharField(max_length=20, blank=True)
+    nome = models.CharField(max_length=140)
+    setor = models.CharField(max_length=120, blank=True)
+    cargo = models.CharField(max_length=140, blank=True)
+    admissao = models.CharField(
+        max_length=10, blank=True,
+        help_text='Como vem no cartão (DD/MM/AAAA); é texto porque nem todo cartão traz.',
+    )
+
+    # Fechamento do iPonto.
+    dias_trabalhados = models.IntegerField(default=0)
+    dias_falta = models.IntegerField(
+        default=0, help_text='D. Falt.: dias INTEIROS de falta descontada.',
+    )
+    dsr = models.IntegerField(default=0)
+    ddsr = models.IntegerField(default=0)
+    folgas = models.IntegerField(default=0)
+    dias_grade = models.IntegerField(default=0, help_text='Linhas de dia lidas na grade.')
+
+    # Leitura da grade.
+    dias_por_categoria = models.JSONField(
+        default=dict,
+        help_text="{'trabalhado': 21, 'folga': 9, 'atestado': 2, ...}",
+    )
+    minutos_por_motivo = models.JSONField(
+        default=dict, help_text="Minutos abonados/perdidos por motivo.",
+    )
+
+    minutos_trabalhados = models.IntegerField(default=0)
+    minutos_falta = models.IntegerField(
+        default=0, help_text='H. Falt.: horas perdidas, inclusive falta parcial e atraso.',
+    )
+    minutos_abonados = models.IntegerField(default=0)
+
+    sem_controle = models.BooleanField(
+        default=False,
+        help_text='Tabela 000 na grade inteira: não bate ponto, fica fora do índice.',
+    )
+
+    class Meta:
+        verbose_name = 'Cartão de ponto'
+        verbose_name_plural = 'Cartões de ponto'
+        ordering = ['setor', 'nome']
+        indexes = [
+            models.Index(fields=['folha', 'setor']),
+            models.Index(fields=['cracha']),
+        ]
+
+    def __str__(self):
+        return f'{self.nome} — {self.folha.competencia}'
+
+    @property
+    def dias_escalados(self):
+        """Dias em que a pessoa era esperada no trabalho, pelo fechamento.
+
+        Férias, atestado e afastamento já estão fora de ``dias_trabalhados`` --
+        o iPonto não os conta ali.
+        """
+        return self.dias_trabalhados + self.dias_falta
+
+
+@receiver(post_delete, sender=FolhaPonto)
+def _apagar_zip_folha_ponto(sender, instance, **kwargs):
+    """Apaga o ZIP do disco junto com a competência -- mesmo motivo do anexo da
+    ficha: ``queryset.delete()`` não chama ``delete()`` do objeto."""
+    if instance.arquivo:
+        instance.arquivo.delete(save=False)
