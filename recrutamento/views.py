@@ -2,7 +2,6 @@ from collections import Counter, OrderedDict
 from datetime import date, timedelta
 from statistics import median
 from threading import Thread
-from uuid import uuid4
 
 from django.db.models import Count, ProtectedError, Q
 from django_filters.rest_framework import DjangoFilterBackend
@@ -682,7 +681,7 @@ class FolhaPontoViewSet(
         # A competência só é conhecida depois de ler o arquivo (sai do período de
         # referência impresso no cartão), então a linha nasce com chave provisória.
         folha = FolhaPonto.objects.create(
-            competencia=f'pend-{uuid4().hex[:8]}',
+            competencia=FolhaPonto.chave_provisoria(),
             arquivo=arquivo,
             status=FolhaPonto.PROCESSANDO,
             importado_por=(request.user.get_full_name() or request.user.username)[:120],

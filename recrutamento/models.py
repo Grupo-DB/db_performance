@@ -17,6 +17,7 @@ Diferenças em relação à planilha de origem:
 
 import re
 from datetime import date
+from uuid import uuid4
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -626,6 +627,11 @@ class FolhaPonto(models.Model):
         max_length=7, unique=True,
         help_text='AAAA-MM do mês do fim do período de referência (ex.: 2026-07).',
     )
+    # ⚠️ A chave provisória de quem está em leitura TEM de caber nos 7 caracteres
+    # da coluna: 'p' + 6 hex. Uma chave mais longa passa no SQLite (que não impõe
+    # tamanho de VARCHAR) e estoura no MySQL com
+    # `DataError: Data too long for column 'competencia'`.
+    PREFIXO_PENDENTE = 'p'
     periodo_inicio = models.DateField(null=True, blank=True)
     periodo_fim = models.DateField(null=True, blank=True)
     arquivo = models.FileField(upload_to='recrutamento/folha-ponto/%Y/%m/')
@@ -649,7 +655,17 @@ class FolhaPonto(models.Model):
         ordering = ['-competencia']
 
     def __str__(self):
-        return f'Folha ponto {self.competencia}'
+        return f'Folha ponto {self.rotulo or self.competencia}'
+
+    @classmethod
+    def chave_provisoria(cls):
+        """Chave de 7 caracteres para a linha que ainda está em leitura.
+
+        A competência só se conhece depois de ler o cartão, mas a coluna é
+        ``unique`` -- então a linha precisa nascer com algum valor. Cabe no
+        ``max_length=7`` de propósito (ver ``PREFIXO_PENDENTE``).
+        """
+        return f'{cls.PREFIXO_PENDENTE}{uuid4().hex[:6]}'
 
     @property
     def rotulo(self):
