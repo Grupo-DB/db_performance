@@ -28,6 +28,48 @@ class PublicAnaliseViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.AllowAny]
 
 
+# Campos livres do cadastro da amostra que os Relatórios Dinâmicos filtram por trecho
+# (icontains). Chave = nome que vem no payload; valor = campo do model Amostra.
+CAMPOS_TEXTO_AMOSTRA = {
+    'numero': 'numero',
+    'numero_sac': 'numero_sac',
+    'numero_lote': 'numero_lote',
+    'estado_fisico': 'estado_fisico',
+    'cod_db': 'cod_db',
+    'periodo_hora': 'periodo_hora',
+    'representatividade_lote': 'representatividade_lote',
+    'registro_ep': 'registro_ep',
+    'registro_produto': 'registro_produto',
+    'destino_envio': 'destino_envio',
+    'identificacao_complementar': 'identificacao_complementar',
+    'complemento': 'complemento',
+    'observacoes': 'observacoes',
+}
+
+# Datas da amostra: sempre intervalo, com as chaves <nome>_inicio e <nome>_fim.
+CAMPOS_DATA_AMOSTRA = {
+    'data_entrada': 'data_entrada',
+    'data_coleta': 'data_coleta',
+    'data_descarte': 'data_descarte',
+    'data_envio': 'data_envio',
+    'data_recebida': 'data_recebida',
+}
+
+# Tudo que filtrar-e-calcular entende. Vai na resposta como `filtros_aceitos` para a
+# tela conseguir avisar quando manda um filtro que este servidor ainda não conhece —
+# sem isso, um backend desatualizado devolveria a lista inteira como se tivesse
+# filtrado.
+FILTROS_SUPORTADOS = sorted(
+    ['data_inicio', 'data_fim', 'finalizada_inicio', 'finalizada_fim',
+     'aprovada_inicio', 'aprovada_fim', 'finalizada', 'aprovada', 'laudo',
+     'usada_laudo', 'estado', 'laboratorio_atual', 'classificacao', 'laboratorio',
+     'local_coleta', 'tipo_amostra', 'produto_ids', 'material', 'fornecedor',
+     'finalidade', 'tipo_amostragem', 'tipo', 'subtipo', 'periodo_turno', 'reter']
+    + list(CAMPOS_TEXTO_AMOSTRA)
+    + [f'{c}_inicio' for c in CAMPOS_DATA_AMOSTRA]
+    + [f'{c}_fim' for c in CAMPOS_DATA_AMOSTRA]
+)
+
 # Cálculos especiais de argamassa: cada um é um campo JSON dedicado no modelo Analise
 # (preenchido pelos drawers do menu "Ações Argamassa"/"Peneiras" em analise.ts), fora do
 # pipeline genérico de Ensaio/CalculoEnsaio. Mapeia campo_especial -> (nome do campo no
@@ -633,6 +675,46 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             else:
                 qs = qs.filter(amostra__produto_amostra__subtipo__icontains=subtipo)
 
+        # ── Demais campos do cadastro da amostra ────────────────────────────
+        # Os Relatórios Dinâmicos espelham a tela de cadastro: todo campo que o
+        # laboratório preenche na amostra é filtrável aqui, na mesma ordem.
+        # Texto casa por trecho (lista = qualquer um dos trechos).
+        for chave, campo in CAMPOS_TEXTO_AMOSTRA.items():
+            valor = data.get(chave)
+            if not valor:
+                continue
+            if isinstance(valor, list):
+                q = Q()
+                for v in valor:
+                    q |= Q(**{f'amostra__{campo}__icontains': v})
+                qs = qs.filter(q)
+            else:
+                qs = qs.filter(**{f'amostra__{campo}__icontains': valor})
+
+        # Datas da amostra, sempre como intervalo <chave>_inicio / <chave>_fim.
+        for chave, campo in CAMPOS_DATA_AMOSTRA.items():
+            inicio = data.get(f'{chave}_inicio')
+            fim = data.get(f'{chave}_fim')
+            if inicio:
+                qs = qs.filter(**{f'amostra__{campo}__gte': inicio})
+            if fim:
+                qs = qs.filter(**{f'amostra__{campo}__lte': fim})
+
+        # Periodicidade: o cadastro gravou ora o id da opção ('0'..'4'), ora o nome
+        # ('Diário'…). Casamento exato contra a lista que a tela manda — ela envia os
+        # dois formatos de cada opção escolhida — para '0' não pegar '10'.
+        periodo_turno = data.get('periodo_turno')
+        if periodo_turno:
+            if isinstance(periodo_turno, list):
+                qs = qs.filter(amostra__periodo_turno__in=[str(p) for p in periodo_turno])
+            else:
+                qs = qs.filter(amostra__periodo_turno=str(periodo_turno))
+
+        # reter é booleano: só filtra quando veio explicitamente true/false.
+        reter = data.get('reter')
+        if reter is not None:
+            qs = qs.filter(amostra__reter=reter)
+
         return qs.order_by('-id')
 
     @action(detail=False, methods=['post'], url_path='curva-granulometrica')
@@ -748,6 +830,15 @@ class AnaliseViewSet(viewsets.ModelViewSet):
           - fornecedor: string ou lista
           - finalidade: string ou lista
           - tipo_amostragem: string ou lista (Media | Pontual)
+          - tipo / subtipo: string ou lista (do produto da amostra)
+          - demais campos livres do cadastro (casam por trecho, aceitam lista):
+            numero, numero_sac, numero_lote, estado_fisico, cod_db, periodo_hora,
+            representatividade_lote, registro_ep, registro_produto, destino_envio,
+            identificacao_complementar, complemento, observacoes
+          - periodo_turno: string ou lista (id da opção ou nome, casamento exato)
+          - reter: true | false
+          - datas da amostra, como intervalo <campo>_inicio / <campo>_fim:
+            data_entrada, data_coleta, data_descarte, data_envio, data_recebida
         Estatísticas (opcionais):
           - ensaio_id: int — filtra por ID do ensaio
           - ensaio_nome: string — filtra por nome/descrição do ensaio (icontains)
@@ -808,6 +899,8 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             'total_analises': len(analises_list),
             'analises': analises_list,
             'estatisticas': None,
+            # Contrato com a tela: ela confere se todo filtro que mandou está aqui.
+            'filtros_aceitos': FILTROS_SUPORTADOS,
         }
 
         # ── 3. CÁLCULO DE ESTATÍSTICAS (opcional) ───────────────────────────
