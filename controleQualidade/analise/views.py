@@ -97,6 +97,36 @@ CAMPOS_ESPECIAIS = {
     'retencao_agua_resultado': ('retencao_agua', lambda d: (d or {}).get('resultado'), 'Retenção de Água', '%'),
 }
 
+# Cal Completo: os 15 resultados da planilha DB CAL Plan ficam num único JSON
+# (Analise.cal_completo), calculado na tela da análise. Aqui cada chave vira uma
+# coluna possível do relatório, na mesma ordem em que aparecem na tela.
+CAMPOS_CAL_COMPLETO = [
+    ('cao_comb_so4', 'CaO Comb c/ SO4'),
+    ('cao_comb_co2', 'CaO Comb c/ CO2'),
+    ('h2o_comb', 'H2O Combinado'),
+    ('cao_hidratado', 'CaO Hidratado'),
+    ('cao_nao_hidratado', 'CaO N/ Hidratado'),
+    ('mgo_hidratado', 'MgO Hidratado'),
+    ('cao_nao_hidratado_final', 'CaO N/ Hidr Final'),
+    ('oxidos_total_nao_hidratados', 'Óx T N/ Hidratados'),
+    ('ca', 'Ca Calc Esteq.'),
+    ('mg', 'Mg Calc Esteq.'),
+    ('oxidos_totais_nao_volumetricos', 'Óx T N/ Vol'),
+    ('soma_oxidos', 'Soma Óxidos'),
+    ('hidrox_totais', 'Hidr Totais'),
+    ('h2o_combinado', 'H2O Comb'),
+    ('eq_caco2', 'Eq CaCO2 Resid'),
+]
+
+for _chave, _rotulo in CAMPOS_CAL_COMPLETO:
+    # default no lambda: sem ele, todas as entradas fechariam sobre a última chave do laço.
+    CAMPOS_ESPECIAIS[f'cal_{_chave}'] = (
+        'cal_completo',
+        lambda d, k=_chave: (d or {}).get(k),
+        f'Cal Completo — {_rotulo}',
+        '%',
+    )
+
 _LABEL_METRICA_PENEIRA = {
     'retido': 'Retido',
     'passante': 'Passante',
