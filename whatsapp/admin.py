@@ -26,9 +26,9 @@ class ConfiguracaoAtendimentoAdmin(admin.ModelAdmin):
         }),
         ('Assinatura das respostas', {
             'fields': ('assinatura',),
-            'description': 'Vai na frente da primeira resposta do atendimento (e de novo se a '
-                           'conversa ficar horas parada). É a mesma para todos os atendentes — o '
-                           'cliente fala com a empresa, não com uma pessoa. Em branco não assina.',
+            'description': 'Vai na frente de toda resposta do atendente. É a mesma para todos '
+                           'os atendentes — o cliente fala com a empresa, não com uma pessoa. '
+                           'Em branco não assina.',
         }),
         ('Última alteração', {'fields': ('atualizado_em', 'atualizado_por')}),
     )

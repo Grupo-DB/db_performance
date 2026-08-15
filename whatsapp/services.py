@@ -1,7 +1,6 @@
 """Regras de negócio desacopladas da ingestão do webhook (fácil de trocar por NLP no futuro)."""
 import logging
 import re
-from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
@@ -13,11 +12,6 @@ logger = logging.getLogger(__name__)
 
 # Quantas vezes o menu é mandado antes de jogar o cliente na fila padrão.
 TENTATIVAS_MAXIMAS = 3
-
-# Depois desse tempo sem o atendente falar, a próxima mensagem volta a ser
-# assinada. Sem isso, uma conversa retomada no dia seguinte continuaria sem nome
-# só porque o último a falar foi a mesma pessoa.
-INTERVALO_REASSINATURA = timedelta(hours=4)
 
 # Grupo (django.contrib.auth.Group) que enxerga todas as filas e pode assumir
 # qualquer conversa, inclusive as que já estão com outro atendente. É o supervisor
@@ -84,34 +78,14 @@ def assinatura_do_atendimento() -> str:
 
 def _deve_assinar(mensagem) -> bool:
     """
-    Assina na primeira fala do atendimento e depois de a conversa ficar parada.
+    Toda fala do atendente sai assinada; a do robô, não.
 
-    Repetir a assinatura em toda linha polui o histórico do cliente — numa
-    sequência de cinco mensagens seguidas ele leria o mesmo rótulo cinco vezes.
-    Quem é o atendente não entra mais na conta: a assinatura é a mesma para
-    todos, então trocar de atendente não é motivo para reassinar.
+    Antes assinava só a primeira do atendimento e depois de horas paradas, para
+    não repetir o rótulo. Passou a assinar sempre a pedido do atendimento: numa
+    conversa longa, ou retomada de outro aparelho, o cliente rolava a tela e já
+    não sabia com que setor estava falando.
     """
-    if mensagem.autor_id is None:
-        return False  # bot: menu de setores, confirmação de roteamento
-
-    anterior = (
-        Mensagem.objects
-        .filter(
-            conversa_id=mensagem.conversa_id,
-            direcao='SAIDA',
-            autor__isnull=False,
-            created_at__lt=mensagem.created_at,
-        )
-        # Uma mensagem que não saiu não apresentou ninguém: contá-la faria a
-        # próxima tentativa ir sem assinatura.
-        .exclude(status_entrega='FALHOU')
-        .exclude(pk=mensagem.pk)
-        .order_by('-created_at')
-        .first()
-    )
-    if anterior is None:
-        return True
-    return (mensagem.created_at - anterior.created_at) > INTERVALO_REASSINATURA
+    return mensagem.autor_id is not None  # None é bot: menu de setores, roteamento
 
 
 def assinar_para_cliente(texto: str, mensagem) -> str:

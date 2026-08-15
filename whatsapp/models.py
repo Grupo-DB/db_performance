@@ -165,8 +165,8 @@ class ConfiguracaoAtendimento(models.Model):
                   'Use {setor} onde o nome do setor deve aparecer.',
     )
     assinatura = models.CharField(
-        max_length=60, blank=True, default='Grupo DB TI',
-        help_text='Nome que o cliente vê no começo da resposta do atendente. É fixo de '
+        max_length=60, blank=True, default='Setor de TI Grupo DB',
+        help_text='Nome que o cliente vê no começo de TODA resposta do atendente. É fixo de '
                   'propósito: o cliente fala com a empresa, não com uma pessoa. '
                   'Deixe em branco para não assinar nada.',
     )
