@@ -138,6 +138,14 @@ class RegraComissao(models.Model):
         ('FIXO', 'Valor fixo (R$)'),
         ('PERCENTUAL_DE_COMISSOES', 'Percentual sobre comissões de outros'),
     ]
+    # Define QUAIS linhas de venda pertencem ao vendedor. Sem isso uma regra incidiria
+    # sobre o faturamento inteiro da empresa (era o furo que deixava o motor inutilizável).
+    ESCOPO_CHOICES = [
+        ('REPRESENTANTE', 'Vendas em que ele é o representante da nota'),
+        ('MASTER', 'Vendas dele + dos sub-representantes (master)'),
+        ('MUNICIPIOS', 'Vendas nas cidades mapeadas para ele'),
+        ('TODAS', 'Todas as vendas da empresa (gestor / fixo)'),
+    ]
 
     representante = models.ForeignKey(
         Representante, on_delete=models.CASCADE,
@@ -159,24 +167,56 @@ class RegraComissao(models.Model):
         max_digits=8, decimal_places=4, default=1,
         help_text='Multiplicador final aplicado ao resultado (ex: 1.05 para +5%)'
     )
+    valor_minimo = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text='Comissão mínima garantida desta regra em R$ (0 = sem mínimo)'
+    )
+    valor_maximo = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text='Teto da comissão desta regra em R$ (0 = sem teto)'
+    )
     ordem = models.PositiveSmallIntegerField(default=0, help_text='Ordem de exibição/aplicação')
     ativo = models.BooleanField(default=True)
 
-    # Filtros opcionais — restringe a quais linhas a regra se aplica
+    escopo = models.CharField(
+        max_length=20, choices=ESCOPO_CHOICES, default='REPRESENTANTE',
+        help_text='Quais linhas de venda são consideradas do vendedor'
+    )
+    meta_grupo = models.CharField(
+        max_length=50, blank=True,
+        help_text='ESCADA_META: grupo da meta usada (CB, PRIMOR…). Vazio = soma das metas do período'
+    )
+    base_comissoes_de = models.CharField(
+        max_length=455, blank=True,
+        help_text='PERCENTUAL_DE_COMISSOES: nomes (ou trechos) separados por ";" cujas comissões '
+                  'formam a base. Vazio = vendedores vinculados a ele como interno'
+    )
+
+    # Filtros opcionais — restringe a quais linhas a regra se aplica.
+    # Todos aceitam vários termos separados por ";" (basta um casar).
     filtro_filial_contem = models.CharField(
-        max_length=100, blank=True,
+        max_length=455, blank=True,
         help_text='Se preenchido, aplica apenas a linhas onde EMPRESAFILIAL contém esse texto (ex: ATM)'
     )
     filtro_cliente_contem = models.CharField(
-        max_length=100, blank=True,
+        max_length=455, blank=True,
         help_text='Se preenchido, aplica apenas a linhas onde CLIENTE_NOME contém esse texto (ex: QUERO QUERO)'
     )
+    filtro_cliente_excluir = models.CharField(
+        max_length=455, blank=True,
+        help_text='Clientes que NÃO entram na base (ex: YARA;COFCO)'
+    )
     filtro_grupo_comercial_contem = models.CharField(
-        max_length=100, blank=True,
-        help_text='Se preenchido, aplica apenas a linhas onde GRUPO_COMERCIAL contém esse texto (ex: CARBOMAX)'
+        max_length=455, blank=True,
+        help_text='Se preenchido, aplica apenas a linhas do grupo comercial / linha de produtos / '
+                  'grupo do ERP que contenham esse texto (ex: CARBOMAX, DOLOMIT)'
+    )
+    filtro_grupo_comercial_excluir = models.CharField(
+        max_length=455, blank=True,
+        help_text='Grupos comerciais que NÃO entram na base'
     )
     filtro_cidade_sufixo = models.CharField(
-        max_length=10, blank=True,
+        max_length=50, blank=True,
         help_text='Se preenchido, aplica apenas a linhas onde CIDADE_FATURAMENTO termina com esse sufixo (ex: -SC, -RS)'
     )
 

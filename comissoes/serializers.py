@@ -127,9 +127,11 @@ class RegraComissaoSerializer(serializers.ModelSerializer):
         model = RegraComissao
         fields = [
             'id', 'representante', 'representante_detalhes',
-            'descricao', 'tipo', 'base_calculo', 'segmento_produto',
-            'taxa', 'valor_fixo', 'multiplicador', 'ordem', 'ativo',
-            'filtro_filial_contem', 'filtro_cliente_contem',
-            'filtro_grupo_comercial_contem', 'filtro_cidade_sufixo',
+            'descricao', 'tipo', 'base_calculo', 'segmento_produto', 'escopo',
+            'taxa', 'valor_fixo', 'multiplicador', 'valor_minimo', 'valor_maximo',
+            'ordem', 'ativo', 'meta_grupo', 'base_comissoes_de',
+            'filtro_filial_contem', 'filtro_cliente_contem', 'filtro_cliente_excluir',
+            'filtro_grupo_comercial_contem', 'filtro_grupo_comercial_excluir',
+            'filtro_cidade_sufixo',
             'grupos', 'faixas',
         ]

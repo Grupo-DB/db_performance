@@ -696,6 +696,18 @@ def calculos_comissoes(request):
     except Exception:
         _params = {}
 
+    # Simulação: a tela de configuração manda valores ainda NÃO salvos para o usuário ver
+    # o efeito em R$ antes de gravar. Só vale para esta requisição.
+    _override = request.data.get('parametros_override') or {}
+    _params_simulados = {}
+    if isinstance(_override, dict):
+        for _ch, _vl in _override.items():
+            try:
+                _params[str(_ch)] = float(_vl)
+                _params_simulados[str(_ch)] = float(_vl)
+            except (TypeError, ValueError):
+                continue
+
     def p(chave, default):
         """Retorna o parâmetro do banco ou o valor padrão."""
         return _params.get(chave, default)
@@ -2232,6 +2244,21 @@ def calculos_comissoes(request):
 
     resultado['_agro_debug'] = _agro_debug
 
+    # ── Motor de regras configuradas pelo usuário ────────────────────────────
+    # Roda DEPOIS dos blocos fixos (para saber quais vendedores já foram calculados e não
+    # sobrescrevê-los) e ANTES do resumo, para que a comissão entre no total geral.
+    try:
+        from .motor_regras import aplicar_regras
+        _motor_debug = aplicar_regras(
+            df, resultado, metas_efetivas, periodo_chave,
+            regras_preview=request.data.get('regras_preview'),
+            representante_preview=request.data.get('representante_preview'),
+        )
+    except Exception as _exc_motor:
+        _motor_debug = {'erros': [f'motor de regras não executado: {_exc_motor}'],
+                        'aplicados': [], 'ignorados_por_conflito': []}
+    resultado['_motor_regras_debug'] = _motor_debug
+
     # ---- Debug: Somas por estado (CC e Agro) ----
     def _soma_por_estado(dataframe):
         estado = dataframe['CIDADE_FATURAMENTO'].str.extract(r'-([A-Z]{2,3})$', expand=False)
@@ -2370,6 +2397,8 @@ def calculos_comissoes(request):
         'comissoes': resultado,
         'resumo_por_vendedor': dict(sorted(_resumo.items())),
         'total_geral': _total_geral,
+        'motor_regras': _motor_debug,
+        'parametros_simulados': _params_simulados,
         '_dolomita_debug': _dolomita_debug,
         'base_vendas_cc': base_vendas,
         'debug_estados': _debug_estados,
