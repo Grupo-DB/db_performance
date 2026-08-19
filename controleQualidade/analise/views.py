@@ -18,6 +18,19 @@ from django.db.models import Q
 
 from controleQualidade.periodo_listagem import filtro_periodo, limite_periodo
 
+# Gestão do laboratório. Mesma lista de shared/grupos.ts no frontend; o nome tem de
+# bater com o do grupo no admin do Django.
+GRUPOS_LAB_GESTAO = ('Admin', 'Master', 'LabGestor')
+
+
+def e_gestao_laboratorio(user):
+    """Usuário é gestão do laboratório? Superusuário entra sempre."""
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser:
+        return True
+    return user.groups.filter(name__in=GRUPOS_LAB_GESTAO).exists()
+
 # URLs e configurações da sua API do Azure OpenAI
 AZURE_OPENAI_ENDPOINT = "https://troop-mg863zkh-eastus2.cognitiveservices.azure.com/"
 AZURE_OPENAI_DEPLOYMENT = "o4-mini-labDb"
@@ -494,12 +507,38 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         
     @action(detail=True, methods=['post'])
     def update_aberta(self, request, pk=None):
+        """
+        Reabre a análise (volta para as OS em andamento).
+
+        Enquanto a OS está apenas finalizada, reabrir é correção de bancada e qualquer
+        usuário do laboratório faz. Depois de APROVADA o resultado já valeu como
+        liberado, então voltar atrás é ato de gestão: só Admin / Master / LabGestor
+        (regra do usuário, 19/08/2026 — a tela repete a regra em `podeReabrir`, mas
+        quem barra é aqui).
+        """
         try:
             analise = self.get_object()
+            if analise.aprovada and not e_gestao_laboratorio(request.user):
+                return Response(
+                    {"error": "OS aprovada só pode ser reaberta por um usuário do grupo LabGestor."},
+                    status=http_status.HTTP_403_FORBIDDEN,
+                )
             analise.finalizada = False
             analise.finalizada_at = None
+            # Reabrir CANCELA a aprovação: o resultado vai ser mexido, então tem de
+            # passar pelo gestor de novo. Antes a OS voltava para a bancada ainda
+            # marcada como aprovada e, ao ser finalizada, já aparecia liberada sem
+            # ninguém ter aprovado a versão nova.
+            aprovacao_cancelada = bool(analise.aprovada)
+            analise.aprovada = False
+            analise.aprovada_at = None
             analise.save()
-            return Response({"status": "Análise reaberta com sucesso."}, status=200)
+            return Response({
+                "status": "Análise reaberta com sucesso.",
+                # O front mostra este texto no toast: reabrir uma OS aprovada tem
+                # consequência, e o técnico precisa saber que ela perdeu a aprovação.
+                "aprovacao_cancelada": aprovacao_cancelada,
+            }, status=200)
         except Analise.DoesNotExist:
             return Response({"error": "Análise não encontrada."}, status=404)
 
