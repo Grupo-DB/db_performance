@@ -8,6 +8,8 @@ from .serializers import AmostraSerializer, TipoAmostraSerializer, ProdutoAmostr
 from rest_framework.response import Response
 import pandas as pd
 
+from controleQualidade.periodo_listagem import filtro_periodo, limite_periodo
+
 class TipoAmostraViewSet(viewsets.ModelViewSet):
     queryset = TipoAmostra.objects.all()
     serializer_class = TipoAmostraSerializer
@@ -127,10 +129,22 @@ class AmostraViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'])
     def sem_ordem(self, request):
-        amostras = Amostra.objects.filter(
-            ordem__isnull=True,
-            expressa__isnull=True
-        )
+        """
+        Amostras que ainda não viraram OS (tela de Amostras).
+
+        Aceita `?dias=60` / `?desde=AAAA-MM-DD` (ver controleQualidade/periodo_listagem):
+        a tela abre nos últimos 60 dias e o recorte é feito AQUI, não no navegador.
+        Sem parâmetro devolve tudo, que é o "Todas as datas" da tela.
+
+        `select_related`/`prefetch_related` porque o AmostraSerializer expande produto e
+        imagens de cada amostra — sem isto era uma consulta por linha.
+        """
+        amostras = (Amostra.objects
+                    .filter(ordem__isnull=True, expressa__isnull=True)
+                    .filter(filtro_periodo(limite_periodo(request)))
+                    .select_related('produto_amostra')
+                    .prefetch_related('imagens')
+                    .order_by('-id'))
         serializer = self.get_serializer(amostras, many=True)
         return Response(serializer.data)
     

@@ -14,6 +14,9 @@ from django.conf import settings
 from openai import AzureOpenAI
 from openai import APIError
 import pandas as pd
+from django.db.models import Q
+
+from controleQualidade.periodo_listagem import filtro_periodo, limite_periodo
 
 # URLs e configurações da sua API do Azure OpenAI
 AZURE_OPENAI_ENDPOINT = "https://troop-mg863zkh-eastus2.cognitiveservices.azure.com/"
@@ -257,21 +260,36 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         'amostra__expressa__calculos_intermediarios__calculo__ensaios__variavel',
     )
 
-    def _queryset_lista(self, **filtros):
+    def _queryset_lista(self, request=None, **filtros):
+        """
+        Listagem com as relações pré-carregadas e, se pedido, recortada por período.
+
+        O recorte (`?dias=90` / `?desde=AAAA-MM-DD`, ver
+        controleQualidade/periodo_listagem) existe porque `fechadas/` são ~4,2 MB: a
+        tela de OS Encerradas abre nos últimos 90 dias e não precisa da base inteira.
+        Sem o parâmetro nada muda — é o "Todas as datas" da tela e o que os outros
+        consumidores (boletim diário, poller de rompimento) continuam recebendo.
+
+        `-id` fixa a ordem mais nova primeiro; sem `order_by` o MySQL devolvia em ordem
+        de chave, e a tela dependia de ordenar no navegador.
+        """
+        periodo = filtro_periodo(limite_periodo(request), 'amostra__') if request else Q()
         return (Analise.objects
                 .filter(**filtros)
+                .filter(periodo)
                 .select_related(*self._RELACOES_LISTA)
-                .prefetch_related(*self._RELACOES_LISTA_M2M))
+                .prefetch_related(*self._RELACOES_LISTA_M2M)
+                .order_by('-id'))
 
     @action(detail=False, methods=['get'], url_path='abertas')
     def abertas(self, request):
-        analises = self._queryset_lista(finalizada=0)
+        analises = self._queryset_lista(request, finalizada=0)
         serializer = self.get_serializer(analises, many=True)
         return Response(serializer.data)
 
     @action(detail=False, methods=['get'], url_path='fechadas')
     def fechadas(self, request):
-        analises = self._queryset_lista(finalizada=1)
+        analises = self._queryset_lista(request, finalizada=1)
         serializer = self.get_serializer(analises, many=True)
         return Response(serializer.data)
     
