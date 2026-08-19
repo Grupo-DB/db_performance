@@ -6,7 +6,7 @@ from django.http import JsonResponse
 from rest_framework.decorators import api_view
 from django.db import connections
 from sqlalchemy import create_engine
-from baseOrcamentaria.orcamento.models import ContaContabil,CentroCusto
+from baseOrcamentaria.orcamento.models import ContaContabil,CentroCusto,GrupoItens
 import pandas as pd
 import locale
 import datetime
@@ -220,6 +220,43 @@ def calculos_realizado(request):
     lambda row: row["DEB_VALOR"] if str(row["CONTA_DEB"])[1] in ['3', '4'] else row["CRED_VALOR"],
     axis=1
 )
+
+    # ── Uma linha por lançamento ────────────────────────────────────────────────
+    # A consulta é um UNION: a primeira metade traz o lado do DÉBITO (DEB_VALOR =
+    # LANCVALOR, CRED_VALOR = 0) e a segunda o lado do CRÉDITO (o contrário). Como o
+    # SALDO acima escolhe UM dos dois lados, o lançamento aparecia duas vezes na
+    # listagem — uma com o valor e outra com 0,00 (era o que a tela mostrava).
+    #
+    # Some 0 não muda total nenhum, então dá para descartar a linha sem valor: das duas
+    # cópias fica a que carrega o SALDO. Quando o lançamento é de valor zero as duas
+    # cópias têm SALDO 0 e sobra uma — dropar as duas esconderia o lançamento.
+    #
+    # `sort_index()` no fim devolve a ordem original das linhas que sobraram.
+    colunas_identidade = [c for c in consulta_realizado.columns
+                          if c not in ('DEB_VALOR', 'CRED_VALOR', 'SALDO')]
+    consulta_realizado = (consulta_realizado
+                          .assign(_tem_valor=consulta_realizado['SALDO'] != 0)
+                          .sort_values('_tem_valor', ascending=False, kind='stable')
+                          .drop_duplicates(subset=colunas_identidade, keep='first')
+                          .sort_index()
+                          .drop(columns='_tem_valor'))
+
+    # ── Grupo de Itens do lançamento ────────────────────────────────────────────
+    # Mesma regra do relatório por Grupo de Itens (baseOrcamentaria/grupoitens): vale a
+    # conta de RESULTADO (a que começa com 3 ou 4, a mesma que define o SALDO) e o
+    # código do grupo são os 9 últimos dígitos dela. `CONTA_DEB`/`CONTA_CRED` vêm da
+    # consulta com um apóstrofo na frente — por isso o índice 1 e o replace.
+    grupo_itens_map = {
+        str(item['codigo']).zfill(9): item['nome_completo']
+        for item in GrupoItens.objects.values('codigo', 'nome_completo')
+    }
+    conta_deb = consulta_realizado['CONTA_DEB'].astype(str)
+    conta_cred = consulta_realizado['CONTA_CRED'].astype(str)
+    conta_resultado = (conta_deb.where(conta_deb.str[1].isin(['3', '4']), conta_cred)
+                       .str.replace("'", "", regex=False))
+    consulta_realizado['GRUPO_ITENS'] = (conta_resultado.str[-9:].str.zfill(9)
+                                         .map(grupo_itens_map)
+                                         .fillna('Não mapeado'))
 
     # Cria a coluna DESCRICAO
     consulta_realizado['DESCRICAO'] = consulta_realizado.apply(
