@@ -497,6 +497,10 @@ def calculos_realizado(request):
 
     total_tipo_deb = consulta_realizado.groupby('TIPO_CUSTO')['SALDO'].sum().to_dict()
     total_tipo_deb_formatado = {tipo: format_locale(valor) for tipo, valor in total_tipo_deb.items()}
+
+    # Soma por Grupo de Itens — mesma coluna que a listagem usa (ver GRUPO_ITENS acima).
+    # É agrupamento do DataFrame que já está em memória: nenhuma consulta a mais.
+    total_grupo_itens = consulta_realizado.groupby('GRUPO_ITENS')['SALDO'].sum().to_dict()
     
 
     #Converte o DataFrame em um formato JSON serializável
@@ -513,6 +517,14 @@ def calculos_realizado(request):
         #'total_grupo': total_grupo_com_nomes_formatado,
         'total_conta': total_conta,
         'df_agrupado':df_agrupado_nomes_formatado,
+        # ── Versões em NÚMERO dos agrupamentos ────────────────────────────────
+        # As chaves acima saem como texto pt-BR já formatado ("1.234"), o que serve
+        # para imprimir mas não para somar nem para alimentar gráfico. O dashboard
+        # soma vários meses/setores, então precisa do número. Chaves NOVAS: os
+        # consumidores antigos continuam lendo as formatadas.
+        'total_cc_nomes': df_agrupado_nomes,
+        'total_grupo_itens': total_grupo_itens,
+        'total_tipo_custo': total_tipo_deb,
         'grupo_contabil': grupo_contabil,
         'total_grupo_com_nomes': total_grupo_com_nomes_formatado,
         'conta_completa_nomes': conta_completa_nomes_formatado,
