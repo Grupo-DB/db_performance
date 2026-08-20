@@ -89,6 +89,7 @@ INSTALLED_APPS = [
     'bisGerenciais.dashboardOperacoes.calcario',
     'bisGerenciais.dashboardOperacoes.fertilizante',
     'bisGerenciais.dashboardOperacoes.argamassa',
+    'unidb',
     'baseOrcamentaria.orcamento',
     'baseOrcamentaria.realizado',
     'baseOrcamentaria.dre',
@@ -174,7 +175,7 @@ DATABASES = {
         'NAME': 'db_manager',
         'USER':'grupodb',
         'PASSWORD': '!@#123qweQWE',
-       #'HOST': '45.6.118.52', #for local env
+        #'HOST': '45.6.118.52', #for local env
         'HOST': 'localhost',
         'PORT': '3306',
         'OPTIONS': {
