@@ -130,7 +130,13 @@ class WhatsAppNotificacaoSerializer(serializers.ModelSerializer):
     # Situação da conversa: aviso de conversa ENCERRADA não vira badge de fila, porque
     # ela não está na lista de abertas — não há como abri-la para dar baixa.
     conversa_status = serializers.CharField(source='conversa.status', read_only=True)
+    # Quem é o cliente. A `mensagem` do aviso NOVA_MENSAGEM é o texto que ele mandou,
+    # sem dizer de quem é — no sino, fora da Central, "bom dia, e o pedido?" não
+    # identifica ninguém. Sai do `select_related('conversa')` que já existe.
+    contato_nome = serializers.CharField(source='conversa.contato_nome', read_only=True)
+    contato_telefone = serializers.CharField(source='conversa.contato_telefone', read_only=True)
 
     class Meta:
         model = WhatsAppNotificacao
-        fields = ['id', 'conversa', 'fila', 'conversa_status', 'tipo', 'mensagem', 'lido', 'created_at']
+        fields = ['id', 'conversa', 'fila', 'conversa_status', 'tipo', 'mensagem', 'lido',
+                  'created_at', 'contato_nome', 'contato_telefone']
