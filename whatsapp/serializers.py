@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 
-from .models import Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
+from .models import Contato, Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
 
 
 class UserMinSerializer(serializers.ModelSerializer):
@@ -57,12 +57,40 @@ class MensagemSerializer(serializers.ModelSerializer):
         queryset=Mensagem.objects.all(), write_only=True, required=False, allow_null=True,
     )
     citada = MensagemCitadaSerializer(source='responde_a', read_only=True)
+    contatos = serializers.SerializerMethodField()
+
+    def get_contatos(self, mensagem):
+        """
+        Cartões de contato, normalizados para a bolha.
+
+        Sai daqui e não de `payload_bruto` cru porque aquele campo guarda o
+        webhook inteiro da Meta — expor o objeto todo para a tela seria vazar
+        estrutura interna e trafegar muito mais do que a bolha usa.
+
+        Serve para os dois sentidos: a chave `contacts` é a mesma no que a Meta
+        manda e no que nós montamos ao enviar.
+        """
+        if mensagem.tipo != 'CONTATO':
+            return []
+        cartoes = (mensagem.payload_bruto or {}).get('contacts') or []
+        resultado = []
+        for cartao in cartoes:
+            telefones = cartao.get('phones') or []
+            resultado.append({
+                'nome': (cartao.get('name') or {}).get('formatted_name') or '',
+                # `wa_id` é o número no formato da Meta; `phone` é como a pessoa
+                # digitou. O primeiro é o que serve para conversar.
+                'telefone': (telefones[0].get('wa_id') or telefones[0].get('phone') or '')
+                            if telefones else '',
+                'empresa': (cartao.get('org') or {}).get('company') or '',
+            })
+        return resultado
 
     class Meta:
         model = Mensagem
         fields = [
             'id', 'conversa', 'direcao', 'tipo', 'texto', 'autor', 'anexos', 'anexo',
-            'responde_a', 'citada',
+            'responde_a', 'citada', 'contatos',
             'template_nome', 'wa_message_id', 'status_entrega', 'erro_detalhe', 'created_at',
         ]
         read_only_fields = [
@@ -140,3 +168,52 @@ class WhatsAppNotificacaoSerializer(serializers.ModelSerializer):
         model = WhatsAppNotificacao
         fields = ['id', 'conversa', 'fila', 'conversa_status', 'tipo', 'mensagem', 'lido',
                   'created_at', 'contato_nome', 'contato_telefone']
+
+
+class ContatoSerializer(serializers.ModelSerializer):
+    """A agenda em si — o que foi cadastrado à mão."""
+
+    criado_por = UserMinSerializer(read_only=True)
+
+    class Meta:
+        model = Contato
+        fields = ['id', 'telefone', 'nome', 'empresa', 'observacoes', 'ativo',
+                  'criado_por', 'criado_em']
+        read_only_fields = ['criado_por', 'criado_em']
+
+    def validate_telefone(self, valor):
+        """
+        Guarda só dígitos.
+
+        A tela deixa digitar "(55) 99629-4108", mas a Meta identifica o cliente
+        por `wa_id`, que é dígito puro com DDI. Normalizar na entrada evita o
+        mesmo contato cadastrado duas vezes com máscaras diferentes — o `unique`
+        do campo não pegaria isso.
+        """
+        digitos = ''.join(c for c in (valor or '') if c.isdigit())
+        if len(digitos) < 10:
+            raise serializers.ValidationError('Telefone incompleto. Use DDI + DDD + número.')
+        return digitos
+
+
+class ContatoDaAgendaSerializer(serializers.Serializer):
+    """
+    Uma linha da tela de contatos: junta a agenda com quem já conversou.
+
+    Não é ModelSerializer porque a linha não é um registro — ela sai do encontro
+    de `Contato` com `Conversa` pelo telefone, e as duas metades podem faltar.
+    """
+
+    telefone = serializers.CharField()
+    nome = serializers.CharField()
+    empresa = serializers.CharField(allow_blank=True)
+    observacoes = serializers.CharField(allow_blank=True)
+    # De onde a linha veio: só agenda, só conversa, ou as duas.
+    fonte = serializers.ChoiceField(choices=['AGENDA', 'CONVERSA', 'AMBOS'])
+    contato_id = serializers.IntegerField(allow_null=True)
+    total_conversas = serializers.IntegerField()
+    ultima_conversa_id = serializers.IntegerField(allow_null=True)
+    ultima_mensagem_em = serializers.DateTimeField(allow_null=True)
+    ultima_conversa_status = serializers.CharField(allow_null=True)
+    # Se dá para mandar texto livre agora, ou se só sai template.
+    janela_aberta = serializers.BooleanField()

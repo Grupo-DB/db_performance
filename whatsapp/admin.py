@@ -1,7 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    ConfiguracaoAtendimento, Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao,
+    ConfiguracaoAtendimento, Contato, Fila, Conversa, Mensagem, MensagemAnexo,
+    WhatsAppNotificacao,
 )
 
 
@@ -49,6 +50,13 @@ class ConfiguracaoAtendimentoAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         obj.atualizado_por = request.user
         super().save_model(request, obj, form, change)
+
+
+@admin.register(Contato)
+class ContatoAdmin(admin.ModelAdmin):
+    list_display = ('nome', 'telefone', 'empresa', 'ativo', 'criado_por', 'criado_em')
+    list_filter = ('ativo', 'empresa')
+    search_fields = ('nome', 'telefone', 'empresa')
 
 
 @admin.register(Fila)

@@ -180,6 +180,52 @@ def enviar_midia(
     return resp.json()
 
 
+def montar_cartao_contato(nome: str, telefone: str, empresa: str = '') -> dict:
+    """
+    Monta UM cartão no formato que a Cloud API espera em `type: contacts`.
+
+    A Meta exige `name.formatted_name` e pelo menos um componente de nome
+    (`first_name`), senão devolve 400. Como a agenda guarda o nome numa única
+    string, o primeiro pedaço vira `first_name` e o resto `last_name` — não é
+    perfeito para nome composto, mas é o que o formato pede e é o que o cliente
+    vê no cartão.
+    """
+    partes = (nome or '').strip().split()
+    return {
+        'name': {
+            'formatted_name': nome or telefone,
+            'first_name': partes[0] if partes else telefone,
+            'last_name': ' '.join(partes[1:]) if len(partes) > 1 else '',
+        },
+        # `type: WORK` porque é sempre contato de trabalho aqui; `wa_id` faz o
+        # cartão virar clicável para conversar, em vez de só um número copiável.
+        'phones': [{'phone': telefone, 'type': 'WORK', 'wa_id': telefone}],
+        **({'org': {'company': empresa}} if empresa else {}),
+    }
+
+
+def enviar_contatos(telefone: str, cartoes: list[dict], citando: str = '') -> dict:
+    """
+    Compartilha um ou mais cartões de contato.
+
+    É tipo próprio na Cloud API (`contacts`), não anexo: vai como JSON e chega no
+    cliente como cartão nativo, com o botão de conversar. Use
+    `montar_cartao_contato` para montar cada item.
+    """
+    url = f"{_base_url()}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    payload = {
+        'messaging_product': 'whatsapp',
+        'to': telefone,
+        'type': 'contacts',
+        'contacts': cartoes,
+    }
+    if citando:
+        payload['context'] = {'message_id': citando}
+    resp = requests.post(url, json=payload, headers=_headers(), timeout=TIMEOUT_PADRAO)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def enviar_template(
     telefone: str,
     nome_template: str,

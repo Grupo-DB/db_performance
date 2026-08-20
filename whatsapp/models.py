@@ -81,6 +81,9 @@ class Mensagem(models.Model):
         ('DOCUMENTO', 'Documento'),
         ('AUDIO', 'Áudio'),
         ('VIDEO', 'Vídeo'),
+        # Cartão de contato (o "contacts" da Cloud API). Os dados ficam em
+        # `payload_bruto`, não em arquivo: é JSON, não mídia.
+        ('CONTATO', 'Contato'),
     ]
     STATUS_ENTREGA_CHOICES = [
         ('PENDENTE', 'Pendente'),
@@ -142,6 +145,44 @@ class MensagemAnexo(models.Model):
 
     def __str__(self):
         return self.nome_original or f"Anexo {self.pk}"
+
+
+class Contato(models.Model):
+    """
+    Agenda própria do atendimento.
+
+    Existe porque a Cloud API **não** tem catálogo de contatos: não há endpoint
+    para ler a agenda do WhatsApp, e a Meta só informa o nome do perfil de quem
+    escreve (que já fica em `Conversa.contato_nome`). Este modelo guarda o que a
+    conversa não dá: quem nunca escreveu, o nome interno que a empresa usa para a
+    pessoa, e a observação do atendimento.
+
+    A listagem da tela junta as duas fontes pelo telefone — quem está aqui, quem
+    só apareceu em conversa, e quem está nos dois lugares. O telefone é a chave,
+    no mesmo formato que a Meta usa em `wa_id` (dígitos, com DDI, sem sinais).
+    """
+
+    telefone = models.CharField(
+        max_length=30, unique=True, db_index=True,
+        help_text='Só dígitos, com DDI. Ex.: 5555996294108',
+    )
+    nome = models.CharField(max_length=150)
+    empresa = models.CharField(max_length=150, blank=True)
+    observacoes = models.TextField(blank=True)
+    ativo = models.BooleanField(default=True)
+    criado_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='contatos_whatsapp_criados',
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Contato'
+        verbose_name_plural = 'Contatos'
+        ordering = ['nome']
+
+    def __str__(self):
+        return f'{self.nome} ({self.telefone})'
 
 
 class ConfiguracaoAtendimento(models.Model):

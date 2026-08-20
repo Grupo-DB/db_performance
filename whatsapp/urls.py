@@ -4,12 +4,14 @@ from rest_framework_nested.routers import NestedDefaultRouter
 
 from .views import (
     WebhookView, FilaViewSet, ConversaViewSet, MensagemViewSet, WhatsAppNotificacaoViewSet,
+    ContatoViewSet,
 )
 
 router = DefaultRouter()
 router.register(r'filas', FilaViewSet, basename='fila')
 router.register(r'conversas', ConversaViewSet, basename='conversa')
 router.register(r'notificacoes', WhatsAppNotificacaoViewSet, basename='whatsapp-notificacao')
+router.register(r'contatos', ContatoViewSet, basename='whatsapp-contato')
 
 conversas_router = NestedDefaultRouter(router, r'conversas', lookup='conversa')
 conversas_router.register(r'mensagens', MensagemViewSet, basename='conversa-mensagens')

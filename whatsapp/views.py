@@ -19,12 +19,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import graph_api, services
-from .models import Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
+from .models import Contato, Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
 from .serializers import (
     FilaSerializer, ConversaListSerializer, ConversaDetailSerializer,
     MensagemSerializer, WhatsAppNotificacaoSerializer,
+    ContatoSerializer, ContatoDaAgendaSerializer,
 )
-from .tasks import processar_webhook_whatsapp, enviar_mensagem_whatsapp, enviar_template_whatsapp
+from .tasks import (
+    processar_webhook_whatsapp, enviar_mensagem_whatsapp, enviar_template_whatsapp,
+    enviar_contato_whatsapp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +310,53 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         # na hora do envio.
         return Response([t for t in todos if t.get('status') == 'APPROVED'])
 
+    @action(detail=True, methods=['post'], url_path='enviar-contato')
+    def enviar_contato(self, request, pk=None):
+        """
+        Compartilha cartões de contato na conversa.
+
+        Recebe `contatos` (ids da agenda) e/ou `avulsos` ([{nome, telefone,
+        empresa}]) — o avulso existe para mandar o telefone de alguém que não
+        está cadastrado sem obrigar a cadastrar primeiro.
+
+        Exige janela aberta: cartão de contato é mensagem livre, não template.
+        """
+        conversa = self.get_object()
+        if not services.pode_atender(request.user, conversa):
+            raise PermissionDenied('Você não pertence à fila desta conversa.')
+        if not conversa.dentro_da_janela_24h:
+            raise JanelaExpirada()
+
+        cartoes = []
+        for contato in Contato.objects.filter(id__in=request.data.get('contatos') or []):
+            cartoes.append(graph_api.montar_cartao_contato(
+                contato.nome, contato.telefone, contato.empresa))
+        for avulso in request.data.get('avulsos') or []:
+            telefone = ''.join(c for c in str(avulso.get('telefone') or '') if c.isdigit())
+            if len(telefone) < 10:
+                continue
+            cartoes.append(graph_api.montar_cartao_contato(
+                avulso.get('nome') or telefone, telefone, avulso.get('empresa') or ''))
+
+        if not cartoes:
+            return Response({'detail': 'Nenhum contato válido para enviar.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # O texto é o rastro legível do histórico; o cartão real vai em
+        # `payload_bruto`, que é de onde a bolha desenha os nomes.
+        nomes = ', '.join(c['name']['formatted_name'] for c in cartoes)
+        mensagem = Mensagem.objects.create(
+            conversa=conversa, direcao='SAIDA', tipo='CONTATO', autor=request.user,
+            texto=nomes, status_entrega='PENDENTE',
+            payload_bruto={'contacts': cartoes},
+            responde_a_id=request.data.get('responde_a') or None,
+        )
+        conversa.ultima_mensagem_em = timezone.now()
+        conversa.save(update_fields=['ultima_mensagem_em'])
+
+        enviar_contato_whatsapp.delay(mensagem.id)
+        return Response(MensagemSerializer(mensagem).data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['post'], url_path='enviar-template')
     def enviar_template(self, request, pk=None):
         """
@@ -340,6 +391,160 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
 
         enviar_template_whatsapp.delay(mensagem.id, nome_template, idioma, componentes)
         return Response(MensagemSerializer(mensagem).data, status=status.HTTP_201_CREATED)
+
+
+class ContatoViewSet(viewsets.ModelViewSet):
+    """
+    Agenda do atendimento + o cruzamento dela com quem já conversou.
+
+    A Cloud API não tem catálogo de contatos, então a agenda é nossa. A tela
+    precisa das DUAS fontes: quem foi cadastrado à mão (e talvez nunca escreveu)
+    e quem existe só porque mandou mensagem um dia.
+    """
+
+    serializer_class = ContatoSerializer
+    permission_classes = [IsAuthenticated]
+    queryset = Contato.objects.all()
+
+    def perform_create(self, serializer):
+        serializer.save(criado_por=self.request.user)
+
+    @action(detail=False, methods=['get'], url_path='agenda')
+    def agenda(self, request):
+        """
+        Uma linha por telefone, juntando agenda e conversas.
+
+        Só entram conversas de filas das quais a pessoa participa (gestor vê
+        tudo) — a agenda não pode virar a porta dos fundos para ler atendimento
+        de outro setor.
+        """
+        conversas = Conversa.objects.all()
+        if not services.eh_gestor(request.user):
+            conversas = conversas.filter(fila__membros=request.user)
+
+        # Uma volta só no banco: a linha mais recente de cada telefone é a
+        # primeira, porque a ordenação desce por data.
+        por_telefone: dict = {}
+        for conversa in conversas.order_by('contato_telefone', '-created_at').distinct():
+            atual = por_telefone.get(conversa.contato_telefone)
+            if atual is None:
+                por_telefone[conversa.contato_telefone] = {
+                    'nome': conversa.contato_nome or '',
+                    'total_conversas': 1,
+                    'ultima_conversa_id': conversa.id,
+                    'ultima_mensagem_em': conversa.ultima_mensagem_em,
+                    'ultima_conversa_status': conversa.status,
+                    'janela_aberta': conversa.dentro_da_janela_24h,
+                }
+            else:
+                atual['total_conversas'] += 1
+
+        linhas = []
+        vistos = set()
+        for contato in Contato.objects.filter(ativo=True):
+            de_conversa = por_telefone.get(contato.telefone)
+            vistos.add(contato.telefone)
+            linhas.append({
+                'telefone': contato.telefone,
+                # O nome da agenda vence o do perfil do WhatsApp: é o nome que a
+                # empresa usa, e o do perfil o cliente troca quando quer.
+                'nome': contato.nome,
+                'empresa': contato.empresa,
+                'observacoes': contato.observacoes,
+                'fonte': 'AMBOS' if de_conversa else 'AGENDA',
+                'contato_id': contato.id,
+                'total_conversas': (de_conversa or {}).get('total_conversas', 0),
+                'ultima_conversa_id': (de_conversa or {}).get('ultima_conversa_id'),
+                'ultima_mensagem_em': (de_conversa or {}).get('ultima_mensagem_em'),
+                'ultima_conversa_status': (de_conversa or {}).get('ultima_conversa_status'),
+                'janela_aberta': (de_conversa or {}).get('janela_aberta', False),
+            })
+
+        for telefone, dados in por_telefone.items():
+            if telefone in vistos:
+                continue
+            linhas.append({
+                'telefone': telefone,
+                'nome': dados['nome'] or telefone,
+                'empresa': '',
+                'observacoes': '',
+                'fonte': 'CONVERSA',
+                'contato_id': None,
+                **{k: v for k, v in dados.items() if k != 'nome'},
+            })
+
+        linhas.sort(key=lambda linha: (linha['nome'] or '').lower())
+        return Response(ContatoDaAgendaSerializer(linhas, many=True).data)
+
+    @action(detail=False, methods=['post'], url_path='iniciar-conversa')
+    def iniciar_conversa(self, request):
+        """
+        Começa um atendimento a partir da agenda, com template.
+
+        Fora da janela de 24h a Meta só aceita template — e para quem nunca
+        escreveu a janela nunca esteve aberta. Por isso o template é obrigatório
+        aqui, e não um detalhe opcional.
+
+        A conversa nasce com fila e responsável preenchidos de propósito: o
+        `get_queryset` da conversa filtra por `fila__membros`, então conversa sem
+        fila ficaria invisível para quem acabou de criá-la.
+        """
+        telefone = ''.join(c for c in str(request.data.get('telefone') or '') if c.isdigit())
+        if len(telefone) < 10:
+            return Response({'detail': 'Telefone inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        nome_template = (request.data.get('template') or '').strip()
+        if not nome_template:
+            return Response(
+                {'detail': 'Escolha um template: só ele pode iniciar conversa.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        fila = self._fila_para_iniciar(request)
+        if fila is None:
+            return Response(
+                {'detail': 'Você não participa de nenhuma fila — não é possível iniciar conversa.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Reaproveita conversa aberta em vez de criar outra: dois registros para o
+        # mesmo cliente partiriam o histórico em dois lugares.
+        conversa = (Conversa.objects
+                    .filter(contato_telefone=telefone, status='ABERTA')
+                    .order_by('-created_at').first())
+        if conversa is None:
+            contato = Contato.objects.filter(telefone=telefone).first()
+            conversa = Conversa.objects.create(
+                contato_telefone=telefone,
+                contato_nome=(contato.nome if contato else ''),
+                fila=fila,
+                responsavel=request.user,
+                # Nós iniciamos: não faz sentido mandar o menu de setores para
+                # quem foi procurado pela empresa.
+                estado_menu='EM_ATENDIMENTO',
+            )
+
+        idioma = (request.data.get('idioma') or 'pt_BR').strip()
+        componentes = request.data.get('componentes') or None
+        mensagem = Mensagem.objects.create(
+            conversa=conversa, direcao='SAIDA', tipo='TEXTO', autor=request.user,
+            texto=request.data.get('previa') or f'[template: {nome_template}]',
+            template_nome=nome_template, status_entrega='PENDENTE',
+            payload_bruto={'template': nome_template, 'idioma': idioma, 'componentes': componentes},
+        )
+        conversa.ultima_mensagem_em = timezone.now()
+        conversa.save(update_fields=['ultima_mensagem_em'])
+
+        enviar_template_whatsapp.delay(mensagem.id, nome_template, idioma, componentes)
+        return Response(ConversaSerializer(conversa).data, status=status.HTTP_201_CREATED)
+
+    def _fila_para_iniciar(self, request):
+        """A fila pedida, se a pessoa participa dela; senão a primeira que for dela."""
+        pedida = request.data.get('fila')
+        minhas = Fila.objects.filter(ativa=True, membros=request.user)
+        if pedida:
+            return minhas.filter(id=pedida).first()
+        return minhas.order_by('ordem', 'nome').first()
 
 
 class JanelaExpirada(APIException):

@@ -17,6 +17,26 @@ _TIPO_MEDIA_CAMPO = {
     'video': 'VIDEO',
 }
 
+# Tipos que NÃO são mídia para baixar, mas têm bolha própria na tela.
+_TIPO_ESTRUTURADO = {
+    'contacts': 'CONTATO',
+}
+
+# Como descrever, no texto da bolha, o que chegou e não é texto. Sem isto a
+# mensagem entrava com tipo TEXTO e corpo vazio — figurinha, localização e
+# cartão de contato viravam BOLHA EM BRANCO, sem indício de que algo chegou.
+_RESUMO_POR_TIPO = {
+    'sticker': '[figurinha]',
+    'location': '[localização]',
+    'contacts': '[contato]',
+    'reaction': '[reação]',
+    'button': '[resposta de botão]',
+    'interactive': '[resposta de menu]',
+    'order': '[pedido]',
+    'system': '[aviso do sistema]',
+    'unsupported': '[mensagem não suportada]',
+}
+
 
 @shared_task
 def processar_webhook_whatsapp(payload: dict):
@@ -60,7 +80,16 @@ def _processar_mensagem_recebida(value: dict, msg: dict):
 
     tipo_msg = msg.get('type', 'text')
     texto = msg.get('text', {}).get('body', '') if tipo_msg == 'text' else ''
-    tipo_interno = 'TEXTO' if tipo_msg == 'text' else _TIPO_MEDIA_CAMPO.get(tipo_msg, 'TEXTO')
+    if tipo_msg == 'text':
+        tipo_interno = 'TEXTO'
+    else:
+        tipo_interno = (_TIPO_MEDIA_CAMPO.get(tipo_msg)
+                        or _TIPO_ESTRUTURADO.get(tipo_msg)
+                        or 'TEXTO')
+    # Mídia tem prévia própria na bolha e não precisa de texto; o resto precisa,
+    # senão a bolha sai vazia. O payload cru fica guardado de todo jeito.
+    if not texto and tipo_msg not in _TIPO_MEDIA_CAMPO:
+        texto = _RESUMO_POR_TIPO.get(tipo_msg, f'[{tipo_msg}]') if tipo_msg != 'text' else ''
 
     agora = timezone.now()
     conversa.ultima_mensagem_em = agora
@@ -305,6 +334,32 @@ def enviar_template_whatsapp(mensagem_id: int, nome_template: str, idioma: str, 
         _marcar_enviada(mensagem, resposta)
     except Exception as exc:
         _marcar_falha(mensagem, exc, 'Falha ao enviar template do WhatsApp')
+
+
+@shared_task
+def enviar_contato_whatsapp(mensagem_id: int):
+    """
+    Envia os cartões de contato já montados na hora do POST.
+
+    Os cartões vêm prontos de `payload_bruto['contacts']`: quem monta é a view,
+    porque é lá que estão os ids da agenda. A task só entrega — assim uma
+    mudança na agenda depois do envio não reescreve o que o cliente recebeu.
+    """
+    mensagem = Mensagem.objects.select_related('conversa').get(id=mensagem_id)
+    cartoes = (mensagem.payload_bruto or {}).get('contacts') or []
+    if not cartoes:
+        _marcar_falha(mensagem, ValueError('sem cartões no payload'),
+                      'Mensagem de contato sem cartão para enviar')
+        return
+
+    citando = mensagem.responde_a.wa_message_id if mensagem.responde_a_id else ''
+    try:
+        resposta = graph_api.enviar_contatos(
+            mensagem.conversa.contato_telefone, cartoes, citando=citando or '',
+        )
+        _marcar_enviada(mensagem, resposta)
+    except Exception as exc:
+        _marcar_falha(mensagem, exc, 'Falha ao enviar contato do WhatsApp')
 
 
 @shared_task
