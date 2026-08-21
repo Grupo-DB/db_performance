@@ -1,4 +1,5 @@
 """Regras de negócio desacopladas da ingestão do webhook (fácil de trocar por NLP no futuro)."""
+import unicodedata
 import logging
 import re
 
@@ -79,14 +80,70 @@ def _filas_ativas(numero=None):
 # A Cloud API entrega tudo pelo número da empresa: o cliente vê "Grupo DB" e não
 # tem como saber a que setor caiu. A assinatura só chega se for junto do conteúdo.
 #
-# A assinatura é do SETOR, não da pessoa: antes ia o primeiro nome de quem
-# respondeu, e o cliente passava a cobrar o atendente pelo nome (e a estranhar
-# quando outro respondia). O texto é editável no admin
-# (ConfiguracaoAtendimento.assinatura), então trocar não exige deploy.
+# A assinatura junta PESSOA e SETOR: "Ana Paula · Grupo DB RH". Só o setor era
+# impessoal; só a pessoa fazia o cliente cobrar o atendente pelo nome e estranhar
+# quando outro respondia. O rótulo do setor segue editável no admin
+# (ConfiguracaoAtendimento.assinatura), então trocá-lo não exige deploy.
 
 def assinatura_do_atendimento(numero=None) -> str:
     """Assinatura configurada; vazia desliga a assinatura por completo."""
     return (ConfiguracaoAtendimento.carregar(numero).assinatura or '').strip()
+
+
+# Nomes compostos são a razão de isto não ser um `split()[0]`: "ANA PAULA DILHE
+# LEAL" viraria "Ana". A lista é curta de propósito — errar para menos ("José"
+# no lugar de "José Carlos") passa despercebido; errar para mais, não.
+_PRIMEIROS_COMPOSTOS = {
+    'ana', 'maria', 'jose', 'joao', 'luiz', 'luis', 'antonio', 'carlos',
+    'paulo', 'pedro', 'francisco', 'marco', 'marcos', 'jean', 'joana', 'rosa',
+}
+_CONECTIVOS = {'de', 'da', 'do', 'das', 'dos', 'e'}
+
+
+def _sem_acento(texto: str) -> str:
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', texto)
+        if unicodedata.category(c) != 'Mn'
+    )
+
+
+def primeiro_nome(nome: str) -> str:
+    """
+    "ANA PAULA DILHE LEAL" -> "Ana Paula"; "MATHEUS SOARES MEDEIROS" -> "Matheus".
+
+    O `capitalize()` existe porque boa parte do cadastro de Colaborador está em
+    caixa alta, e assinar em CAIXA ALTA parece grito dentro da conversa.
+    """
+    partes = [p for p in (nome or '').split() if p]
+    if not partes:
+        return ''
+    escolhidas = [partes[0]]
+    if (len(partes) >= 3
+            and _sem_acento(partes[0]).lower() in _PRIMEIROS_COMPOSTOS
+            and _sem_acento(partes[1]).lower() not in _CONECTIVOS):
+        escolhidas.append(partes[1])
+    return ' '.join(p.capitalize() for p in escolhidas)
+
+
+def nome_do_atendente(user) -> str:
+    """
+    O nome da pessoa, nunca o login: os usernames aqui são `anapaula.leal` e
+    e-mails, que não servem para o cliente ler.
+
+    A fonte é `Colaborador.nome` porque `User.first_name` está vazio em todos os
+    atendentes. Quem não tem colaborador (conta de serviço, cadastro antigo)
+    devolve vazio, e a assinatura fica só com o setor.
+    """
+    if user is None:
+        return ''
+    # Reverse OneToOne sem registro levanta RelatedObjectDoesNotExist, que o
+    # Django faz herdar de AttributeError justamente para o getattr funcionar.
+    colaborador = getattr(user, 'colaborador', None)
+    if colaborador is not None and (colaborador.nome or '').strip():
+        return primeiro_nome(colaborador.nome)
+    if (user.first_name or '').strip():
+        return primeiro_nome(user.first_name)
+    return ''
 
 
 def _deve_assinar(mensagem) -> bool:
@@ -112,13 +169,31 @@ def assinar_para_cliente(texto: str, mensagem) -> str:
     """
     if not _deve_assinar(mensagem):
         return texto
-    # A assinatura é do número por onde a conversa entrou: com dois setores,
-    # "Setor de TI Grupo DB" numa resposta do Comercial estaria errada.
-    nome = assinatura_do_atendimento(mensagem.conversa.numero)
+    # O setor vem do número por onde a conversa entrou: com dois setores,
+    # "Grupo DB TI" numa resposta do RH estaria errada.
+    setor = assinatura_do_atendimento(mensagem.conversa.numero)
+    pessoa = nome_do_atendente(mensagem.autor)
+    nome = ' · '.join(parte for parte in (pessoa, setor) if parte)
     if not nome:
         return texto
     # Sem texto é legenda de mídia: aí a assinatura vai sozinha, sem os dois-pontos.
     return f'*{nome}:*\n{texto}' if (texto or '').strip() else f'*{nome}*'
+
+
+def saudar_se_configurado(conversa) -> None:
+    """
+    Responde a saudação do número, quando há uma configurada.
+
+    Chamada só no primeiro contato de um atendimento em número sem menu — é o
+    equivalente, ali, ao menu de setores que o número com menu manda.
+
+    Silenciosa por padrão: `texto_saudacao` nasce em branco, então nenhum número
+    passa a falar sozinho só porque este código existe. Quem quiser saudação
+    preenche o campo no admin, sem deploy.
+    """
+    texto = (ConfiguracaoAtendimento.carregar(conversa.numero).texto_saudacao or '').strip()
+    if texto:
+        responder_automatico(conversa, texto)
 
 
 def montar_texto_menu(filas=None, numero=None) -> str:

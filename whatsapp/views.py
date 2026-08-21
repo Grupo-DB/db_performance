@@ -20,17 +20,18 @@ from rest_framework.views import APIView
 
 from . import graph_api, services
 from .models import (
-    Contato, Fila, Conversa, Mensagem, MensagemAnexo, NumeroNegocio,
-    WhatsAppNotificacao,
+    Contato, Disparo, DisparoDestinatario, Fila, Conversa, Mensagem, MensagemAnexo,
+    NumeroNegocio, WhatsAppNotificacao,
 )
 from .serializers import (
     FilaSerializer, ConversaListSerializer, ConversaDetailSerializer,
     MensagemSerializer, WhatsAppNotificacaoSerializer,
     ContatoSerializer, ContatoDaAgendaSerializer,
+    DisparoSerializer, DisparoDetalheSerializer, NumeroNegocioSerializer,
 )
 from .tasks import (
     processar_webhook_whatsapp, enviar_mensagem_whatsapp, enviar_template_whatsapp,
-    enviar_contato_whatsapp,
+    enviar_contato_whatsapp, processar_disparo,
 )
 
 logger = logging.getLogger(__name__)
@@ -688,3 +689,104 @@ class WhatsAppNotificacaoViewSet(viewsets.ReadOnlyModelViewSet):
     def nao_lidas(self, request):
         count = WhatsAppNotificacao.objects.filter(usuario_notificado=request.user, lido=False).count()
         return Response({'nao_lidas': count})
+
+
+class DisparoViewSet(viewsets.ModelViewSet):
+    """
+    Disparo em massa: monta a lista, envia e acompanha.
+
+    Restrito a gestor. Um envio para centenas de pessoas não é operação de
+    atendimento — erro aqui não se conserta pedindo desculpa numa conversa, e a
+    Meta rebaixa a qualidade do número quando o destinatário bloqueia.
+    """
+
+    permission_classes = [IsAuthenticated]
+    queryset = Disparo.objects.select_related('numero', 'criado_por')
+
+    def get_serializer_class(self):
+        return DisparoDetalheSerializer if self.action == 'retrieve' else DisparoSerializer
+
+    def _exigir_gestor(self):
+        if not services.eh_gestor(self.request.user):
+            raise PermissionDenied('Só gestor do WhatsApp pode usar o disparo em massa.')
+
+    def get_queryset(self):
+        self._exigir_gestor()
+        return self.queryset
+
+    def perform_create(self, serializer):
+        self._exigir_gestor()
+        contatos_ids = serializer.validated_data.pop('contatos_ids', [])
+        contatos = list(Contato.objects.filter(id__in=contatos_ids, ativo=True))
+        if not contatos:
+            raise ValidationError({'contatos_ids': 'Nenhum contato válido na seleção.'})
+
+        disparo = serializer.save(criado_por=self.request.user)
+        # Telefone e nome são COPIADOS agora, não lidos na hora do envio: a
+        # agenda pode mudar no meio de um disparo de horas, e o relatório precisa
+        # dizer para onde a mensagem foi de fato.
+        DisparoDestinatario.objects.bulk_create([
+            DisparoDestinatario(
+                disparo=disparo, contato=c, telefone=c.telefone, nome=c.nome,
+            )
+            for c in contatos
+        ], ignore_conflicts=True)  # mesmo telefone repetido na seleção não duplica
+
+    @action(detail=True, methods=['post'])
+    def enviar(self, request, pk=None):
+        """Põe o disparo na fila do Celery. Também é o 'continuar' de um pausado."""
+        self._exigir_gestor()
+        disparo = self.get_object()
+        if disparo.status in ('CONCLUIDO', 'CANCELADO'):
+            return Response(
+                {'detail': f'Disparo {disparo.get_status_display().lower()}: não há o que enviar.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not disparo.destinatarios.filter(status='PENDENTE').exists():
+            return Response({'detail': 'Nenhum destinatário pendente.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        processar_disparo.delay(disparo.id)
+        return Response({'detail': 'Envio iniciado.'})
+
+    @action(detail=True, methods=['post'])
+    def pausar(self, request, pk=None):
+        """
+        Interrompe sem descartar: os pendentes continuam pendentes.
+
+        A task relê o status a cada destinatário, então o envio para na próxima
+        volta do laço — não é preciso revogar nada no Celery.
+        """
+        self._exigir_gestor()
+        disparo = self.get_object()
+        if disparo.status != 'ENVIANDO':
+            return Response({'detail': 'Só dá para pausar um disparo em andamento.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        disparo.status = 'PAUSADO'
+        disparo.detalhe_status = 'Pausado manualmente.'
+        disparo.save(update_fields=['status', 'detalhe_status'])
+        return Response({'detail': 'Disparo pausado.'})
+
+    @action(detail=True, methods=['post'])
+    def cancelar(self, request, pk=None):
+        """Encerra de vez. Quem já recebeu, recebeu — não há como desfazer envio."""
+        self._exigir_gestor()
+        disparo = self.get_object()
+        disparo.status = 'CANCELADO'
+        disparo.detalhe_status = 'Cancelado manualmente.'
+        disparo.save(update_fields=['status', 'detalhe_status'])
+        disparo.destinatarios.filter(status='PENDENTE').update(status='CANCELADO')
+        return Response({'detail': 'Disparo cancelado.'})
+
+
+class NumeroNegocioViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """
+    Os números da empresa, só para leitura.
+
+    Somente leitura de propósito: cadastrar número exige o `phone_number_id` da
+    Meta e casa com fila e textos — errar aqui manda a resposta pelo número do
+    outro setor. Isso é cadastro de admin, não de tela.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = NumeroNegocioSerializer
+    queryset = NumeroNegocio.objects.filter(ativo=True).order_by('-is_padrao', 'nome')

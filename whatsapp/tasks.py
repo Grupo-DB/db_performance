@@ -1,13 +1,17 @@
 import logging
 import mimetypes
+import time
+from datetime import timedelta
 
 from celery import shared_task
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db.models import Q
 from django.utils import timezone
 
 from . import audio, graph_api, services
-from .models import Conversa, Mensagem, MensagemAnexo, NumeroNegocio, WhatsAppNotificacao
+from .models import (Conversa, Disparo, DisparoDestinatario, Mensagem, MensagemAnexo,
+                     NumeroNegocio, WhatsAppNotificacao)
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +287,11 @@ def _processar_mensagem_recebida(value: dict, msg: dict):
         conversa.fila = conversa.fila or numero.fila_padrao()
         conversa.estado_menu = 'EM_ATENDIMENTO'
         conversa.save(update_fields=['fila', 'estado_menu'])
+        # Saudação só aqui dentro: este ramo é alcançado uma vez por atendimento
+        # (na mensagem seguinte a conversa já está EM_ATENDIMENTO e cai no `if`
+        # de cima), então o cliente não recebe o mesmo texto a cada frase que
+        # escreve. Em branco, não manda nada.
+        services.saudar_se_configurado(conversa)
         _notificar_nova_mensagem(conversa, texto or f"[{tipo_interno.lower()}]")
     else:
         services.resolver_fila_por_texto(texto, conversa)
@@ -564,3 +573,137 @@ def notificar_andamento_tarefa(tarefa_id: int):
 
     andamento = 'Concluída' if tarefa.concluido_em else tarefa.coluna.titulo
     services.avisar_andamento_tarefa(tarefa.conversa_whatsapp, tarefa.titulo, andamento)
+
+
+# ── Disparo em massa ─────────────────────────────────────────────────────────
+# Teto e ritmo ficam em settings para se ajustarem sem deploy: o limite da Meta
+# sobe sozinho conforme a qualidade do número (250 -> 2.000 -> 10.000...), e
+# descobrir isso num dia de convocação não é hora de mexer em código.
+_TETO_24H_PADRAO = 250
+_PAUSA_ENTRE_ENVIOS = 0.25  # 4 por segundo; o teto da Meta é 20/s
+
+
+def _teto_24h() -> int:
+    return int(getattr(settings, 'WHATSAPP_TETO_DESTINATARIOS_24H', _TETO_24H_PADRAO))
+
+
+def _enviados_nas_ultimas_24h(numero) -> int:
+    """
+    Quantos destinatários ÚNICOS este número já alcançou nas últimas 24h.
+
+    Conta por telefone distinto, e não por mensagem, porque é assim que a Meta
+    conta: três avisos para a mesma pessoa gastam uma vaga, não três.
+    """
+    desde = timezone.now() - timedelta(hours=24)
+    return (DisparoDestinatario.objects
+            .filter(disparo__numero=numero, status='ENVIADO', enviado_em__gte=desde)
+            .values('telefone').distinct().count())
+
+
+def _conversa_para_disparo(destinatario, disparo):
+    """
+    A conversa onde a mensagem do disparo entra.
+
+    Reaproveita a conversa aberta do contato em vez de criar outra: quem receber
+    o aviso e responder deve continuar o mesmo histórico, e não abrir um
+    atendimento paralelo. Conversa nova nasce EM_ATENDIMENTO porque fomos nós que
+    puxamos o assunto — mandar o menu de setores depois seria absurdo.
+    """
+    conversa = (Conversa.objects
+                .filter(contato_telefone=destinatario.telefone, status='ABERTA')
+                .order_by('-created_at').first())
+    if conversa is not None:
+        return conversa
+    return Conversa.objects.create(
+        contato_telefone=destinatario.telefone,
+        contato_nome=destinatario.nome or '',
+        numero=disparo.numero,
+        fila=disparo.numero.fila_padrao(),
+        estado_menu='EM_ATENDIMENTO',
+    )
+
+
+@shared_task
+def processar_disparo(disparo_id: int):
+    """
+    Entrega o disparo, um destinatário por vez, e para quando bate o teto.
+
+    Sequencial de propósito: paralelizar aqui só adiantaria a hora de estourar o
+    limite da Meta, e um número que estoura tem a qualidade rebaixada — o que
+    encarece e atrasa TODOS os envios seguintes, inclusive o atendimento normal.
+
+    Reentrante: só olha para os PENDENTES, então continuar um disparo pausado é
+    chamar a task de novo. É isso que permite retomar no dia seguinte, quando o
+    teto de 24h zera.
+    """
+    disparo = Disparo.objects.select_related('numero').get(id=disparo_id)
+    if disparo.status in ('CONCLUIDO', 'CANCELADO'):
+        return
+
+    disparo.status = 'ENVIANDO'
+    disparo.detalhe_status = ''
+    if disparo.iniciado_em is None:
+        disparo.iniciado_em = timezone.now()
+    disparo.save(update_fields=['status', 'detalhe_status', 'iniciado_em'])
+
+    teto = _teto_24h()
+    pendentes = list(disparo.destinatarios.filter(status='PENDENTE').order_by('id'))
+
+    for destinatario in pendentes:
+        # Relido a cada volta: é assim que Cancelar/Pausar na tela interrompe um
+        # disparo já em andamento, sem precisar revogar a task no Celery.
+        disparo.refresh_from_db(fields=['status'])
+        if disparo.status in ('CANCELADO', 'PAUSADO'):
+            logger.info('Disparo %s interrompido (%s)', disparo.id, disparo.status)
+            return
+
+        if _enviados_nas_ultimas_24h(disparo.numero) >= teto:
+            disparo.status = 'PAUSADO'
+            disparo.detalhe_status = (
+                f'Teto de {teto} destinatários em 24h atingido. '
+                f'Continue amanhã: os pendentes seguem na fila.'
+            )
+            disparo.save(update_fields=['status', 'detalhe_status'])
+            logger.warning('Disparo %s pausado no teto de 24h', disparo.id)
+            return
+
+        conversa = _conversa_para_disparo(destinatario, disparo)
+        mensagem = Mensagem.objects.create(
+            conversa=conversa,
+            direcao='SAIDA',
+            tipo='TEXTO',
+            autor=disparo.criado_por,
+            texto=disparo.previa or f'[template: {disparo.template_nome}]',
+            template_nome=disparo.template_nome,
+            status_entrega='PENDENTE',
+            payload_bruto={'disparo': disparo.id, 'template': disparo.template_nome},
+        )
+        destinatario.mensagem = mensagem
+
+        try:
+            resposta = graph_api.enviar_template(
+                destinatario.telefone, disparo.template_nome, disparo.idioma,
+                disparo.componentes, numero=disparo.numero,
+            )
+            _marcar_enviada(mensagem, resposta)
+            destinatario.status = 'ENVIADO'
+            destinatario.erro = ''
+            destinatario.enviado_em = timezone.now()
+            conversa.ultima_mensagem_em = destinatario.enviado_em
+            conversa.save(update_fields=['ultima_mensagem_em'])
+        except Exception as exc:
+            _marcar_falha(mensagem, exc, 'Falha ao enviar destinatário de disparo')
+            destinatario.status = 'FALHA'
+            # Truncado porque o detalhe da Meta é longo e o campo é de tela: o
+            # texto inteiro continua em `Mensagem.erro_detalhe`.
+            destinatario.erro = graph_api.detalhe_do_erro(exc)[:255]
+        destinatario.save(update_fields=['status', 'erro', 'enviado_em', 'mensagem'])
+
+        time.sleep(_PAUSA_ENTRE_ENVIOS)
+
+    disparo.refresh_from_db(fields=['status'])
+    if disparo.status == 'ENVIANDO':
+        disparo.status = 'CONCLUIDO'
+        disparo.concluido_em = timezone.now()
+        disparo.detalhe_status = ''
+        disparo.save(update_fields=['status', 'concluido_em', 'detalhe_status'])

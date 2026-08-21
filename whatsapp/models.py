@@ -306,6 +306,17 @@ class ConfiguracaoAtendimento(models.Model):
         help_text='Confirmação enviada quando o cliente escolhe o setor. '
                   'Use {setor} onde o nome do setor deve aparecer.',
     )
+    texto_saudacao = models.TextField(
+        # `db_default` além do `default`: sem ele o MySQL cria a coluna NOT NULL
+        # sem valor padrão, e enquanto o código antigo estiver no ar todo INSERT
+        # que omitir a coluna morre com o 1364 — foi o que derrubou o canal em
+        # 21/08. Com o default no banco, a janela entre migration e deploy é
+        # inofensiva.
+        blank=True, default='', db_default='',
+        help_text='Resposta automática à PRIMEIRA mensagem de um atendimento, em número '
+                  'sem menu. Sai uma vez por atendimento, não a cada mensagem. '
+                  'Em branco = o cliente não recebe nada até uma pessoa responder.',
+    )
     assinatura = models.CharField(
         max_length=60, blank=True, default='Setor de TI Grupo DB',
         help_text='Nome que o cliente vê no começo de TODA resposta do atendente. É fixo de '
@@ -405,3 +416,129 @@ class WhatsAppNotificacao(models.Model):
 
     def __str__(self):
         return f"{self.get_tipo_display()} - {self.conversa}"
+
+
+class Disparo(models.Model):
+    """
+    Um envio da mesma mensagem para vários contatos da agenda.
+
+    Existe porque a lista de transmissão do app não serve aqui: ela entrega só
+    para quem tem a empresa salva nos contatos e para no máximo 256 pessoas. Pela
+    API não há essa exigência — mas cada destinatário é uma mensagem individual,
+    e é por isso que isto precisa ser uma fila com estado, e não um laço dentro
+    de uma view.
+
+    **Só template.** Quem está fora da janela de 24h — que é a regra num aviso em
+    massa — só pode ser alcançado por template aprovado. Aceitar texto livre aqui
+    daria uma tela que funciona no teste com um colega (que acabou de escrever) e
+    falha calada no envio de verdade.
+    """
+
+    STATUS = [
+        ('RASCUNHO', 'Rascunho'),
+        ('ENVIANDO', 'Enviando'),
+        ('PAUSADO', 'Pausado'),
+        ('CONCLUIDO', 'Concluído'),
+        ('CANCELADO', 'Cancelado'),
+    ]
+
+    nome = models.CharField(max_length=120, help_text='Só para você achar depois. Ex.: Convocação exames 08/2026')
+    numero = models.ForeignKey(
+        NumeroNegocio, on_delete=models.PROTECT, related_name='disparos',
+        help_text='Número que envia. Define também a fila onde cai quem responder.',
+    )
+    template_nome = models.CharField(max_length=120)
+    idioma = models.CharField(max_length=10, default='pt_BR')
+    componentes = models.JSONField(
+        null=True, blank=True,
+        help_text='Variáveis do template ({{1}}, {{2}}...), no formato da Meta.',
+    )
+    previa = models.TextField(
+        blank=True,
+        help_text='Texto aproximado do que o cliente recebe. Só para o histórico: '
+                  'o corpo real do template mora na Meta.',
+    )
+    status = models.CharField(max_length=12, choices=STATUS, default='RASCUNHO')
+    detalhe_status = models.CharField(max_length=255, blank=True)
+    criado_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='disparos_whatsapp',
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+    iniciado_em = models.DateTimeField(null=True, blank=True)
+    concluido_em = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Disparo em massa'
+        verbose_name_plural = 'Disparos em massa'
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        return f'{self.nome} ({self.get_status_display()})'
+
+    @property
+    def total(self):
+        return self.destinatarios.count()
+
+    @property
+    def enviados(self):
+        return self.destinatarios.filter(status='ENVIADO').count()
+
+    @property
+    def falhas(self):
+        return self.destinatarios.filter(status='FALHA').count()
+
+    @property
+    def pendentes(self):
+        return self.destinatarios.filter(status='PENDENTE').count()
+
+
+class DisparoDestinatario(models.Model):
+    """
+    Uma linha por pessoa, com o resultado dela.
+
+    O status é por destinatário, e não um contador no disparo, porque o que o RH
+    precisa saber depois é **quem** não recebeu — um "412 de 500 enviados" não
+    permite reenviar para os 88 nem justificar a ausência de ninguém.
+    """
+
+    STATUS = [
+        ('PENDENTE', 'Pendente'),
+        ('ENVIADO', 'Enviado'),
+        ('FALHA', 'Falha'),
+        ('CANCELADO', 'Cancelado'),
+    ]
+
+    disparo = models.ForeignKey(Disparo, on_delete=models.CASCADE, related_name='destinatarios')
+    contato = models.ForeignKey(
+        Contato, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='disparos',
+    )
+    # Copiados do contato no momento do envio: a agenda pode mudar depois, e o
+    # relatório precisa dizer para qual número foi de fato.
+    telefone = models.CharField(max_length=30, db_index=True)
+    nome = models.CharField(max_length=150, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS, default='PENDENTE', db_index=True)
+    erro = models.CharField(max_length=255, blank=True)
+    enviado_em = models.DateTimeField(null=True, blank=True)
+    # A mensagem nasce numa conversa de verdade para que a RESPOSTA do cliente
+    # caia na fila certa e no histórico dele, em vez de aparecer como um
+    # atendimento novo sem contexto nenhum.
+    mensagem = models.ForeignKey(
+        Mensagem, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='disparos',
+    )
+
+    class Meta:
+        verbose_name = 'Destinatário do disparo'
+        verbose_name_plural = 'Destinatários do disparo'
+        ordering = ['id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['disparo', 'telefone'],
+                name='whatsapp_disparo_sem_telefone_repetido',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.telefone} ({self.get_status_display()})'

@@ -2,8 +2,8 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 
 from .models import (
-    Contato, Fila, Conversa, Mensagem, MensagemAnexo, NumeroNegocio,
-    WhatsAppNotificacao,
+    Contato, Disparo, DisparoDestinatario, Fila, Conversa, Mensagem, MensagemAnexo,
+    NumeroNegocio, WhatsAppNotificacao,
 )
 
 
@@ -241,3 +241,51 @@ class NumeroNegocioSerializer(serializers.ModelSerializer):
     class Meta:
         model = NumeroNegocio
         fields = ['id', 'nome', 'telefone', 'phone_number_id', 'ativo', 'is_padrao']
+
+
+class DisparoDestinatarioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DisparoDestinatario
+        fields = ['id', 'contato', 'telefone', 'nome', 'status', 'erro', 'enviado_em']
+        read_only_fields = fields
+
+
+class DisparoSerializer(serializers.ModelSerializer):
+    """
+    Lista e detalhe do disparo, com o placar sempre junto.
+
+    Os contadores vêm no mesmo payload de propósito: a tela acompanha o envio
+    por polling, e buscar progresso num segundo endpoint dobraria as requisições
+    de uma tela que já fica atualizando sozinha.
+    """
+
+    criado_por_nome = serializers.CharField(source='criado_por.username', read_only=True, default='')
+    numero_nome = serializers.CharField(source='numero.nome', read_only=True)
+    total = serializers.IntegerField(read_only=True)
+    enviados = serializers.IntegerField(read_only=True)
+    falhas = serializers.IntegerField(read_only=True)
+    pendentes = serializers.IntegerField(read_only=True)
+    # Só os contatos escolhidos na tela; a lista gravada volta em `destinatarios`.
+    contatos_ids = serializers.ListField(
+        child=serializers.IntegerField(), write_only=True, required=False, allow_empty=False,
+    )
+
+    class Meta:
+        model = Disparo
+        fields = [
+            'id', 'nome', 'numero', 'numero_nome', 'template_nome', 'idioma',
+            'componentes', 'previa', 'status', 'detalhe_status',
+            'criado_por', 'criado_por_nome', 'criado_em', 'iniciado_em', 'concluido_em',
+            'total', 'enviados', 'falhas', 'pendentes', 'contatos_ids',
+        ]
+        read_only_fields = [
+            'status', 'detalhe_status', 'criado_por', 'criado_em',
+            'iniciado_em', 'concluido_em',
+        ]
+
+
+class DisparoDetalheSerializer(DisparoSerializer):
+    destinatarios = DisparoDestinatarioSerializer(many=True, read_only=True)
+
+    class Meta(DisparoSerializer.Meta):
+        fields = DisparoSerializer.Meta.fields + ['destinatarios']

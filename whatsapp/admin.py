@@ -1,8 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    ConfiguracaoAtendimento, Contato, Fila, Conversa, Mensagem, MensagemAnexo,
-    NumeroNegocio, WhatsAppNotificacao,
+    ConfiguracaoAtendimento, Contato, Disparo, DisparoDestinatario, Fila, Conversa,
+    Mensagem, MensagemAnexo, NumeroNegocio, WhatsAppNotificacao,
 )
 
 
@@ -23,6 +23,13 @@ class ConfiguracaoAtendimentoAdmin(admin.ModelAdmin):
     def rotulo(self, obj):
         return obj.numero.nome if obj.numero_id else 'Geral (todos os números)'
     fieldsets = (
+        ('Saudação automática', {
+            'fields': ('texto_saudacao',),
+            'description': 'Resposta à <b>primeira</b> mensagem de um atendimento, em número '
+                           'que não usa menu de setores (é o caso do RH). Sai uma vez por '
+                           'atendimento, não a cada mensagem. Em branco, o cliente não recebe '
+                           'nada até uma pessoa responder.',
+        }),
         ('Menu de setores', {
             'fields': ('texto_menu',),
             'description': 'Os setores saem numerados abaixo desta linha, na ordem definida em Filas.',
@@ -33,9 +40,10 @@ class ConfiguracaoAtendimentoAdmin(admin.ModelAdmin):
         }),
         ('Assinatura das respostas', {
             'fields': ('assinatura',),
-            'description': 'Vai na frente de toda resposta do atendente. É a mesma para todos '
-                           'os atendentes — o cliente fala com a empresa, não com uma pessoa. '
-                           'Em branco não assina.',
+            'description': 'Rótulo do setor, que vai na frente de toda resposta do atendente '
+                           'depois do primeiro nome de quem respondeu '
+                           '(ex.: <i>Ana Paula · Grupo DB RH</i>). Em branco, sai só o nome '
+                           'da pessoa.',
         }),
         ('Número', {
             'fields': ('numero',),
@@ -118,3 +126,28 @@ class WhatsAppNotificacaoAdmin(admin.ModelAdmin):
     list_display = ('tipo', 'conversa', 'usuario_notificado', 'lido', 'created_at')
     list_filter = ('tipo', 'lido')
     ordering = ('-created_at',)
+
+
+class DisparoDestinatarioInline(admin.TabularInline):
+    """Só leitura: a lista é montada no envio e o resultado é histórico."""
+    model = DisparoDestinatario
+    extra = 0
+    can_delete = False
+    fields = ('telefone', 'nome', 'status', 'erro', 'enviado_em')
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Disparo)
+class DisparoAdmin(admin.ModelAdmin):
+    list_display = ('nome', 'numero', 'template_nome', 'status', 'placar', 'criado_em')
+    list_filter = ('status', 'numero')
+    search_fields = ('nome', 'template_nome')
+    readonly_fields = ('criado_por', 'criado_em', 'iniciado_em', 'concluido_em', 'detalhe_status')
+    inlines = [DisparoDestinatarioInline]
+
+    @admin.display(description='Enviados / Falhas / Pendentes')
+    def placar(self, obj):
+        return f'{obj.enviados} / {obj.falhas} / {obj.pendentes}'
