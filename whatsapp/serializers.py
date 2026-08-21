@@ -267,7 +267,14 @@ class DisparoSerializer(serializers.ModelSerializer):
     pendentes = serializers.IntegerField(read_only=True)
     # Só os contatos escolhidos na tela; a lista gravada volta em `destinatarios`.
     contatos_ids = serializers.ListField(
-        child=serializers.IntegerField(), write_only=True, required=False, allow_empty=False,
+        child=serializers.IntegerField(), write_only=True, required=False, allow_empty=True,
+    )
+    # Quem só existe em conversa não tem id de agenda. Em vez de deixar essa
+    # gente de fora — que era a maioria: 35 telefones contra 1 cadastrado — a
+    # tela manda o telefone cru e o cadastro nasce aqui.
+    telefones = serializers.ListField(
+        child=serializers.CharField(max_length=30), write_only=True,
+        required=False, allow_empty=True,
     )
 
     class Meta:
@@ -276,7 +283,7 @@ class DisparoSerializer(serializers.ModelSerializer):
             'id', 'nome', 'numero', 'numero_nome', 'template_nome', 'idioma',
             'componentes', 'previa', 'status', 'detalhe_status',
             'criado_por', 'criado_por_nome', 'criado_em', 'iniciado_em', 'concluido_em',
-            'total', 'enviados', 'falhas', 'pendentes', 'contatos_ids',
+            'total', 'enviados', 'falhas', 'pendentes', 'contatos_ids', 'telefones',
         ]
         read_only_fields = [
             'status', 'detalhe_status', 'criado_por', 'criado_em',

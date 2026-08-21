@@ -714,10 +714,46 @@ class DisparoViewSet(viewsets.ModelViewSet):
         self._exigir_gestor()
         return self.queryset
 
+    def _contatos_dos_telefones(self, telefones):
+        """
+        Garante um Contato para cada telefone que veio só de conversa.
+
+        Cadastra em vez de gravar o telefone solto no destinatário: assim a
+        pessoa passa a existir na agenda e o próximo disparo já a encontra pelo
+        nome. O nome sai da conversa mais recente — é o do perfil do WhatsApp,
+        o único que temos de quem nunca foi cadastrado.
+        """
+        encontrados = []
+        for bruto in telefones:
+            digitos = ''.join(c for c in str(bruto) if c.isdigit())
+            if len(digitos) < 10:
+                continue
+            contato = Contato.objects.filter(telefone=digitos).first()
+            if contato is None:
+                nome = (Conversa.objects
+                        .filter(contato_telefone=digitos)
+                        .exclude(contato_nome='')
+                        .order_by('-created_at')
+                        .values_list('contato_nome', flat=True)
+                        .first())
+                contato = Contato.objects.create(
+                    telefone=digitos,
+                    # Sem nome no perfil, o próprio número: `nome` é obrigatório
+                    # e deixar em branco daria uma linha ilegível na agenda.
+                    nome=nome or digitos,
+                    criado_por=self.request.user,
+                )
+            encontrados.append(contato)
+        return encontrados
+
     def perform_create(self, serializer):
         self._exigir_gestor()
         contatos_ids = serializer.validated_data.pop('contatos_ids', [])
+        telefones = serializer.validated_data.pop('telefones', [])
         contatos = list(Contato.objects.filter(id__in=contatos_ids, ativo=True))
+        contatos += self._contatos_dos_telefones(telefones)
+        # Sem set(): o mesmo telefone pode chegar pelos dois caminhos, e a
+        # constraint de (disparo, telefone) já impede a linha repetida.
         if not contatos:
             raise ValidationError({'contatos_ids': 'Nenhum contato válido na seleção.'})
 
