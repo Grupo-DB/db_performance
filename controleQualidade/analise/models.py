@@ -26,6 +26,16 @@ class Analise(models.Model):
     peneiras = models.JSONField(null=True, blank=True)
     peneiras_umidas = models.JSONField(null=True, blank=True)
     laboratorio_atual = models.CharField(max_length=255, null=True, blank=True)
+    # Fonte única da data de moldagem dos corpos de prova.
+    #
+    # Antes ela existia em três lugares que se desencontravam: `flexao.moldagem`,
+    # `compressao.moldagem` e, implicitamente, o L0/M0 da variação (que é a
+    # LEITURA inicial, dias depois da moldagem). O laudo lia um deles e saía com
+    # data diferente da que o laboratório aplicou na tela.
+    #
+    # Nula em análise antiga, e é por isso que o front mantém a dedução por
+    # `L0 - 3` como segunda opção.
+    data_moldagem = models.DateField(null=True, blank=True)
     variacao_dimensional = models.JSONField(null=True, blank=True)
     variacao_massa = models.JSONField(null=True, blank=True)
     tracao_normal = models.JSONField(null=True, blank=True)
