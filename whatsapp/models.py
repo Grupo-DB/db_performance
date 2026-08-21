@@ -2,6 +2,87 @@ from django.db import models
 from django.contrib.auth.models import User
 
 
+class NumeroNegocio(models.Model):
+    """
+    Um número de WhatsApp da empresa.
+
+    Existe porque o `phone_number_id` era único e vinha do `.env`: toda saída
+    usava o mesmo número, então mensagem que chegasse num segundo número seria
+    respondida pelo primeiro — o cliente escreve para um e recebe resposta de
+    outro.
+
+    `access_token` e `waba_id` ficam em branco no caso normal: o número na MESMA
+    WABA usa o token do `.env`. Só quando o número nasce em outra WABA é que
+    precisa de token próprio — o token guarda um retrato dos ativos do usuário de
+    sistema no momento em que foi gerado, e uma WABA que não estava naquele
+    retrato devolve `code 100 / subcode 33`.
+    """
+
+    phone_number_id = models.CharField(
+        max_length=50, unique=True,
+        help_text='Phone Number ID da Meta (não é o telefone). Fica no WhatsApp Manager.',
+    )
+    nome = models.CharField(max_length=60, help_text='Como aparece na tela. Ex.: TI, Comercial')
+    telefone = models.CharField(max_length=30, blank=True, help_text='Só para exibição.')
+    waba_id = models.CharField(
+        max_length=50, blank=True,
+        help_text='Em branco = a WABA do .env. Preencha só se o número está em outra conta.',
+    )
+    access_token = models.TextField(
+        blank=True,
+        help_text='Em branco = o token do .env. Obrigatório quando a WABA é outra.',
+    )
+    ativo = models.BooleanField(default=True)
+    is_padrao = models.BooleanField(
+        default=False,
+        help_text='Destino de mensagem que chegar num número não cadastrado, para o '
+                  'webhook não descartar o atendimento.',
+    )
+    menu_automatico = models.BooleanField(
+        default=True,
+        help_text='Desligue em número que também é atendido no app WhatsApp Business '
+                  '(coexistência): o robô mandaria o menu de setores por cima de quem '
+                  'já está respondendo à mão, e o cliente receberia as duas coisas. '
+                  'Desligado, a conversa entra direto na fila e a Central funciona como '
+                  'caixa de entrada compartilhada.',
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Número de negócio'
+        verbose_name_plural = 'Números de negócio'
+        ordering = ['nome']
+
+    def __str__(self):
+        return f'{self.nome} ({self.telefone or self.phone_number_id})'
+
+    def fila_padrao(self):
+        """
+        Onde cai a conversa quando este número não pergunta o setor.
+
+        Prefere a fila marcada como padrão entre as deste número; sem ela, a
+        primeira na ordem. Nulo só se ninguém cadastrou fila para o número — e aí
+        a conversa fica sem fila, visível apenas para gestor, o que é melhor que
+        perder a mensagem.
+        """
+        filas = self.filas.filter(ativa=True).order_by('-is_padrao', 'ordem', 'nome')
+        return filas.first()
+
+    @classmethod
+    def resolver(cls, phone_number_id: str):
+        """
+        O número que recebeu a mensagem, ou o padrão quando ele não está cadastrado.
+
+        Nunca levanta exceção: número novo configurado na Meta e esquecido aqui
+        não pode fazer o webhook perder a mensagem do cliente.
+        """
+        if phone_number_id:
+            achado = cls.objects.filter(phone_number_id=phone_number_id, ativo=True).first()
+            if achado:
+                return achado
+        return cls.objects.filter(is_padrao=True, ativo=True).first()
+
+
 class Fila(models.Model):
     nome = models.CharField(max_length=100, unique=True)
     descricao = models.CharField(max_length=255, blank=True)
@@ -13,6 +94,12 @@ class Fila(models.Model):
     )
     is_padrao = models.BooleanField(default=False, help_text='Fila de fallback quando não é possível identificar o setor')
     membros = models.ManyToManyField(User, related_name='filas_whatsapp', blank=True)
+    numero = models.ForeignKey(
+        NumeroNegocio, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='filas',
+        help_text='Número que oferece esta fila no menu. Em branco = todos os números '
+                  '(fila compartilhada).',
+    )
     criado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='filas_whatsapp_criadas')
     criado_em = models.DateTimeField(auto_now_add=True)
 
@@ -38,6 +125,12 @@ class Conversa(models.Model):
     contato_telefone = models.CharField(max_length=30, db_index=True)
     contato_nome = models.CharField(max_length=150, blank=True)
     numero_negocio_id = models.CharField(max_length=50, blank=True, help_text='phone_number_id do Meta que recebeu a mensagem')
+    numero = models.ForeignKey(
+        NumeroNegocio, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='conversas',
+        help_text='Número da empresa por onde esta conversa entrou. Substitui o '
+                  '`numero_negocio_id` de texto, que fica só como histórico.',
+    )
     fila = models.ForeignKey(Fila, on_delete=models.SET_NULL, null=True, blank=True, related_name='conversas')
     responsavel = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
@@ -109,6 +202,12 @@ class Mensagem(models.Model):
     template_nome = models.CharField(
         max_length=120, blank=True,
         help_text='Preenchido quando a saída foi por template aprovado (fora da janela de 24h).',
+    )
+    enviada_pelo_celular = models.BooleanField(
+        default=False,
+        help_text='Saída digitada no app WhatsApp Business (coexistência), espelhada para cá '
+                  'pelo webhook. Distingue do robô: as duas são saída sem autor, e sem este '
+                  'campo a tela marcaria como "automático" o que uma pessoa escreveu.',
     )
     payload_bruto = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -190,9 +289,11 @@ class ConfiguracaoAtendimento(models.Model):
     Textos que o robô manda sozinho, editáveis sem deploy.
 
     Existe porque eram literais dentro de `services.py`: trocar uma vírgula da
-    saudação exigia subir código e reiniciar o worker do Celery. É um registro
-    único (singleton) — `carregar()` é o único jeito previsto de obtê-lo, e o
-    admin não deixa criar um segundo nem apagar o que existe.
+    saudação exigia subir código e reiniciar o worker do Celery.
+
+    Era singleton. Com mais de um número passou a ser um registro por número,
+    mais o **geral** (`numero` nulo), que atende todo número sem configuração
+    própria. `carregar(numero)` é o jeito previsto de obtê-lo.
     """
 
     texto_menu = models.TextField(
@@ -211,6 +312,13 @@ class ConfiguracaoAtendimento(models.Model):
                   'propósito: o cliente fala com a empresa, não com uma pessoa. '
                   'Deixe em branco para não assinar nada.',
     )
+    numero = models.ForeignKey(
+        NumeroNegocio, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='configuracoes',
+        help_text='Em branco = configuração geral, usada por todo número que não tiver a '
+                  'sua. Preencha para dar menu, roteamento e assinatura próprios a um '
+                  'número (é o que separa um setor do outro).',
+    )
     atualizado_em = models.DateTimeField(auto_now=True)
     atualizado_por = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
@@ -219,26 +327,57 @@ class ConfiguracaoAtendimento(models.Model):
 
     class Meta:
         verbose_name = 'Configuração do atendimento'
-        verbose_name_plural = 'Configuração do atendimento'
+        verbose_name_plural = 'Configurações do atendimento'
+        constraints = [
+            # Uma configuração por número. `condition` é obrigatória: sem ela o
+            # unique não vale para a geral (NULL não colide com NULL) e ainda
+            # daria erro de duplicidade em bancos que tratam NULL como valor.
+            models.UniqueConstraint(
+                fields=['numero'], condition=models.Q(numero__isnull=False),
+                name='whatsapp_config_uma_por_numero',
+            ),
+        ]
 
     def __str__(self):
-        return 'Textos automáticos do atendimento'
+        if self.numero_id:
+            return f'Textos automáticos — {self.numero.nome}'
+        return 'Textos automáticos — geral'
 
     def save(self, *args, **kwargs):
-        # Trava o singleton no banco, e não só na tela: qualquer caminho que
-        # tente criar um segundo registro sobrescreve o primeiro.
-        self.pk = 1
+        # A GERAL continua travada no pk=1: é a que `carregar()` usa como último
+        # recurso, e duas gerais deixariam o robô escolhendo textos por sorteio
+        # (o `unique` do banco não pega, porque MySQL aceita vários NULL).
+        # A do número NÃO pode ser travada — fixar o pk aqui faria o cadastro do
+        # segundo setor sobrescrever os textos do primeiro, calado.
+        if self.numero_id is None:
+            self.pk = 1
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        # Apagar deixaria o atendimento sem texto nenhum até alguém recriar.
-        raise ValueError('A configuração do atendimento não pode ser excluída.')
+        # A geral não se apaga: sem ela o atendimento fica sem texto nenhum até
+        # alguém recriar. A de um número, sim — apagar é como se volta a usar a
+        # geral naquele número.
+        if self.numero_id is None:
+            raise ValueError('A configuração geral do atendimento não pode ser excluída.')
+        super().delete(*args, **kwargs)
 
     @classmethod
-    def carregar(cls):
-        """Devolve a configuração, criando-a com os textos padrão na primeira vez."""
-        config, _ = cls.objects.get_or_create(pk=1)
-        return config
+    def carregar(cls, numero=None):
+        """
+        A configuração do número, caindo para a geral quando ele não tem uma.
+
+        Deixou de ser singleton quando entrou o segundo número: cada setor precisa
+        do seu menu e da sua assinatura. Sem configuração própria, o número usa a
+        geral — então nada muda para quem nunca cadastrar uma.
+        """
+        if numero is not None:
+            do_numero = cls.objects.filter(numero=numero).first()
+            if do_numero:
+                return do_numero
+        geral = cls.objects.filter(numero__isnull=True).order_by('pk').first()
+        if geral:
+            return geral
+        return cls.objects.create()
 
 
 class WhatsAppNotificacao(models.Model):

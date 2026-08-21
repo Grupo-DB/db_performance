@@ -19,7 +19,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import graph_api, services
-from .models import Contato, Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
+from .models import (
+    Contato, Fila, Conversa, Mensagem, MensagemAnexo, NumeroNegocio,
+    WhatsAppNotificacao,
+)
 from .serializers import (
     FilaSerializer, ConversaListSerializer, ConversaDetailSerializer,
     MensagemSerializer, WhatsAppNotificacaoSerializer,
@@ -519,6 +522,11 @@ class ContatoViewSet(viewsets.ModelViewSet):
                 contato_nome=(contato.nome if contato else ''),
                 fila=fila,
                 responsavel=request.user,
+                # De qual número sai: o da fila quando ela é de um setor, senão o
+                # padrão. Sem isso a conversa nasceria sem número e a resposta iria
+                # pelo número do .env, que pode não ser o do setor.
+                numero=fila.numero or NumeroNegocio.objects.filter(
+                    is_padrao=True, ativo=True).first(),
                 # Nós iniciamos: não faz sentido mandar o menu de setores para
                 # quem foi procurado pela empresa.
                 estado_menu='EM_ATENDIMENTO',

@@ -3,10 +3,11 @@ import mimetypes
 
 from celery import shared_task
 from django.core.files.base import ContentFile
+from django.db.models import Q
 from django.utils import timezone
 
 from . import audio, graph_api, services
-from .models import Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
+from .models import Conversa, Mensagem, MensagemAnexo, NumeroNegocio, WhatsAppNotificacao
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +45,152 @@ def processar_webhook_whatsapp(payload: dict):
         for entry in payload.get('entry', []):
             for change in entry.get('changes', []):
                 value = change.get('value', {})
+                campo = change.get('field') or ''
+
+                # Coexistência: número que também é atendido no app WhatsApp
+                # Business. TODA mensagem que a pessoa manda pelo celular vem por
+                # aqui, e só por aqui — não aparece em `messages`. Sem tratar, a
+                # Central mostraria a conversa pela metade, só o lado do cliente.
+                if campo == 'smb_message_echoes':
+                    for echo in value.get('message_echoes', []):
+                        _processar_echo(value, echo)
+                    continue
+
+                # Ainda não consumidos: `history` são os 180 dias anteriores ao
+                # onboarding (chega em 3 fases) e `smb_app_state_sync` são os
+                # contatos do celular. Registrar em log é de propósito — assim se
+                # vê que chegaram, em vez de descobrir o silêncio depois. A Meta dá
+                # 24h para sincronizar, então implementar isto é decisão com prazo.
+                if campo in ('history', 'smb_app_state_sync'):
+                    logger.info(
+                        'Webhook de coexistência recebido e ignorado (field=%s, '
+                        'phone_number_id=%s)',
+                        campo, value.get('metadata', {}).get('phone_number_id', ''),
+                    )
+                    continue
+
                 for msg in value.get('messages', []):
                     _processar_mensagem_recebida(value, msg)
                 for status in value.get('statuses', []):
                     _processar_status(status)
     except Exception:
         logger.exception('Falha ao processar webhook do WhatsApp')
+
+
+# O que escrever na bolha do que saiu pelo celular e não é texto nem mídia.
+_RESUMO_ECHO = {
+    'revoke': '[mensagem apagada no celular]',
+    'edit': '[mensagem editada no celular]',
+}
+
+
+def _processar_echo(value: dict, echo: dict):
+    """
+    Mensagem que a EMPRESA mandou pelo app WhatsApp Business (ou por um aparelho
+    conectado), espelhada para cá pelo webhook `smb_message_echoes`.
+
+    Entra como saída sem autor: quem digitou foi alguém no celular, não um
+    usuário da Central. Ninguém é notificado — notificação é para mensagem de
+    cliente; avisar a fila do que a própria equipe escreveu só faria barulho.
+    """
+    wa_message_id = echo.get('id')
+    telefone = echo.get('to') or ''
+    if not wa_message_id or not telefone:
+        return
+    # Pega os dois casos de uma vez: retry da Meta e o eco do que NÓS mesmos
+    # enviamos pela API (o `wa_message_id` já está gravado desde o envio), que
+    # senão viraria bolha duplicada em toda resposta dada pela Central.
+    if Mensagem.objects.filter(wa_message_id=wa_message_id).exists():
+        return
+
+    phone_number_id = value.get('metadata', {}).get('phone_number_id', '')
+    numero = NumeroNegocio.resolver(phone_number_id)
+    conversa = _conversa_do_echo(telefone, numero, phone_number_id)
+
+    tipo_echo = echo.get('type') or 'text'
+    corpo = echo.get(tipo_echo)
+    corpo = corpo if isinstance(corpo, dict) else {}
+    if tipo_echo == 'text':
+        texto = corpo.get('body', '')
+    else:
+        texto = corpo.get('caption', '')
+    tipo_interno = (_TIPO_MEDIA_CAMPO.get(tipo_echo)
+                    or _TIPO_ESTRUTURADO.get(tipo_echo)
+                    or 'TEXTO')
+    if not texto and tipo_echo not in _TIPO_MEDIA_CAMPO:
+        texto = (_RESUMO_ECHO.get(tipo_echo)
+                 or _RESUMO_POR_TIPO.get(tipo_echo)
+                 or f'[{tipo_echo}]')
+
+    # `ultima_mensagem_cliente_em` NÃO se toca aqui: a janela de 24h é contada da
+    # fala do CLIENTE, e mensagem nossa não a reabre. Mexer nela deixaria a
+    # Central achando que pode mandar texto livre quando a Meta já só aceita
+    # template.
+    conversa.ultima_mensagem_em = timezone.now()
+    conversa.save(update_fields=['ultima_mensagem_em'])
+
+    mensagem = Mensagem.objects.create(
+        conversa=conversa,
+        direcao='SAIDA',
+        tipo=tipo_interno,
+        texto=texto,
+        autor=None,
+        wa_message_id=wa_message_id,
+        # A Meta já aceitou e entregou — o `statuses` do mesmo número atualiza
+        # daqui para frente, se vier.
+        status_entrega='ENVIADA',
+        # Sem isto a bolha sairia marcada como "automático" na Central: robô e
+        # celular são os dois saída sem autor.
+        enviada_pelo_celular=True,
+        payload_bruto=echo,
+        responde_a=_mensagem_citada(echo),
+    )
+
+    if tipo_echo in _TIPO_MEDIA_CAMPO and corpo.get('id'):
+        # Mídia do echo é mídia da Meta como qualquer outra: baixar com o token do
+        # número, senão a foto que o RH mandou pelo celular não aparece na Central.
+        baixar_midia_whatsapp.delay(mensagem.id, corpo['id'])
+
+
+def _conversa_do_echo(telefone: str, numero, phone_number_id: str):
+    """
+    A conversa a que este echo pertence, criando-a quando a empresa é que puxou
+    o assunto pelo celular.
+    """
+    qs = Conversa.objects.filter(contato_telefone=telefone)
+    if numero is not None:
+        qs = qs.filter(Q(numero=numero) | Q(numero__isnull=True))
+    conversa = qs.order_by('-created_at').first()
+
+    if conversa is None:
+        # Nasce EM_ATENDIMENTO e na fila do número: quem falou primeiro foi a
+        # empresa, então perguntar "para qual setor você quer falar?" depois
+        # seria absurdo — e o robô faria isso na primeira resposta do cliente.
+        return Conversa.objects.create(
+            contato_telefone=telefone,
+            numero=numero,
+            numero_negocio_id=phone_number_id,
+            fila=numero.fila_padrao() if numero is not None else None,
+            estado_menu='EM_ATENDIMENTO',
+        )
+
+    campos = []
+    if conversa.numero_id is None and numero is not None:
+        conversa.numero = numero
+        conversa.numero_negocio_id = phone_number_id
+        campos += ['numero', 'numero_negocio_id']
+    if conversa.status == 'ENCERRADA':
+        # Retomada pelo celular: reabre EM_ATENDIMENTO, e não em
+        # AGUARDANDO_SETOR como na volta pelo cliente — já tem gente falando.
+        conversa.status = 'ABERTA'
+        conversa.estado_menu = 'EM_ATENDIMENTO'
+        campos += ['status', 'estado_menu']
+    if conversa.fila_id is None and numero is not None:
+        conversa.fila = numero.fila_padrao()
+        campos.append('fila')
+    if campos:
+        conversa.save(update_fields=campos)
+    return conversa
 
 
 def _processar_mensagem_recebida(value: dict, msg: dict):
@@ -64,13 +205,31 @@ def _processar_mensagem_recebida(value: dict, msg: dict):
             contato_nome = contato.get('profile', {}).get('name', '')
             break
 
-    conversa = Conversa.objects.filter(contato_telefone=telefone).order_by('-created_at').first()
+    # Em qual número da empresa a mensagem entrou. `resolver` cai no número padrão
+    # quando o id não está cadastrado, para número novo configurado na Meta e
+    # esquecido aqui não fazer o webhook perder a mensagem do cliente.
+    phone_number_id = value.get('metadata', {}).get('phone_number_id', '')
+    numero = NumeroNegocio.resolver(phone_number_id)
+
+    # A busca é pelo PAR (telefone, número): o mesmo cliente escrevendo para o TI e
+    # para o Comercial são dois atendimentos, não um. `numero` nulo é conversa
+    # anterior ao cadastro dos números — ela continua sendo reaproveitada.
+    conversas_do_contato = Conversa.objects.filter(contato_telefone=telefone)
+    if numero is not None:
+        conversas_do_contato = conversas_do_contato.filter(
+            Q(numero=numero) | Q(numero__isnull=True))
+    conversa = conversas_do_contato.order_by('-created_at').first()
     if conversa is None:
         conversa = Conversa.objects.create(
             contato_telefone=telefone,
             contato_nome=contato_nome,
-            numero_negocio_id=value.get('metadata', {}).get('phone_number_id', ''),
+            numero=numero,
+            numero_negocio_id=phone_number_id,
         )
+    elif conversa.numero_id is None and numero is not None:
+        # Conversa que existia antes dos números cadastrados: assume este.
+        conversa.numero = numero
+        conversa.numero_negocio_id = phone_number_id
     elif conversa.status == 'ENCERRADA':
         conversa.status = 'ABERTA'
         conversa.estado_menu = 'AGUARDANDO_SETOR'
@@ -115,6 +274,15 @@ def _processar_mensagem_recebida(value: dict, msg: dict):
         baixar_midia_whatsapp.delay(mensagem.id, media_info['id'])
 
     if conversa.estado_menu == 'EM_ATENDIMENTO' and conversa.fila_id:
+        _notificar_nova_mensagem(conversa, texto or f"[{tipo_interno.lower()}]")
+    elif numero is not None and not numero.menu_automatico:
+        # Número atendido também pelo app WhatsApp Business (coexistência): o robô
+        # não pode falar. Mandar o menu de setores aqui significaria o cliente
+        # recebendo "escolha um setor" enquanto uma pessoa já responde à mão pelo
+        # celular. A conversa entra direto na fila do número e só avisa a equipe.
+        conversa.fila = conversa.fila or numero.fila_padrao()
+        conversa.estado_menu = 'EM_ATENDIMENTO'
+        conversa.save(update_fields=['fila', 'estado_menu'])
         _notificar_nova_mensagem(conversa, texto or f"[{tipo_interno.lower()}]")
     else:
         services.resolver_fila_por_texto(texto, conversa)
@@ -191,9 +359,12 @@ def _processar_status(status: dict):
 @shared_task
 def baixar_midia_whatsapp(mensagem_id: int, wa_media_id: str):
     try:
-        url = graph_api.obter_url_midia(wa_media_id)
-        conteudo, content_type = graph_api.baixar_midia(url)
-        mensagem = Mensagem.objects.get(id=mensagem_id)
+        mensagem = Mensagem.objects.select_related('conversa').get(id=mensagem_id)
+        # O token importa aqui: mídia de conversa que entrou por número de outra
+        # WABA não é acessível com o token do .env.
+        numero = mensagem.conversa.numero
+        url = graph_api.obter_url_midia(wa_media_id, numero=numero)
+        conteudo, content_type = graph_api.baixar_midia(url, numero=numero)
         anexo = MensagemAnexo(mensagem=mensagem, wa_media_id=wa_media_id, mime_type=content_type)
         # Com extensão: o arquivo é servido pelo nginx, que decide o Content-Type
         # pelo nome. Sem ela a foto descia como octet-stream e o navegador não a
@@ -269,7 +440,8 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
         try:
             _marcar_enviada(
                 mensagem,
-                graph_api.enviar_mensagem_texto(telefone, texto_para_cliente, citando=citando),
+                graph_api.enviar_mensagem_texto(
+                telefone, texto_para_cliente, citando=citando, numero=mensagem.conversa.numero),
             )
         except Exception as exc:
             _marcar_falha(mensagem, exc, 'Falha ao enviar texto do WhatsApp')
@@ -288,13 +460,13 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
             # A conversão vale só para o que sobe à Meta.
             conteudo, mime_envio, nome = audio.preparar_para_whatsapp(conteudo, anexo.mime_type, nome)
 
-        media_id = graph_api.upload_midia(conteudo, nome, mime_envio)
+        media_id = graph_api.upload_midia(conteudo, nome, mime_envio, numero=mensagem.conversa.numero)
         anexo.wa_media_id = media_id
         anexo.save(update_fields=['wa_media_id'])
 
         resposta = graph_api.enviar_midia(
             telefone, media_id, categoria, legenda=texto_para_cliente,
-            nome_arquivo=nome, citando=citando,
+            nome_arquivo=nome, citando=citando, numero=mensagem.conversa.numero,
         )
         _marcar_enviada(mensagem, resposta)
     except Exception as exc:
@@ -310,7 +482,8 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
     # já não assina mais (esta aqui passa a ser a última saída da conversa).
     if texto_para_cliente and categoria not in graph_api.CATEGORIAS_COM_LEGENDA:
         try:
-            graph_api.enviar_mensagem_texto(telefone, texto_para_cliente)
+            graph_api.enviar_mensagem_texto(
+                telefone, texto_para_cliente, numero=mensagem.conversa.numero)
         except Exception:
             logger.exception(
                 'Mídia enviada, mas a legenda avulsa falhou (mensagem_id=%s)', mensagem_id,
@@ -330,6 +503,7 @@ def enviar_template_whatsapp(mensagem_id: int, nome_template: str, idioma: str, 
     try:
         resposta = graph_api.enviar_template(
             mensagem.conversa.contato_telefone, nome_template, idioma, componentes,
+            numero=mensagem.conversa.numero,
         )
         _marcar_enviada(mensagem, resposta)
     except Exception as exc:
@@ -356,6 +530,7 @@ def enviar_contato_whatsapp(mensagem_id: int):
     try:
         resposta = graph_api.enviar_contatos(
             mensagem.conversa.contato_telefone, cartoes, citando=citando or '',
+            numero=mensagem.conversa.numero,
         )
         _marcar_enviada(mensagem, resposta)
     except Exception as exc:

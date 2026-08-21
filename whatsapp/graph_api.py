@@ -64,8 +64,29 @@ def _base_url():
     return f"https://graph.facebook.com/{settings.WHATSAPP_API_VERSION}"
 
 
-def _headers():
-    return {'Authorization': f'Bearer {settings.WHATSAPP_ACCESS_TOKEN}'}
+def _id_do_numero(numero=None) -> str:
+    """
+    De qual número da empresa a mensagem sai.
+
+    `numero` é um `NumeroNegocio` (recebido por parâmetro, não importado, para o
+    módulo continuar sem depender de models). Nulo cai no `.env` — é o que
+    mantém funcionando tudo o que existia antes de haver mais de um número.
+    """
+    if numero is not None and getattr(numero, 'phone_number_id', ''):
+        return numero.phone_number_id
+    return settings.WHATSAPP_PHONE_NUMBER_ID
+
+
+def _headers(numero=None):
+    """
+    Token da requisição.
+
+    Só difere do token do `.env` quando o número está em OUTRA WABA: o token
+    guarda um retrato dos ativos do usuário de sistema, então uma WABA que não
+    estava lá na geração dá `code 100 / subcode 33`.
+    """
+    token = (getattr(numero, 'access_token', '') or '') if numero is not None else ''
+    return {'Authorization': f'Bearer {token or settings.WHATSAPP_ACCESS_TOKEN}'}
 
 
 def categoria_da_midia(mime_type: str, nome_arquivo: str = '') -> str:
@@ -95,14 +116,14 @@ def tipo_interno_da_midia(mime_type: str, nome_arquivo: str = '') -> str:
 
 # ── Envio ────────────────────────────────────────────────────────────────────
 
-def enviar_mensagem_texto(telefone: str, texto: str, citando: str = '') -> dict:
+def enviar_mensagem_texto(telefone: str, texto: str, citando: str = '', numero=None) -> dict:
     """
     Envia mensagem de texto livre. Só é aceita pela Meta dentro da janela de 24h.
 
     `citando` é o `wa_message_id` da mensagem que deve aparecer citada acima da
     resposta (o "Responder" do WhatsApp). Vazio manda mensagem solta.
     """
-    url = f"{_base_url()}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    url = f"{_base_url()}/{_id_do_numero(numero)}/messages"
     payload = {
         'messaging_product': 'whatsapp',
         'to': telefone,
@@ -111,12 +132,12 @@ def enviar_mensagem_texto(telefone: str, texto: str, citando: str = '') -> dict:
     }
     if citando:
         payload['context'] = {'message_id': citando}
-    resp = requests.post(url, json=payload, headers=_headers(), timeout=TIMEOUT_PADRAO)
+    resp = requests.post(url, json=payload, headers=_headers(numero), timeout=TIMEOUT_PADRAO)
     resp.raise_for_status()
     return resp.json()
 
 
-def upload_midia(conteudo: bytes, nome_arquivo: str, mime_type: str) -> str:
+def upload_midia(conteudo: bytes, nome_arquivo: str, mime_type: str, numero=None) -> str:
     """
     Sobe o arquivo para a Meta e devolve o `media_id`.
 
@@ -137,10 +158,10 @@ def upload_midia(conteudo: bytes, nome_arquivo: str, mime_type: str) -> str:
     mime_efetivo = (mime_type or '').split(';')[0].strip() or \
         (mimetypes.guess_type(nome_arquivo)[0] or 'application/octet-stream')
 
-    url = f"{_base_url()}/{settings.WHATSAPP_PHONE_NUMBER_ID}/media"
+    url = f"{_base_url()}/{_id_do_numero(numero)}/media"
     resp = requests.post(
         url,
-        headers=_headers(),
+        headers=_headers(numero),
         # 'type' vai no corpo e o arquivo em multipart; a Meta recusa JSON aqui.
         data={'messaging_product': 'whatsapp', 'type': mime_efetivo},
         files={'file': (nome_arquivo, conteudo, mime_efetivo)},
@@ -157,6 +178,7 @@ def enviar_midia(
     legenda: str = '',
     nome_arquivo: str = '',
     citando: str = '',
+    numero=None,
 ) -> dict:
     """Envia mídia já hospedada na Meta (`media_id` vindo de `upload_midia`)."""
     corpo: dict = {'id': media_id}
@@ -166,7 +188,7 @@ def enviar_midia(
         # Sem isto o destinatário recebe o documento nomeado com o id interno.
         corpo['filename'] = nome_arquivo
 
-    url = f"{_base_url()}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    url = f"{_base_url()}/{_id_do_numero(numero)}/messages"
     payload = {
         'messaging_product': 'whatsapp',
         'to': telefone,
@@ -175,7 +197,7 @@ def enviar_midia(
     }
     if citando:
         payload['context'] = {'message_id': citando}
-    resp = requests.post(url, json=payload, headers=_headers(), timeout=TIMEOUT_MIDIA)
+    resp = requests.post(url, json=payload, headers=_headers(numero), timeout=TIMEOUT_MIDIA)
     resp.raise_for_status()
     return resp.json()
 
@@ -204,7 +226,7 @@ def montar_cartao_contato(nome: str, telefone: str, empresa: str = '') -> dict:
     }
 
 
-def enviar_contatos(telefone: str, cartoes: list[dict], citando: str = '') -> dict:
+def enviar_contatos(telefone: str, cartoes: list[dict], citando: str = '', numero=None) -> dict:
     """
     Compartilha um ou mais cartões de contato.
 
@@ -212,7 +234,7 @@ def enviar_contatos(telefone: str, cartoes: list[dict], citando: str = '') -> di
     cliente como cartão nativo, com o botão de conversar. Use
     `montar_cartao_contato` para montar cada item.
     """
-    url = f"{_base_url()}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    url = f"{_base_url()}/{_id_do_numero(numero)}/messages"
     payload = {
         'messaging_product': 'whatsapp',
         'to': telefone,
@@ -221,7 +243,7 @@ def enviar_contatos(telefone: str, cartoes: list[dict], citando: str = '') -> di
     }
     if citando:
         payload['context'] = {'message_id': citando}
-    resp = requests.post(url, json=payload, headers=_headers(), timeout=TIMEOUT_PADRAO)
+    resp = requests.post(url, json=payload, headers=_headers(numero), timeout=TIMEOUT_PADRAO)
     resp.raise_for_status()
     return resp.json()
 
@@ -231,6 +253,7 @@ def enviar_template(
     nome_template: str,
     idioma: str = 'pt_BR',
     componentes: list | None = None,
+    numero=None,
 ) -> dict:
     """
     Envia um template aprovado pela Meta.
@@ -245,14 +268,14 @@ def enviar_template(
     if componentes:
         template['components'] = componentes
 
-    url = f"{_base_url()}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    url = f"{_base_url()}/{_id_do_numero(numero)}/messages"
     payload = {
         'messaging_product': 'whatsapp',
         'to': telefone,
         'type': 'template',
         'template': template,
     }
-    resp = requests.post(url, json=payload, headers=_headers(), timeout=TIMEOUT_PADRAO)
+    resp = requests.post(url, json=payload, headers=_headers(numero), timeout=TIMEOUT_PADRAO)
     resp.raise_for_status()
     return resp.json()
 
@@ -263,6 +286,7 @@ def criar_template(
     exemplos: list[str] | None = None,
     categoria: str = 'UTILITY',
     idioma: str = 'pt_BR',
+    numero=None,
 ) -> dict:
     """
     Cadastra um template na conta e o manda para revisão da Meta.
@@ -294,7 +318,7 @@ def criar_template(
     url = f"{_base_url()}/{waba_id}/message_templates"
     resp = requests.post(
         url,
-        headers=_headers(),
+        headers=_headers(numero),
         json={
             'name': nome,
             'language': idioma,
@@ -307,7 +331,7 @@ def criar_template(
     return resp.json()
 
 
-def listar_templates() -> list[dict]:
+def listar_templates(numero=None) -> list[dict]:
     """
     Templates cadastrados na conta, para a tela oferecer só o que existe.
 
@@ -320,7 +344,7 @@ def listar_templates() -> list[dict]:
         return []
     url = f"{_base_url()}/{waba_id}/message_templates"
     resp = requests.get(
-        url, headers=_headers(),
+        url, headers=_headers(numero),
         params={'limit': 100, 'fields': 'name,status,language,category,components'},
         timeout=TIMEOUT_PADRAO,
     )
@@ -330,14 +354,14 @@ def listar_templates() -> list[dict]:
 
 # ── Recebimento ──────────────────────────────────────────────────────────────
 
-def obter_url_midia(wa_media_id: str) -> str:
+def obter_url_midia(wa_media_id: str, numero=None) -> str:
     url = f"{_base_url()}/{wa_media_id}"
-    resp = requests.get(url, headers=_headers(), timeout=TIMEOUT_PADRAO)
+    resp = requests.get(url, headers=_headers(numero), timeout=TIMEOUT_PADRAO)
     resp.raise_for_status()
     return resp.json()['url']
 
 
-def baixar_midia(media_url: str) -> tuple[bytes, str]:
-    resp = requests.get(media_url, headers=_headers(), timeout=TIMEOUT_MIDIA)
+def baixar_midia(media_url: str, numero=None) -> tuple[bytes, str]:
+    resp = requests.get(media_url, headers=_headers(numero), timeout=TIMEOUT_MIDIA)
     resp.raise_for_status()
     return resp.content, resp.headers.get('Content-Type', '')

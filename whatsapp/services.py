@@ -5,6 +5,8 @@ import re
 from django.conf import settings
 from django.utils import timezone
 
+from django.db.models import Q
+
 from .models import ConfiguracaoAtendimento, Fila, Mensagem, WhatsAppNotificacao
 from . import graph_api
 
@@ -58,8 +60,19 @@ def pode_atender(usuario, conversa) -> bool:
     return bool(conversa.fila_id) and conversa.fila.membros.filter(pk=usuario.pk).exists()
 
 
-def _filas_ativas():
-    return list(Fila.objects.filter(ativa=True).order_by('ordem', 'nome'))
+def _filas_ativas(numero=None):
+    """
+    Filas que ESTE número oferece no menu.
+
+    Fila com `numero` nulo é compartilhada e aparece em todos; fila de outro
+    número não aparece. Sem isso os setores do número de TI entrariam no menu do
+    número do Comercial, e o cliente escolheria uma fila que ninguém daquele
+    setor atende.
+    """
+    qs = Fila.objects.filter(ativa=True)
+    if numero is not None:
+        qs = qs.filter(Q(numero=numero) | Q(numero__isnull=True))
+    return list(qs.order_by('ordem', 'nome'))
 
 
 # ── Assinatura do atendimento ────────────────────────────────────────────────
@@ -71,9 +84,9 @@ def _filas_ativas():
 # quando outro respondia). O texto é editável no admin
 # (ConfiguracaoAtendimento.assinatura), então trocar não exige deploy.
 
-def assinatura_do_atendimento() -> str:
+def assinatura_do_atendimento(numero=None) -> str:
     """Assinatura configurada; vazia desliga a assinatura por completo."""
-    return (ConfiguracaoAtendimento.carregar().assinatura or '').strip()
+    return (ConfiguracaoAtendimento.carregar(numero).assinatura or '').strip()
 
 
 def _deve_assinar(mensagem) -> bool:
@@ -99,22 +112,24 @@ def assinar_para_cliente(texto: str, mensagem) -> str:
     """
     if not _deve_assinar(mensagem):
         return texto
-    nome = assinatura_do_atendimento()
+    # A assinatura é do número por onde a conversa entrou: com dois setores,
+    # "Setor de TI Grupo DB" numa resposta do Comercial estaria errada.
+    nome = assinatura_do_atendimento(mensagem.conversa.numero)
     if not nome:
         return texto
     # Sem texto é legenda de mídia: aí a assinatura vai sozinha, sem os dois-pontos.
     return f'*{nome}:*\n{texto}' if (texto or '').strip() else f'*{nome}*'
 
 
-def montar_texto_menu(filas=None) -> str:
-    filas = filas if filas is not None else _filas_ativas()
-    linhas = [ConfiguracaoAtendimento.carregar().texto_menu]
+def montar_texto_menu(filas=None, numero=None) -> str:
+    filas = filas if filas is not None else _filas_ativas(numero)
+    linhas = [ConfiguracaoAtendimento.carregar(numero).texto_menu]
     for i, fila in enumerate(filas, start=1):
         linhas.append(f"{i} - {fila.nome}")
     return "\n".join(linhas)
 
 
-def montar_texto_roteamento(fila) -> str:
+def montar_texto_roteamento(fila, numero=None) -> str:
     """
     Confirmação de "você caiu no setor X", com o nome do setor no lugar de {setor}.
 
@@ -123,7 +138,7 @@ def montar_texto_roteamento(fila) -> str:
     KeyError — no meio de uma task do Celery, onde ninguém vê o erro. Sem o
     marcador o texto simplesmente sai como foi escrito.
     """
-    modelo = ConfiguracaoAtendimento.carregar().texto_roteamento
+    modelo = ConfiguracaoAtendimento.carregar(numero).texto_roteamento
     return modelo.replace('{setor}', fila.nome)
 
 
@@ -172,7 +187,8 @@ def responder_automatico(conversa, texto: str) -> None:
     """
     _registrar_saida_automatica(
         conversa, texto,
-        lambda: graph_api.enviar_mensagem_texto(conversa.contato_telefone, texto),
+        lambda: graph_api.enviar_mensagem_texto(
+            conversa.contato_telefone, texto, numero=conversa.numero),
         'Falha ao enviar resposta automática',
     )
 
@@ -181,7 +197,7 @@ def _enviar_menu(conversa, filas) -> None:
     """Manda o menu e contabiliza o envio — `tentativas_menu` é o que impede o loop."""
     conversa.tentativas_menu += 1
     conversa.save(update_fields=['tentativas_menu'])
-    responder_automatico(conversa, montar_texto_menu(filas))
+    responder_automatico(conversa, montar_texto_menu(filas, conversa.numero))
 
 
 def _notificar_membros(conversa, fila, tipo, texto_preview):
@@ -212,7 +228,7 @@ def _resolver_por_opcao_ou_palavra_chave(texto: str, filas):
 
 def resolver_fila_por_texto(texto: str, conversa) -> None:
     """Avança a máquina de estados de roteamento de uma Conversa a partir do texto recebido do cliente."""
-    filas = _filas_ativas()
+    filas = _filas_ativas(conversa.numero)
 
     if conversa.fila_id and conversa.estado_menu == 'EM_ATENDIMENTO':
         return  # já roteada, nada a fazer aqui
@@ -252,7 +268,7 @@ def resolver_fila_por_texto(texto: str, conversa) -> None:
     conversa.estado_menu = 'EM_ATENDIMENTO'
     conversa.save(update_fields=['fila', 'estado_menu', 'tentativas_menu'])
 
-    responder_automatico(conversa, montar_texto_roteamento(fila_encontrada))
+    responder_automatico(conversa, montar_texto_roteamento(fila_encontrada, conversa.numero))
     _notificar_membros(
         conversa, fila_encontrada, 'CONVERSA_ATRIBUIDA',
         f"Nova conversa de {conversa.contato_nome or conversa.contato_telefone}"

@@ -1,7 +1,10 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 
-from .models import Contato, Fila, Conversa, Mensagem, MensagemAnexo, WhatsAppNotificacao
+from .models import (
+    Contato, Fila, Conversa, Mensagem, MensagemAnexo, NumeroNegocio,
+    WhatsAppNotificacao,
+)
 
 
 class UserMinSerializer(serializers.ModelSerializer):
@@ -92,14 +95,19 @@ class MensagemSerializer(serializers.ModelSerializer):
             'id', 'conversa', 'direcao', 'tipo', 'texto', 'autor', 'anexos', 'anexo',
             'responde_a', 'citada', 'contatos',
             'template_nome', 'wa_message_id', 'status_entrega', 'erro_detalhe', 'created_at',
+            'enviada_pelo_celular',
         ]
         read_only_fields = [
             'conversa', 'direcao', 'tipo', 'template_nome', 'wa_message_id',
             'status_entrega', 'erro_detalhe', 'created_at', 'autor',
+            'enviada_pelo_celular',
         ]
 
 
 class ConversaListSerializer(serializers.ModelSerializer):
+    # Por qual número da empresa a conversa entrou — com mais de um número, a
+    # tela precisa dizer qual, senão o atendente responde achando que é o dele.
+    numero_nome = serializers.CharField(source='numero.nome', read_only=True, default='')
     fila = FilaSerializer(read_only=True)
     responsavel = UserMinSerializer(read_only=True)
     ultima_mensagem_texto = serializers.SerializerMethodField()
@@ -114,6 +122,7 @@ class ConversaListSerializer(serializers.ModelSerializer):
             'id', 'contato_telefone', 'contato_nome', 'fila', 'responsavel',
             'status', 'estado_menu', 'ultima_mensagem_em', 'ultima_mensagem_texto',
             'ultima_mensagem_cliente_em', 'dentro_da_janela_24h', 'created_at',
+                    'numero_nome',
         ]
 
     def get_ultima_mensagem_texto(self, obj):
@@ -122,6 +131,9 @@ class ConversaListSerializer(serializers.ModelSerializer):
 
 
 class ConversaDetailSerializer(serializers.ModelSerializer):
+    # Por qual número da empresa a conversa entrou — com mais de um número, a
+    # tela precisa dizer qual, senão o atendente responde achando que é o dele.
+    numero_nome = serializers.CharField(source='numero.nome', read_only=True, default='')
     fila = FilaSerializer(read_only=True)
     responsavel = UserMinSerializer(read_only=True)
     mensagens = MensagemSerializer(many=True, read_only=True)
@@ -134,6 +146,7 @@ class ConversaDetailSerializer(serializers.ModelSerializer):
             'id', 'contato_telefone', 'contato_nome', 'fila', 'responsavel',
             'status', 'estado_menu', 'ultima_mensagem_em', 'ultima_mensagem_cliente_em',
             'dentro_da_janela_24h', 'mensagens', 'tarefas_kanban', 'created_at',
+                    'numero_nome',
         ]
 
     def get_tarefas_kanban(self, obj):
@@ -217,3 +230,14 @@ class ContatoDaAgendaSerializer(serializers.Serializer):
     ultima_conversa_status = serializers.CharField(allow_null=True)
     # Se dá para mandar texto livre agora, ou se só sai template.
     janela_aberta = serializers.BooleanField()
+
+
+class NumeroNegocioSerializer(serializers.ModelSerializer):
+    """
+    O que a tela precisa saber do número. Sem `access_token` — segredo não sai
+    daqui nem para usuário autenticado.
+    """
+
+    class Meta:
+        model = NumeroNegocio
+        fields = ['id', 'nome', 'telefone', 'phone_number_id', 'ativo', 'is_padrao']
