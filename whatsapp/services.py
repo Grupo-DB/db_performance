@@ -30,9 +30,14 @@ TENTATIVAS_MAXIMAS = 3
 #
 # Quem não está em nenhum desses grupos continua na regra antiga (as filas de
 # que participa), para ninguém ficar sem atendimento por cadastro não feito.
+# `apelidos` são os nomes que o número tem no admin. O número principal chama-se
+# "Atendimento" (é o rótulo que aparece na Central), não "TI" — sem o apelido o
+# escopo não casaria com número nenhum.
 ESCOPOS = {
-    'RH': {'gestor': 'GestorWhatsapp', 'atendentes': 'RHWhatsapp'},
-    'TI': {'gestor': 'GestorWhatsappTI', 'atendentes': 'TIWhatsapp'},
+    'RH': {'gestor': 'GestorWhatsapp', 'atendentes': 'RHWhatsapp',
+           'apelidos': ('RH', 'Recursos Humanos')},
+    'TI': {'gestor': 'GestorWhatsappTI', 'atendentes': 'TIWhatsapp',
+           'apelidos': ('TI', 'Atendimento', 'Setor TI')},
 }
 
 # Mantido para o resto do código (disparo em massa, admin): gestor de QUALQUER
@@ -67,7 +72,9 @@ def numeros_do_escopo(escopo: str) -> list:
     from .models import NumeroNegocio
 
     configurados = (getattr(settings, 'WHATSAPP_NUMEROS_POR_ESCOPO', None) or {}).get(escopo) or []
-    apelidos = {_chave_escopo(escopo)} | {_chave_escopo(a) for a in configurados}
+    apelidos = {_chave_escopo(escopo)}
+    apelidos |= {_chave_escopo(a) for a in ESCOPOS.get(escopo, {}).get('apelidos', ())}
+    apelidos |= {_chave_escopo(a) for a in configurados}
     return [
         numero.id for numero in NumeroNegocio.objects.all()
         if _chave_escopo(numero.nome) in apelidos or (numero.phone_number_id or '') in configurados
@@ -147,10 +154,16 @@ def filtro_de_conversas(usuario):
     for escopo, papel in papeis.items():
         numeros = numeros_do_escopo(escopo)
         if not numeros:
-            # Escopo sem número casado: não libera o atendimento inteiro por
-            # engano — cai no que a pessoa já atendia pela fila.
+            # Escopo sem número casado (nome trocado no admin, cadastro novo).
+            # Cai para a fila, MAS o atendente continua restrito ao que é dele ou
+            # ao que não tem dono: só a separação entre setores depende do número,
+            # a regra pessoal não — senão um cadastro errado devolve o atendimento
+            # inteiro para todo mundo, que é o defeito que isto veio corrigir.
             logger.warning('Escopo %s do WhatsApp não casou com nenhum NumeroNegocio.', escopo)
-            filtro |= Q(fila__membros=usuario)
+            pela_fila = Q(fila__membros=usuario)
+            if papel != 'gestor':
+                pela_fila &= (Q(responsavel=usuario) | Q(responsavel__isnull=True))
+            filtro |= pela_fila
             continue
 
         do_escopo = Q(numero_id__in=numeros)
@@ -250,7 +263,13 @@ def pode_atender(usuario, conversa) -> bool:
 
     if eh_gestor(usuario):
         return True
-    return bool(conversa.fila_id) and conversa.fila.membros.filter(pk=usuario.pk).exists()
+    if not (conversa.fila_id and conversa.fila.membros.filter(pk=usuario.pk).exists()):
+        return False
+    # Atendente dos grupos novos, com o número ainda sem escopo: vale a regra
+    # pessoal, que não depende do cadastro do número.
+    if papeis:
+        return conversa.responsavel_id in (None, usuario.pk)
+    return True
 
 
 def _filas_ativas(numero=None):
