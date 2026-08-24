@@ -79,10 +79,23 @@ class FilaViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        # Gestor do atendimento vê todas as filas: é a condição para ele assumir
-        # um chamado de qualquer setor (ver services.GRUPO_GESTOR).
-        qs = Fila.objects.all() if services.eh_gestor(user) else Fila.objects.filter(membros=user)
-        return qs.distinct()
+        if user.is_staff:
+            return Fila.objects.all()
+
+        papeis = services.escopos_do_usuario(user)
+        if not papeis:
+            return Fila.objects.filter(membros=user).distinct()
+
+        # Gestor enxerga as filas do SEU número (e as compartilhadas, de número
+        # nulo); atendente continua vendo as filas de que participa.
+        filtro = Q(membros=user)
+        for escopo, papel in papeis.items():
+            if papel != 'gestor':
+                continue
+            numeros = services.numeros_do_escopo(escopo)
+            if numeros:
+                filtro |= Q(numero_id__in=numeros) | Q(numero__isnull=True)
+        return Fila.objects.filter(filtro).distinct()
 
     def perform_create(self, serializer):
         serializer.save(criado_por=self.request.user)
@@ -103,9 +116,9 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        if services.eh_gestor(self.request.user):
-            return Conversa.objects.all()
-        return Conversa.objects.filter(fila__membros=self.request.user).distinct()
+        # Regra única de visibilidade (RH x TI, gestor x atendente) — está em
+        # services.filtro_de_conversas para não divergir entre os endpoints.
+        return services.conversas_visiveis(self.request.user)
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -127,7 +140,9 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         # pk conhecido deixaria assumir conversa de fila alheia.
         conversa = self.get_object()
 
-        if services.eh_gestor(request.user):
+        # Gestor DESTE atendimento (o do RH não manda no da TI). O queryset já
+        # barrou a conversa do outro número; isto separa gestor de atendente.
+        if services.eh_gestor_de(request.user, services.escopo_da_conversa(conversa)):
             # Gestor tira o chamado de quem estiver com ele — é justamente para
             # isso que o grupo existe (atendente de folga, chamado parado).
             anterior_id = conversa.responsavel_id
@@ -171,12 +186,14 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             conversa.fila_id = fila_id
         conversa.responsavel_id = usuario_id or None
         conversa.save(update_fields=['fila', 'responsavel'])
+        # Avisa quem passa a enxergar a conversa: com responsável definido é só
+        # ele; sem responsável, os atendentes daquele número.
         WhatsAppNotificacao.objects.bulk_create([
             WhatsAppNotificacao(
-                conversa=conversa, usuario_notificado=membro,
+                conversa=conversa, usuario_notificado=usuario,
                 tipo='CONVERSA_TRANSFERIDA', mensagem=f"Conversa de {conversa.contato_nome or conversa.contato_telefone} transferida para sua fila",
             )
-            for membro in (conversa.fila.membros.all() if conversa.fila_id else [])
+            for usuario in services.usuarios_para_avisar(conversa)
         ])
         return Response(ConversaDetailSerializer(conversa).data)
 
@@ -422,9 +439,7 @@ class ContatoViewSet(viewsets.ModelViewSet):
         tudo) — a agenda não pode virar a porta dos fundos para ler atendimento
         de outro setor.
         """
-        conversas = Conversa.objects.all()
-        if not services.eh_gestor(request.user):
-            conversas = conversas.filter(fila__membros=request.user)
+        conversas = services.conversas_visiveis(request.user)
 
         # Uma volta só no banco: a linha mais recente de cada telefone é a
         # primeira, porque a ordenação desce por data.
@@ -569,8 +584,10 @@ class MensagemViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Mensagem.objects.filter(conversa_id=self.kwargs['conversa_pk'])
-        if not services.eh_gestor(self.request.user):
-            qs = qs.filter(conversa__fila__membros=self.request.user)
+        # O histórico segue a visibilidade da conversa: sem isto, o id na URL
+        # abriria o atendimento do outro número.
+        visiveis = services.conversas_visiveis(self.request.user)
+        qs = qs.filter(conversa__in=visiveis)
         # A citada e os anexos entram em toda bolha: sem o prefetch a listagem
         # fazia duas consultas por mensagem do histórico.
         return qs.select_related('autor', 'responde_a', 'responde_a__autor').prefetch_related('anexos').distinct()

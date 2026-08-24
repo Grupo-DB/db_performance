@@ -16,20 +16,198 @@ logger = logging.getLogger(__name__)
 # Quantas vezes o menu é mandado antes de jogar o cliente na fila padrão.
 TENTATIVAS_MAXIMAS = 3
 
-# Grupo (django.contrib.auth.Group) que enxerga todas as filas e pode assumir
-# qualquer conversa, inclusive as que já estão com outro atendente. É o supervisor
-# do atendimento: sem isso, um chamado parado com alguém de folga só saía da
-# frente pelo admin do Django.
+# ── Escopos de atendimento (RH x TI) ─────────────────────────────────────────
+#
+# Cada NÚMERO de WhatsApp é um atendimento separado, e o escopo de uma conversa
+# é o número por onde ela entrou: currículo e atestado que chegam no número do
+# RH não são assunto de quem atende chamado de TI, e vice-versa.
+#
+# Por grupo do Django (django.contrib.auth.Group):
+#   RHWhatsapp / TIWhatsapp  → atendente: vê as conversas do SEU número que
+#                              estão com ele ou ainda SEM DONO (para assumir).
+#   GestorWhatsapp           → gestor do RH: vê todas as conversas do RH.
+#   GestorWhatsappTI         → gestor da TI: vê todas as conversas da TI.
+#
+# Quem não está em nenhum desses grupos continua na regra antiga (as filas de
+# que participa), para ninguém ficar sem atendimento por cadastro não feito.
+ESCOPOS = {
+    'RH': {'gestor': 'GestorWhatsapp', 'atendentes': 'RHWhatsapp'},
+    'TI': {'gestor': 'GestorWhatsappTI', 'atendentes': 'TIWhatsapp'},
+}
+
+# Mantido para o resto do código (disparo em massa, admin): gestor de QUALQUER
+# escopo. Para "gestor DESTE atendimento", use `eh_gestor_de`.
 GRUPO_GESTOR = 'GestorWhatsapp'
+GRUPOS_GESTORES = tuple(cfg['gestor'] for cfg in ESCOPOS.values())
+
+
+def _chave_escopo(texto) -> str:
+    """Nome comparável: sem acento, sem espaço nas pontas, minúsculo.
+
+    Não reaproveita o `_sem_acento` lá de baixo de propósito — aquele preserva a
+    caixa (é usado no primeiro nome do atendente) e "RH" nunca casaria com "rh".
+    """
+    normalizado = unicodedata.normalize('NFKD', (texto or '').strip().lower())
+    return ''.join(c for c in normalizado if not unicodedata.combining(c))
+
+
+def numeros_do_escopo(escopo: str) -> list:
+    """
+    Ids de `NumeroNegocio` do escopo.
+
+    O casamento é pelo NOME cadastrado no admin ("RH", "TI") — é o único vínculo
+    que existe hoje entre grupo e número. Para um cadastro que não possa ser
+    renomeado, `settings.WHATSAPP_NUMEROS_POR_ESCOPO` aceita outros nomes ou o
+    próprio `phone_number_id`:
+
+        WHATSAPP_NUMEROS_POR_ESCOPO = {'RH': ['Recursos Humanos', '1356992644155626']}
+
+    `manage.py whatsapp_escopos` mostra como está resolvendo hoje.
+    """
+    from .models import NumeroNegocio
+
+    configurados = (getattr(settings, 'WHATSAPP_NUMEROS_POR_ESCOPO', None) or {}).get(escopo) or []
+    apelidos = {_chave_escopo(escopo)} | {_chave_escopo(a) for a in configurados}
+    return [
+        numero.id for numero in NumeroNegocio.objects.all()
+        if _chave_escopo(numero.nome) in apelidos or (numero.phone_number_id or '') in configurados
+    ]
+
+
+def _numero_padrao_id():
+    """Número que atende quem não escolheu setor — dono das conversas antigas."""
+    from .models import NumeroNegocio
+
+    padrao = NumeroNegocio.objects.filter(is_padrao=True, ativo=True).first()
+    return padrao.id if padrao else None
+
+
+def escopo_da_conversa(conversa) -> str:
+    """
+    'RH' / 'TI' / '' quando o número da conversa não casa com escopo nenhum.
+
+    Conversa anterior ao 2º número não tem `numero` preenchido: ela é do
+    atendimento padrão, não de todo mundo.
+    """
+    numero_id = conversa.numero_id or _numero_padrao_id()
+    if numero_id is None:
+        return ''
+    for escopo in ESCOPOS:
+        if numero_id in numeros_do_escopo(escopo):
+            return escopo
+    return ''
+
+
+def escopos_do_usuario(usuario) -> dict:
+    """`{'RH': 'gestor'}` / `{'TI': 'atendente'}` — vazio para quem está fora dos grupos."""
+    if not usuario or not usuario.is_authenticated:
+        return {}
+    grupos = set(usuario.groups.values_list('name', flat=True))
+    papeis = {}
+    for escopo, cfg in ESCOPOS.items():
+        if cfg['gestor'] in grupos:
+            papeis[escopo] = 'gestor'
+        elif cfg['atendentes'] in grupos:
+            papeis[escopo] = 'atendente'
+    return papeis
 
 
 def eh_gestor(usuario) -> bool:
+    """Gestor de algum atendimento (ou staff). Não diz de qual — veja `eh_gestor_de`."""
     if not usuario or not usuario.is_authenticated:
         return False
-    return usuario.is_staff or usuario.groups.filter(name=GRUPO_GESTOR).exists()
+    return usuario.is_staff or usuario.groups.filter(name__in=GRUPOS_GESTORES).exists()
+
+
+def eh_gestor_de(usuario, escopo: str) -> bool:
+    if not usuario or not usuario.is_authenticated:
+        return False
+    if usuario.is_staff:
+        return True
+    grupo = ESCOPOS.get(escopo, {}).get('gestor')
+    return bool(grupo) and usuario.groups.filter(name=grupo).exists()
+
+
+def filtro_de_conversas(usuario):
+    """
+    `Q` do que este usuário enxerga — `None` quando enxerga tudo (staff).
+
+    Gestor: tudo do seu número. Atendente: do seu número, o que é dele ou o que
+    ainda não tem dono — senão ninguém conseguiria puxar chamado novo.
+    """
+    if usuario.is_staff:
+        return None
+
+    papeis = escopos_do_usuario(usuario)
+    if not papeis:
+        return Q(fila__membros=usuario)      # regra antiga
+
+    padrao_id = _numero_padrao_id()
+    filtro = Q(pk__in=[])                    # nada, até algum escopo somar
+    for escopo, papel in papeis.items():
+        numeros = numeros_do_escopo(escopo)
+        if not numeros:
+            # Escopo sem número casado: não libera o atendimento inteiro por
+            # engano — cai no que a pessoa já atendia pela fila.
+            logger.warning('Escopo %s do WhatsApp não casou com nenhum NumeroNegocio.', escopo)
+            filtro |= Q(fila__membros=usuario)
+            continue
+
+        do_escopo = Q(numero_id__in=numeros)
+        if padrao_id in numeros:
+            do_escopo |= Q(numero__isnull=True)
+
+        if papel == 'gestor':
+            filtro |= do_escopo
+        else:
+            filtro |= do_escopo & (Q(responsavel=usuario) | Q(responsavel__isnull=True))
+    return filtro
+
+
+def conversas_visiveis(usuario, queryset=None):
+    """Conversas que este usuário pode abrir. Use isto, nunca `Conversa.objects.all()`."""
+    from .models import Conversa
+
+    qs = Conversa.objects.all() if queryset is None else queryset
+    filtro = filtro_de_conversas(usuario)
+    return qs if filtro is None else qs.filter(filtro).distinct()
+
+
+def pode_ver(usuario, conversa) -> bool:
+    from .models import Conversa
+
+    filtro = filtro_de_conversas(usuario)
+    if filtro is None:
+        return True
+    return Conversa.objects.filter(filtro, pk=conversa.pk).exists()
+
+
+def usuarios_para_avisar(conversa):
+    """
+    Quem recebe aviso desta conversa.
+
+    Casa com quem consegue ABRI-LA: aviso para quem não pode ver vira badge que
+    não abre nada. Sem responsável, avisa os atendentes do escopo que estão na
+    fila; com responsável, avisa só ele. O gestor do escopo recebe sempre.
+    """
+    from django.contrib.auth.models import User
+
+    escopo = escopo_da_conversa(conversa)
+    if not escopo:
+        # Número fora dos escopos: continua avisando a fila, como antes.
+        return list(conversa.fila.membros.all()) if conversa.fila_id else []
+
+    cfg = ESCOPOS[escopo]
+    alvo = Q(groups__name=cfg['gestor'])
+    if conversa.responsavel_id:
+        alvo |= Q(pk=conversa.responsavel_id)
+    elif conversa.fila_id:
+        alvo |= Q(filas_whatsapp=conversa.fila_id, groups__name=cfg['atendentes'])
+    return list(User.objects.filter(is_active=True).filter(alvo).distinct())
 
 
 def marcar_avisos_lidos(conversa, usuario=None) -> int:
+
     """
     Dá baixa nos avisos pendentes de uma conversa.
 
@@ -53,9 +231,23 @@ def pode_atender(usuario, conversa) -> bool:
     """
     Quem pode escrever, encerrar e abrir tarefa nesta conversa.
 
-    Regra normal é pertencer à fila. O gestor entra em qualquer uma — de nada
-    serviria ele assumir um chamado e depois não conseguir responder.
+    Acompanha quem ENXERGA a conversa: gestor do escopo atende qualquer uma do
+    seu número; atendente atende a que é dele e a que ainda não tem dono (é
+    assim que ele assume). Fora dos escopos vale a regra antiga, a da fila.
     """
+    if usuario.is_staff:
+        return True
+
+    escopo = escopo_da_conversa(conversa)
+    papeis = escopos_do_usuario(usuario)
+    if escopo and papeis:
+        papel = papeis.get(escopo)
+        if papel is None:
+            return False                     # atendimento do outro número
+        if papel == 'gestor':
+            return True
+        return conversa.responsavel_id in (None, usuario.pk)
+
     if eh_gestor(usuario):
         return True
     return bool(conversa.fila_id) and conversa.fila.membros.filter(pk=usuario.pk).exists()
@@ -276,11 +468,14 @@ def _enviar_menu(conversa, filas) -> None:
 
 
 def _notificar_membros(conversa, fila, tipo, texto_preview):
-    if not fila:
-        return
+    """Aviso vai para quem enxerga a conversa, não para a fila inteira.
+
+    Com a separação por número, membro de fila compartilhada podia receber badge
+    de conversa do outro atendimento — que ele abre e leva 404.
+    """
     notificacoes = [
-        WhatsAppNotificacao(conversa=conversa, usuario_notificado=membro, tipo=tipo, mensagem=texto_preview)
-        for membro in fila.membros.all()
+        WhatsAppNotificacao(conversa=conversa, usuario_notificado=usuario, tipo=tipo, mensagem=texto_preview)
+        for usuario in usuarios_para_avisar(conversa)
     ]
     if notificacoes:
         WhatsAppNotificacao.objects.bulk_create(notificacoes)
