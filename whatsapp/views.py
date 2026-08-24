@@ -545,7 +545,7 @@ class ContatoViewSet(viewsets.ModelViewSet):
         conversa.save(update_fields=['ultima_mensagem_em'])
 
         enviar_template_whatsapp.delay(mensagem.id, nome_template, idioma, componentes)
-        return Response(ConversaSerializer(conversa).data, status=status.HTTP_201_CREATED)
+        return Response(ConversaDetailSerializer(conversa).data, status=status.HTTP_201_CREATED)
 
     def _fila_para_iniciar(self, request):
         """A fila pedida, se a pessoa participa dela; senão a primeira que for dela."""
