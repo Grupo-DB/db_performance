@@ -712,9 +712,13 @@ class DisparoViewSet(viewsets.ModelViewSet):
     """
     Disparo em massa: monta a lista, envia e acompanha.
 
-    Restrito a gestor. Um envio para centenas de pessoas não é operação de
-    atendimento — erro aqui não se conserta pedindo desculpa numa conversa, e a
-    Meta rebaixa a qualidade do número quando o destinatário bloqueia.
+    Aberto a quem atende WhatsApp (RH e TI), não só ao gestor: o disparo virou
+    ferramenta de rotina dos dois setores. Continua fora do alcance de quem não
+    atende — um envio para centenas de pessoas não se conserta pedindo desculpa
+    numa conversa, e a Meta rebaixa a qualidade do número quando o destinatário
+    bloqueia.
+
+    Cada um enxerga os disparos do SEU número, pela mesma razão das conversas.
     """
 
     permission_classes = [IsAuthenticated]
@@ -723,13 +727,27 @@ class DisparoViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         return DisparoDetalheSerializer if self.action == 'retrieve' else DisparoSerializer
 
-    def _exigir_gestor(self):
-        if not services.eh_gestor(self.request.user):
-            raise PermissionDenied('Só gestor do WhatsApp pode usar o disparo em massa.')
+    def _exigir_atendimento(self):
+        """Gestor ou atendente de algum número; quem não atende WhatsApp fica fora."""
+        usuario = self.request.user
+        if usuario.is_staff or services.escopos_do_usuario(usuario):
+            return
+        raise PermissionDenied('Só quem atende o WhatsApp pode usar o disparo em massa.')
 
     def get_queryset(self):
-        self._exigir_gestor()
-        return self.queryset
+        self._exigir_atendimento()
+        usuario = self.request.user
+        if usuario.is_staff:
+            return self.queryset
+
+        # Disparo do RH não aparece para a TI e vice-versa — mesma separação das
+        # conversas. Número que não casou com escopo nenhum fica só com o staff.
+        numeros = [
+            numero_id
+            for escopo in services.escopos_do_usuario(usuario)
+            for numero_id in services.numeros_do_escopo(escopo)
+        ]
+        return self.queryset.filter(numero_id__in=numeros)
 
     def _contatos_dos_telefones(self, telefones):
         """
@@ -763,8 +781,22 @@ class DisparoViewSet(viewsets.ModelViewSet):
             encontrados.append(contato)
         return encontrados
 
+    def _exigir_numero_do_escopo(self, numero):
+        """Disparar PELO número do outro setor faria o cliente responder para lá."""
+        usuario = self.request.user
+        if usuario.is_staff or numero is None:
+            return
+        permitidos = [
+            numero_id
+            for escopo in services.escopos_do_usuario(usuario)
+            for numero_id in services.numeros_do_escopo(escopo)
+        ]
+        if permitidos and numero.id not in permitidos:
+            raise PermissionDenied('Esse número é de outro atendimento.')
+
     def perform_create(self, serializer):
-        self._exigir_gestor()
+        self._exigir_atendimento()
+        self._exigir_numero_do_escopo(serializer.validated_data.get('numero'))
         contatos_ids = serializer.validated_data.pop('contatos_ids', [])
         telefones = serializer.validated_data.pop('telefones', [])
         contatos = list(Contato.objects.filter(id__in=contatos_ids, ativo=True))
@@ -788,7 +820,7 @@ class DisparoViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def enviar(self, request, pk=None):
         """Põe o disparo na fila do Celery. Também é o 'continuar' de um pausado."""
-        self._exigir_gestor()
+        self._exigir_atendimento()
         disparo = self.get_object()
         if disparo.status in ('CONCLUIDO', 'CANCELADO'):
             return Response(
@@ -809,7 +841,7 @@ class DisparoViewSet(viewsets.ModelViewSet):
         A task relê o status a cada destinatário, então o envio para na próxima
         volta do laço — não é preciso revogar nada no Celery.
         """
-        self._exigir_gestor()
+        self._exigir_atendimento()
         disparo = self.get_object()
         if disparo.status != 'ENVIANDO':
             return Response({'detail': 'Só dá para pausar um disparo em andamento.'},
@@ -822,7 +854,7 @@ class DisparoViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def cancelar(self, request, pk=None):
         """Encerra de vez. Quem já recebeu, recebeu — não há como desfazer envio."""
-        self._exigir_gestor()
+        self._exigir_atendimento()
         disparo = self.get_object()
         disparo.status = 'CANCELADO'
         disparo.detalhe_status = 'Cancelado manualmente.'

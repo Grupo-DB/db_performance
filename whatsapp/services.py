@@ -23,10 +23,17 @@ TENTATIVAS_MAXIMAS = 3
 # RH não são assunto de quem atende chamado de TI, e vice-versa.
 #
 # Por grupo do Django (django.contrib.auth.Group):
-#   RHWhatsapp / TIWhatsapp  → atendente: vê as conversas do SEU número que
-#                              estão com ele ou ainda SEM DONO (para assumir).
-#   GestorWhatsapp           → gestor do RH: vê todas as conversas do RH.
-#   GestorWhatsappTI         → gestor da TI: vê todas as conversas da TI.
+#   RHWhatsapp    → atendente do RH: vê só as conversas do número do RH que
+#                   estão COM ELE ou ainda SEM DONO (para assumir). O RH trata
+#                   de atestado, salário e desligamento — assunto que não é do
+#                   colega de fila.
+#   TIWhatsapp    → atendente da TI: vê TODAS as conversas do número da TI. O
+#                   chamado de TI é da equipe, e quem pega é quem está livre.
+#   GestorWhatsapp   → gestor do RH: todas as conversas do RH.
+#   GestorWhatsappTI → gestor da TI: todas as conversas da TI.
+#
+# `compartilhado` é o que separa os dois comportamentos: ligado, o atendimento
+# inteiro é visível para a equipe daquele número.
 #
 # Quem não está em nenhum desses grupos continua na regra antiga (as filas de
 # que participa), para ninguém ficar sem atendimento por cadastro não feito.
@@ -35,9 +42,9 @@ TENTATIVAS_MAXIMAS = 3
 # escopo não casaria com número nenhum.
 ESCOPOS = {
     'RH': {'gestor': 'GestorWhatsapp', 'atendentes': 'RHWhatsapp',
-           'apelidos': ('RH', 'Recursos Humanos')},
+           'apelidos': ('RH', 'Recursos Humanos'), 'compartilhado': False},
     'TI': {'gestor': 'GestorWhatsappTI', 'atendentes': 'TIWhatsapp',
-           'apelidos': ('TI', 'Atendimento', 'Setor TI')},
+           'apelidos': ('TI', 'Atendimento', 'Setor TI'), 'compartilhado': True},
 }
 
 # Mantido para o resto do código (disparo em massa, admin): gestor de QUALQUER
@@ -105,6 +112,11 @@ def escopo_da_conversa(conversa) -> str:
     return ''
 
 
+def escopo_compartilhado(escopo: str) -> bool:
+    """TI: a equipe toda enxerga o atendimento. RH: cada um vê o que é seu."""
+    return bool(ESCOPOS.get(escopo, {}).get('compartilhado'))
+
+
 def escopos_do_usuario(usuario) -> dict:
     """`{'RH': 'gestor'}` / `{'TI': 'atendente'}` — vazio para quem está fora dos grupos."""
     if not usuario or not usuario.is_authenticated:
@@ -161,7 +173,7 @@ def filtro_de_conversas(usuario):
             # inteiro para todo mundo, que é o defeito que isto veio corrigir.
             logger.warning('Escopo %s do WhatsApp não casou com nenhum NumeroNegocio.', escopo)
             pela_fila = Q(fila__membros=usuario)
-            if papel != 'gestor':
+            if papel != 'gestor' and not escopo_compartilhado(escopo):
                 pela_fila &= (Q(responsavel=usuario) | Q(responsavel__isnull=True))
             filtro |= pela_fila
             continue
@@ -170,7 +182,7 @@ def filtro_de_conversas(usuario):
         if padrao_id in numeros:
             do_escopo |= Q(numero__isnull=True)
 
-        if papel == 'gestor':
+        if papel == 'gestor' or escopo_compartilhado(escopo):
             filtro |= do_escopo
         else:
             filtro |= do_escopo & (Q(responsavel=usuario) | Q(responsavel__isnull=True))
@@ -212,10 +224,12 @@ def usuarios_para_avisar(conversa):
 
     cfg = ESCOPOS[escopo]
     alvo = Q(groups__name=cfg['gestor'])
+    if conversa.fila_id and (escopo_compartilhado(escopo) or not conversa.responsavel_id):
+        # TI: o chamado é da equipe, todos são avisados. RH: só enquanto está sem
+        # dono — depois de assumido o aviso é de quem assumiu.
+        alvo |= Q(filas_whatsapp=conversa.fila_id, groups__name=cfg['atendentes'])
     if conversa.responsavel_id:
         alvo |= Q(pk=conversa.responsavel_id)
-    elif conversa.fila_id:
-        alvo |= Q(filas_whatsapp=conversa.fila_id, groups__name=cfg['atendentes'])
     return list(User.objects.filter(is_active=True).filter(alvo).distinct())
 
 
@@ -257,7 +271,7 @@ def pode_atender(usuario, conversa) -> bool:
         papel = papeis.get(escopo)
         if papel is None:
             return False                     # atendimento do outro número
-        if papel == 'gestor':
+        if papel == 'gestor' or escopo_compartilhado(escopo):
             return True
         return conversa.responsavel_id in (None, usuario.pk)
 
@@ -267,7 +281,7 @@ def pode_atender(usuario, conversa) -> bool:
         return False
     # Atendente dos grupos novos, com o número ainda sem escopo: vale a regra
     # pessoal, que não depende do cadastro do número.
-    if papeis:
+    if papeis and not any(escopo_compartilhado(e) for e in papeis):
         return conversa.responsavel_id in (None, usuario.pk)
     return True
 
