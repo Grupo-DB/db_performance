@@ -42,8 +42,14 @@ class IndicadorBoletim(models.Model):
     ]
 
     # A data que joga a análise numa semana. `Analise.data` é auto_now — ela muda a
-    # cada gravação, então NÃO serve de data do ensaio. A coleta é o que interessa
-    # ao boletim: é a semana em que o material foi produzido.
+    # cada gravação, então NÃO serve de data do ensaio.
+    #
+    # O padrão é a ENTRADA da amostra no laboratório (25/08/2026, decisão do
+    # laboratório). Era a coleta, com o argumento de ser a semana em que o material
+    # foi produzido; na prática a coleta é digitada à mão, falta em amostra antiga e
+    # às vezes está a semanas da análise — a entrada é o que o laboratório usa para
+    # dizer de que semana é o resultado. A queda para a coleta continua existindo
+    # (ver `_data_de_referencia`), para amostra sem entrada não desaparecer.
     DATA_COLETA = 'data_coleta'
     DATA_ENTRADA = 'data_entrada'
     DATA_FINALIZADA = 'finalizada_at'
@@ -117,7 +123,7 @@ class IndicadorBoletim(models.Model):
         help_text='Restringe a produtos específicos. Vazio = qualquer produto que passe nos '
                   'demais filtros (mais seguro, porque o nome do produto na amostra varia).',
     )
-    campo_data = models.CharField(max_length=20, choices=DATA_CHOICES, default=DATA_COLETA)
+    campo_data = models.CharField(max_length=20, choices=DATA_CHOICES, default=DATA_ENTRADA)
 
     # ── Como apresentar e cobrar ─────────────────────────────────────────────
     unidade = models.CharField(max_length=20, blank=True, default='%')
