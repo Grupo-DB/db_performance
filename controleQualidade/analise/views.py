@@ -82,6 +82,7 @@ FILTROS_SUPORTADOS = sorted(
      'local_coleta', 'tipo_amostra', 'produto_ids', 'material', 'fornecedor',
      'finalidade', 'tipo_amostragem', 'tipo', 'subtipo', 'periodo_turno', 'reter']
     + list(CAMPOS_TEXTO_AMOSTRA)
+    + [f'{c}_preenchimento' for c in CAMPOS_TEXTO_AMOSTRA]
     + [f'{c}_inicio' for c in CAMPOS_DATA_AMOSTRA]
     + [f'{c}_fim' for c in CAMPOS_DATA_AMOSTRA]
 )
@@ -777,6 +778,24 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(q)
             else:
                 qs = qs.filter(**{f'amostra__{campo}__icontains': valor})
+
+        # Preenchimento do campo, independente do que ele contém: `<chave>_preenchimento`
+        # vale 'preenchido' (só quem tem algo escrito) ou 'vazio' (só quem não tem).
+        # Existe porque procurar por trecho exige adivinhar o trecho — quem quer "as
+        # análises que TÊM observação" não tem o que digitar. Casado com o seletor ao
+        # lado de cada campo de texto nos Relatórios Dinâmicos.
+        for chave, campo in CAMPOS_TEXTO_AMOSTRA.items():
+            modo = data.get(f'{chave}_preenchimento')
+            if modo not in ('preenchido', 'vazio'):
+                continue
+            # NULL e '' são a mesma coisa para quem preenche a ficha. Só-espaço não
+            # aparece em nenhum dos três campos hoje (conferido nas 946 análises), por
+            # isso não entra um regex aqui.
+            sem_conteudo = (
+                Q(**{f'amostra__{campo}__isnull': True})
+                | Q(**{f'amostra__{campo}__exact': ''})
+            )
+            qs = qs.filter(sem_conteudo) if modo == 'vazio' else qs.exclude(sem_conteudo)
 
         # Datas da amostra, sempre como intervalo <chave>_inicio / <chave>_fim.
         for chave, campo in CAMPOS_DATA_AMOSTRA.items():
