@@ -51,7 +51,10 @@ class Amostra(models.Model):
     reter = models.BooleanField(default=True) #se a amostra foi retida ou não
     data_coleta = models.DateField(null=True, blank=True)
     data_entrada = models.DateField(null=True, blank=True)
-    numero = models.CharField(max_length=255, null=False, blank=False)
+    # unique: o número é atribuído pelo servidor (controleQualidade/amostra/numeracao.py).
+    # O índice é a última linha de defesa contra duplicata — e é ele que faz a trava do
+    # `SELECT ... FOR UPDATE` pegar só a faixa do prefixo em vez da tabela inteira.
+    numero = models.CharField(max_length=255, null=False, blank=False, unique=True)
     tipo_amostra = models.CharField(max_length=255, null=True, blank=True)
     subtipo = models.CharField(max_length=255, null=True, blank=True)
     produto_amostra = models.ForeignKey(ProdutoAmostra, null=True, blank=True, on_delete=models.RESTRICT, related_name='amostra') 

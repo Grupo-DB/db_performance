@@ -33,6 +33,15 @@ class AmostraImagemSerializer(serializers.ModelSerializer):
         return None
 
 class AmostraSerializer(serializers.ModelSerializer):
+    # `numero` é declarado à mão para ficar SEM o UniqueValidator que o
+    # ModelSerializer criaria a partir do `unique=True` do model.
+    # Motivo: no POST o número que chega do navegador é só a prévia do
+    # formulário e é DESCARTADO — quem numera é `AmostraViewSet.perform_create`
+    # (ver controleQualidade/amostra/numeracao.py). Com o validador, uma prévia
+    # velha ("cal 00.0440" já usado) devolveria 400 em vez de a amostra nascer
+    # com o próximo número livre. A duplicata na EDIÇÃO é barrada no validate()
+    # abaixo, e o índice único do banco fecha a porta nos dois casos.
+    numero = serializers.CharField(max_length=255, required=False, allow_blank=True, validators=[])
     ordem = serializers.PrimaryKeyRelatedField(queryset=Ordem.objects.all(), write_only=True, required=False, allow_null=True)
     ordem_detalhes = OrdemSerializer(source='ordem', read_only=True)
     expressa =  serializers.PrimaryKeyRelatedField(queryset=OrdemExpressa.objects.all(), write_only=True, required=False, allow_null=True)
@@ -48,6 +57,25 @@ class AmostraSerializer(serializers.ModelSerializer):
     class Meta:
         model = Amostra
         fields = '__all__'
+
+    def validate(self, attrs):
+        """Na edição, impede trocar o número por um que já exista.
+
+        Só na edição: no cadastro o valor recebido é ignorado (ver o comentário
+        do campo `numero`). A comparação é `iexact` porque a collation do MySQL
+        é insensível a acento e caixa — para o índice único 'CAL 00.0440' e
+        'cal 00.0440' são o mesmo número.
+        """
+        numero = attrs.get('numero')
+        if numero and self.instance is not None:
+            ja_existe = (Amostra.objects
+                         .filter(numero__iexact=numero.strip())
+                         .exclude(pk=self.instance.pk)
+                         .exists())
+            if ja_existe:
+                raise serializers.ValidationError(
+                    {'numero': f'Já existe outra amostra com o número {numero}.'})
+        return attrs
 
     def create(self, validated_data):
         uploaded_images = validated_data.pop('uploaded_images', [])

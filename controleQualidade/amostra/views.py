@@ -6,9 +6,12 @@ from django.http import JsonResponse
 from .models import Amostra, TipoAmostra, ProdutoAmostra, AmostraImagem, GarantiaProduto
 from .serializers import AmostraSerializer, TipoAmostraSerializer, ProdutoAmostraSerializer, AmostraImagemSerializer, GarantiaProdutoSerializer
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
+from django.db import transaction
 import pandas as pd
 
 from controleQualidade.periodo_listagem import filtro_periodo, limite_periodo
+from .numeracao import proximo_sequencial, reservar_numero
 
 class TipoAmostraViewSet(viewsets.ModelViewSet):
     queryset = TipoAmostra.objects.all()
@@ -104,6 +107,31 @@ class GarantiaProdutoViewSet(viewsets.ModelViewSet):
 class AmostraViewSet(viewsets.ModelViewSet):
     queryset = Amostra.objects.all()
     serializer_class = AmostraSerializer
+
+    def perform_create(self, serializer):
+        """Numera a amostra AQUI, ignorando o número que veio do formulário.
+
+        O `numero` do POST é a prévia que a tela mostrou quando o material foi
+        escolhido — pode ter minutos ou dias de idade e já pertencer a outra
+        amostra (era a origem das duplicatas de "cal 00.0440", ver
+        controleQualidade/amostra/numeracao.py). O número definitivo é reservado
+        e gravado na MESMA transação: `reservar_numero` deixa as linhas do
+        prefixo travadas até o commit, então dois cadastros simultâneos do mesmo
+        material saem com números diferentes em vez de esperarem a sorte.
+
+        Quem chamou recebe o número real no corpo da resposta — é ele que a tela
+        deve exibir, não a prévia.
+        """
+        with transaction.atomic():
+            numero = reservar_numero(
+                serializer.validated_data.get('material'),
+                numero_informado=serializer.validated_data.get('numero'),
+            )
+            if not numero:
+                raise ValidationError(
+                    {'numero': 'Informe o material da amostra para o número ser gerado.'})
+            serializer.save(numero=numero)
+
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -186,29 +214,22 @@ class AmostraViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='proximo-sequencial-nome/(?P<material_nome>[^/.]+)')
     def proximo_sequencial_nome(self, request, material_nome=None):
+        """PRÉVIA do próximo sequencial, para a tela mostrar antes de gravar.
+
+        Não reserva nada: entre esta consulta e o POST outra pessoa pode levar o
+        número. Quem define o número da amostra é `perform_create`; aqui é só
+        para o campo "Número" do formulário não ficar vazio.
+
+        A leitura (`values_list` + `sequencial_de`) mora em numeracao.py para
+        prévia e gravação nunca divergirem.
+        """
         try:
             # Decodifica o nome do material (case de caracteres especiais na URL)
             import urllib.parse
             material_nome = urllib.parse.unquote(material_nome)
-            
-            # Busca todas as amostras que começam com o nome do material
-            amostras = Amostra.objects.filter(numero__istartswith=material_nome)
-            
-            sequenciais = []
-            for amostra in amostras:
-                try:
-                    # Exemplo: 'Calcário 08.392' -> pega '08.392', remove ponto, converte para int
-                    numero_parts = amostra.numero.split(' ')
-                    if len(numero_parts) >= 2:
-                        seq_str = numero_parts[-1].replace('.', '')
-                        if seq_str.isdigit():
-                            sequenciais.append(int(seq_str))
-                except Exception:
-                    continue
-            
-            proximo = max(sequenciais) + 1 if sequenciais else 1
-            return Response(proximo)
-            
+
+            return Response(proximo_sequencial(material_nome))
+
         except Exception as e:
             # Log do erro para debug
             import logging
