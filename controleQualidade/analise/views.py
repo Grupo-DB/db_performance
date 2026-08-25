@@ -697,23 +697,24 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             qs = qs.filter(classificacao__icontains=classificacao)
 
         # Filtros via Amostra
+        # Escolha em lista (multiselect) casa por IGUALDADE; texto digitado continua
+        # casando por trecho. Era `icontains` nos dois casos, e aí escolher o material
+        # 'Cal' trazia junto os 428 'Calcário' (215 viravam 643), 'Fábrica I' trazia
+        # 'Fábrica II' e 'Fábrica III' (159 viravam 393) e o fornecedor 'DB' trazia
+        # 'DB ATM'. As opções da tela saem dos valores que existem na base, então o que
+        # ela manda é sempre o texto inteiro — `__in` é o casamento certo, e é o que
+        # tipo_amostra/finalidade/tipo/subtipo já faziam.
         laboratorio = data.get('laboratorio')
         if laboratorio:
             if isinstance(laboratorio, list):
-                q = Q()
-                for lab in laboratorio:
-                    q |= Q(amostra__laboratorio__icontains=lab)
-                qs = qs.filter(q)
+                qs = qs.filter(amostra__laboratorio__in=laboratorio)
             else:
                 qs = qs.filter(amostra__laboratorio__icontains=laboratorio)
 
         local_coleta = data.get('local_coleta')
         if local_coleta:
             if isinstance(local_coleta, list):
-                q = Q()
-                for loc in local_coleta:
-                    q |= Q(amostra__local_coleta__icontains=loc)
-                qs = qs.filter(q)
+                qs = qs.filter(amostra__local_coleta__in=local_coleta)
             else:
                 qs = qs.filter(amostra__local_coleta__icontains=local_coleta)
 
@@ -731,20 +732,14 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         material = data.get('material')
         if material:
             if isinstance(material, list):
-                q = Q()
-                for mat in material:
-                    q |= Q(amostra__material__icontains=mat)
-                qs = qs.filter(q)
+                qs = qs.filter(amostra__material__in=material)
             else:
                 qs = qs.filter(amostra__material__icontains=material)
 
         fornecedor = data.get('fornecedor')
         if fornecedor:
             if isinstance(fornecedor, list):
-                q = Q()
-                for f in fornecedor:
-                    q |= Q(amostra__fornecedor__icontains=f)
-                qs = qs.filter(q)
+                qs = qs.filter(amostra__fornecedor__in=fornecedor)
             else:
                 qs = qs.filter(amostra__fornecedor__icontains=fornecedor)
 
