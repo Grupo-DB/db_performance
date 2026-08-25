@@ -12,9 +12,10 @@ garantias que essa mudança precisa manter:
 3. na EDIÇÃO, apontar para um número de outra amostra é 400, não duplicata.
 
     venv/bin/python manage.py test controleQualidade.amostra.tests \
-        --settings=db_performance.settings_test
+        --settings=db_performance.settings_teste_projeto
 
-(o --settings é obrigatório: ver db_performance/settings_test.py)
+(o --settings é obrigatório: sem ele o test runner cria banco de teste no
+MySQL de PRODUÇÃO — ver db_performance/settings_teste_projeto.py)
 """
 import copy
 from io import StringIO
