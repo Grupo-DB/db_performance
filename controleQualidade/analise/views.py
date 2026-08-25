@@ -75,6 +75,21 @@ CAMPOS_DATA_AMOSTRA = {
 # tela conseguir avisar quando manda um filtro que este servidor ainda não conhece —
 # sem isso, um backend desatualizado devolveria a lista inteira como se tivesse
 # filtrado.
+def _mesmo_ensaio(descricao, nome_procurado):
+    """
+    Descrição do ensaio bate com o nome procurado? Comparação EXATA (sem caixa/espaços).
+
+    Era `nome.lower() in descricao.lower()`, e o "in" fazia `(Análise) - CaO` capturar
+    `(Análise) - CaO Disponível`: o cartão de CaO do dash de qualidade saía com o título
+    e os valores do CaO Disponível, e o cálculo composto de CaO (que só é procurado
+    depois, no fallback em AnaliseCalculo) nunca chegava a ser consultado. Conferido nas
+    946 análises: das oito descrições que o dash procura, `(Análise) - CaO` é a ÚNICA com
+    colisão de trecho — as outras sete casam só com elas mesmas, então a troca por
+    igualdade não mexe nelas. Mesma armadilha do casamento por nome dos laudos.
+    """
+    return (descricao or '').strip().lower() == (nome_procurado or '').strip().lower()
+
+
 FILTROS_SUPORTADOS = sorted(
     ['data_inicio', 'data_fim', 'finalizada_inicio', 'finalizada_fim',
      'aprovada_inicio', 'aprovada_fim', 'finalizada', 'aprovada', 'laudo',
@@ -437,7 +452,7 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                                     # Verificar se corresponde aos critérios (usar OR, não AND)
                                     if ensaio_ids and ensaio.get('id') in ensaio_ids:
                                         match_found = True
-                                    elif ensaio_nome and ensaio_nome.lower() in ensaio.get('descricao', '').lower():
+                                    elif ensaio_nome and _mesmo_ensaio(ensaio.get('descricao'), ensaio_nome):
                                         match_found = True
                                     
                                     if match_found:
@@ -1047,7 +1062,7 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                         match = False
                         if ensaio_id_filtro and ensaio.get('id') == int(ensaio_id_filtro):
                             match = True
-                        if ensaio_nome_filtro and ensaio_nome_filtro.lower() in (ensaio.get('descricao') or '').lower():
+                        if ensaio_nome_filtro and _mesmo_ensaio(ensaio.get('descricao'), ensaio_nome_filtro):
                             match = True
 
                         if not match:
