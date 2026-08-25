@@ -96,6 +96,17 @@ def _numero_padrao_id():
     return padrao.id if padrao else None
 
 
+def escopo_do_numero(numero_id) -> str:
+    """'RH' / 'TI' / '' quando o número não casa com escopo nenhum."""
+    numero_id = numero_id or _numero_padrao_id()
+    if numero_id is None:
+        return ''
+    for escopo in ESCOPOS:
+        if numero_id in numeros_do_escopo(escopo):
+            return escopo
+    return ''
+
+
 def escopo_da_conversa(conversa) -> str:
     """
     'RH' / 'TI' / '' quando o número da conversa não casa com escopo nenhum.
@@ -103,13 +114,7 @@ def escopo_da_conversa(conversa) -> str:
     Conversa anterior ao 2º número não tem `numero` preenchido: ela é do
     atendimento padrão, não de todo mundo.
     """
-    numero_id = conversa.numero_id or _numero_padrao_id()
-    if numero_id is None:
-        return ''
-    for escopo in ESCOPOS:
-        if numero_id in numeros_do_escopo(escopo):
-            return escopo
-    return ''
+    return escopo_do_numero(conversa.numero_id)
 
 
 def escopo_compartilhado(escopo: str) -> bool:
@@ -284,6 +289,129 @@ def pode_atender(usuario, conversa) -> bool:
     if papeis and not any(escopo_compartilhado(e) for e in papeis):
         return conversa.responsavel_id in (None, usuario.pk)
     return True
+
+
+# ── Telefone: o mesmo celular escrito de várias formas ───────────────────────
+#
+# A Meta devolve o `wa_id` na forma canônica DELA, e para o Brasil essa forma
+# nem sempre traz o nono dígito. A agenda, importada de .vcf, tem número com e
+# sem o 55. Comparar a string crua faz o cliente que responde a um template
+# nascer numa conversa NOVA, com o histórico do atendimento partido em dois —
+# que é exatamente o defeito relatado pelo RH.
+
+def so_digitos(telefone) -> str:
+    return ''.join(c for c in str(telefone or '') if c.isdigit())
+
+
+def variantes_telefone(telefone) -> list:
+    """
+    Todas as formas com que ESTE telefone pode estar gravado no banco.
+
+    Duas transformações, e só elas: pôr/tirar o `55` e pôr/tirar o nono dígito.
+
+    O nono dígito só entra em CELULAR — assinante de 8 dígitos começando em 6..9.
+    Fixo começa em 2..5, e enfiar um 9 num fixo produziria o número de OUTRA
+    PESSOA: 54 3333-4444 (fixo) viraria 54 9 3333-4444, que existe e é de outro
+    alguém. Casar a conversa errada é bem pior que abrir uma conversa a mais,
+    então na dúvida não se expande — é por isso que número que não tem forma
+    brasileira (DDD ou assinante fora do padrão) sai daqui como entrou.
+    """
+    digitos = so_digitos(telefone)
+    if not digitos:
+        return []
+
+    nacional = digitos[2:] if digitos.startswith('55') and len(digitos) in (12, 13) else digitos
+    ddd, assinante = nacional[:2], nacional[2:]
+    if not ('11' <= ddd <= '99'):
+        return [digitos]
+
+    if len(assinante) == 9 and assinante[0] == '9' and '6' <= assinante[1] <= '9':
+        curtas = {nacional, ddd + assinante[1:]}          # celular, sem o nono
+    elif len(assinante) == 8 and '6' <= assinante[0] <= '9':
+        curtas = {nacional, ddd + '9' + assinante}        # celular antigo, com o nono
+    elif len(assinante) == 8 and '2' <= assinante[0] <= '5':
+        curtas = {nacional}                               # fixo: só o 55 varia
+    else:
+        return [digitos]
+
+    formas = {digitos}
+    for forma in curtas:
+        formas.add(forma)
+        formas.add('55' + forma)
+    return sorted(formas)
+
+
+def chave_telefone(telefone) -> str:
+    """
+    Uma forma só por celular, para agrupar (agenda, contagens).
+
+    É a mais longa das variantes — com o 55 e com o nono dígito. Não serve para
+    ENVIAR (para isso vale o que a Meta devolveu), só para dizer "estes dois
+    registros são a mesma pessoa".
+    """
+    formas = variantes_telefone(telefone)
+    return max(formas, key=len) if formas else ''
+
+
+def filtro_telefone(telefone) -> Q:
+    """`Q` que casa a conversa deste contato, escrita como estiver."""
+    return Q(contato_telefone__in=variantes_telefone(telefone))
+
+
+# ── Quem é avisado de mensagem nova ──────────────────────────────────────────
+
+def membros_avisaveis(conversa) -> list:
+    """
+    Membros da fila que CONSEGUEM abrir esta conversa.
+
+    O aviso de mensagem nova ia para `fila.membros.all()` inteira, sem passar
+    pela visibilidade — então no RH, onde cada atendente só enxerga o que é dele
+    ou o que está sem dono, a colega recebia badge de conversa que ela nem abre.
+    Filtrar por `pode_ver` mantém a TI idêntica (lá o atendimento é compartilhado
+    e todo membro passa) e conserta o RH sem regra nova.
+    """
+    if not conversa.fila_id:
+        return []
+    return [m for m in conversa.fila.membros.all() if pode_ver(m, conversa)]
+
+
+def atendimento_pessoal_do_numero(numero_id) -> bool:
+    """
+    Neste número cada conversa tem dono (RH) ou é da equipe toda (TI)?
+
+    Número fora dos escopos cai em `False`: sem cadastro, o comportamento
+    continua o antigo, o compartilhado.
+    """
+    escopo = escopo_do_numero(numero_id)
+    return bool(escopo) and not escopo_compartilhado(escopo)
+
+
+def atendimento_pessoal(conversa) -> bool:
+    return atendimento_pessoal_do_numero(conversa.numero_id)
+
+
+def assumir_ao_responder(conversa, usuario) -> bool:
+    """
+    Quem responde passa a ser o responsável — só onde o atendimento é pessoal.
+
+    No RH o atendente respondia sem clicar em "Assumir", e a conversa continuava
+    com `responsavel` nulo: ficava marcada "Sem atendente" para a colega e seguia
+    gerando aviso para as duas, mesmo já estando sendo atendida. Na TI nada muda
+    de propósito — lá o chamado é da equipe e ninguém o toma para si ao responder.
+
+    `UPDATE` condicional em vez de ler-e-salvar: duas respostas no mesmo instante,
+    só a primeira leva.
+    """
+    from .models import Conversa
+
+    if conversa.responsavel_id or not atendimento_pessoal(conversa):
+        return False
+    assumidas = (Conversa.objects
+                 .filter(pk=conversa.pk, responsavel__isnull=True)
+                 .update(responsavel=usuario))
+    if assumidas:
+        conversa.responsavel = usuario
+    return bool(assumidas)
 
 
 def _filas_ativas(numero=None):

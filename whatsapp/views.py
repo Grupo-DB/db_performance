@@ -374,6 +374,7 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         )
         conversa.ultima_mensagem_em = timezone.now()
         conversa.save(update_fields=['ultima_mensagem_em'])
+        services.assumir_ao_responder(conversa, request.user)
 
         enviar_contato_whatsapp.delay(mensagem.id)
         return Response(MensagemSerializer(mensagem).data, status=status.HTTP_201_CREATED)
@@ -409,6 +410,10 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         # `ultima_mensagem_cliente_em` NÃO é tocado de propósito: template não
         # reabre a janela de 24h — só uma resposta do cliente reabre.
         conversa.save(update_fields=['ultima_mensagem_em'])
+        # Mandar template também é atender: nas filas pessoais (RH) quem mandou
+        # passa a ser o responsável, senão a conversa continua na pilha de
+        # "aguardando" enquanto alguém já falou com o cliente.
+        services.assumir_ao_responder(conversa, request.user)
 
         enviar_template_whatsapp.delay(mensagem.id, nome_template, idioma, componentes)
         return Response(MensagemSerializer(mensagem).data, status=status.HTTP_201_CREATED)
@@ -443,11 +448,16 @@ class ContatoViewSet(viewsets.ModelViewSet):
 
         # Uma volta só no banco: a linha mais recente de cada telefone é a
         # primeira, porque a ordenação desce por data.
+        # A chave é o telefone NORMALIZADO: o mesmo celular gravado com o nono
+        # dígito na agenda e sem ele na conversa daria duas linhas para a mesma
+        # pessoa, uma delas sem histórico.
         por_telefone: dict = {}
         for conversa in conversas.order_by('contato_telefone', '-created_at').distinct():
-            atual = por_telefone.get(conversa.contato_telefone)
+            chave = services.chave_telefone(conversa.contato_telefone)
+            atual = por_telefone.get(chave)
             if atual is None:
-                por_telefone[conversa.contato_telefone] = {
+                por_telefone[chave] = {
+                    'telefone': conversa.contato_telefone,
                     'nome': conversa.contato_nome or '',
                     'total_conversas': 1,
                     'ultima_conversa_id': conversa.id,
@@ -461,8 +471,8 @@ class ContatoViewSet(viewsets.ModelViewSet):
         linhas = []
         vistos = set()
         for contato in Contato.objects.filter(ativo=True):
-            de_conversa = por_telefone.get(contato.telefone)
-            vistos.add(contato.telefone)
+            de_conversa = por_telefone.get(services.chave_telefone(contato.telefone))
+            vistos.add(services.chave_telefone(contato.telefone))
             linhas.append({
                 'telefone': contato.telefone,
                 # O nome da agenda vence o do perfil do WhatsApp: é o nome que a
@@ -479,11 +489,11 @@ class ContatoViewSet(viewsets.ModelViewSet):
                 'janela_aberta': (de_conversa or {}).get('janela_aberta', False),
             })
 
-        for telefone, dados in por_telefone.items():
-            if telefone in vistos:
+        for chave, dados in por_telefone.items():
+            if chave in vistos:
                 continue
+            telefone = dados['telefone']
             linhas.append({
-                'telefone': telefone,
                 'nome': dados['nome'] or telefone,
                 'empresa': '',
                 'observacoes': '',
@@ -527,12 +537,19 @@ class ContatoViewSet(viewsets.ModelViewSet):
             )
 
         # Reaproveita conversa aberta em vez de criar outra: dois registros para o
-        # mesmo cliente partiriam o histórico em dois lugares.
+        # mesmo cliente partiriam o histórico em dois lugares. A busca é por todas
+        # as formas do telefone (com/sem o 55, com/sem o nono dígito) e presa ao
+        # número desta fila — a conversa que o contato tem aberta com o outro setor
+        # não é esta.
+        numero_da_fila = fila.numero or NumeroNegocio.objects.filter(
+            is_padrao=True, ativo=True).first()
         conversa = (Conversa.objects
-                    .filter(contato_telefone=telefone, status='ABERTA')
+                    .filter(services.filtro_telefone(telefone), status='ABERTA')
+                    .filter(Q(numero=numero_da_fila) | Q(numero__isnull=True))
                     .order_by('-created_at').first())
         if conversa is None:
-            contato = Contato.objects.filter(telefone=telefone).first()
+            contato = Contato.objects.filter(
+                telefone__in=services.variantes_telefone(telefone)).first()
             conversa = Conversa.objects.create(
                 contato_telefone=telefone,
                 contato_nome=(contato.nome if contato else ''),
@@ -541,8 +558,7 @@ class ContatoViewSet(viewsets.ModelViewSet):
                 # De qual número sai: o da fila quando ela é de um setor, senão o
                 # padrão. Sem isso a conversa nasceria sem número e a resposta iria
                 # pelo número do .env, que pode não ser o do setor.
-                numero=fila.numero or NumeroNegocio.objects.filter(
-                    is_padrao=True, ativo=True).first(),
+                numero=numero_da_fila,
                 # Nós iniciamos: não faz sentido mandar o menu de setores para
                 # quem foi procurado pela empresa.
                 estado_menu='EM_ATENDIMENTO',
@@ -620,6 +636,12 @@ class MensagemViewSet(viewsets.ModelViewSet):
             MensagemAnexo.objects.create(mensagem=mensagem, arquivo=anexo, mime_type=mime)
         conversa.ultima_mensagem_em = timezone.now()
         conversa.save(update_fields=['ultima_mensagem_em'])
+        # Responder é assumir — onde o atendimento é pessoal (RH). Ninguém clicava
+        # em "Assumir" antes de escrever, então a conversa seguia com `responsavel`
+        # nulo: aparecia "Sem atendente" para a colega e continuava gerando aviso
+        # para as duas, já estando atendida. Na TI nada muda: lá o chamado é da
+        # equipe e responder não o toma para si.
+        services.assumir_ao_responder(conversa, self.request.user)
         # Quem responde leu o que o cliente escreveu. Vale só para ele: o aviso do
         # colega é a leitura DELE, e some quando ele abrir a conversa.
         services.marcar_avisos_lidos(conversa, usuario=self.request.user)
@@ -763,10 +785,13 @@ class DisparoViewSet(viewsets.ModelViewSet):
             digitos = ''.join(c for c in str(bruto) if c.isdigit())
             if len(digitos) < 10:
                 continue
-            contato = Contato.objects.filter(telefone=digitos).first()
+            # Pelas variantes: o mesmo celular gravado com o nono dígito e sem
+            # ele viraria duas linhas na agenda, e o `unique` não pega isso.
+            contato = Contato.objects.filter(
+                telefone__in=services.variantes_telefone(digitos)).first()
             if contato is None:
                 nome = (Conversa.objects
-                        .filter(contato_telefone=digitos)
+                        .filter(services.filtro_telefone(digitos))
                         .exclude(contato_nome='')
                         .order_by('-created_at')
                         .values_list('contato_nome', flat=True)

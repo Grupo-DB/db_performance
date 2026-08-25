@@ -161,7 +161,7 @@ def _conversa_do_echo(telefone: str, numero, phone_number_id: str):
     A conversa a que este echo pertence, criando-a quando a empresa é que puxou
     o assunto pelo celular.
     """
-    qs = Conversa.objects.filter(contato_telefone=telefone)
+    qs = Conversa.objects.filter(services.filtro_telefone(telefone))
     if numero is not None:
         qs = qs.filter(Q(numero=numero) | Q(numero__isnull=True))
     conversa = qs.order_by('-created_at').first()
@@ -218,7 +218,13 @@ def _processar_mensagem_recebida(value: dict, msg: dict):
     # A busca é pelo PAR (telefone, número): o mesmo cliente escrevendo para o TI e
     # para o Comercial são dois atendimentos, não um. `numero` nulo é conversa
     # anterior ao cadastro dos números — ela continua sendo reaproveitada.
-    conversas_do_contato = Conversa.objects.filter(contato_telefone=telefone)
+    #
+    # E é por TODAS as formas do telefone, não pela string crua: o `wa_id` que a
+    # Meta manda aqui é a forma canônica DELA (no Brasil, às vezes sem o nono
+    # dígito), enquanto a conversa aberta por template nasceu com o telefone como
+    # está na agenda. Comparando cru, a resposta do cliente ao template abria um
+    # atendimento novo e partia o histórico em dois.
+    conversas_do_contato = Conversa.objects.filter(services.filtro_telefone(telefone))
     if numero is not None:
         conversas_do_contato = conversas_do_contato.filter(
             Q(numero=numero) | Q(numero__isnull=True))
@@ -230,11 +236,17 @@ def _processar_mensagem_recebida(value: dict, msg: dict):
             numero=numero,
             numero_negocio_id=phone_number_id,
         )
-    elif conversa.numero_id is None and numero is not None:
+    elif conversa.contato_telefone != telefone:
+        # Casou por variante: passa a gravar o `wa_id`. É para lá que a Meta
+        # entrega, então convergir agora evita que a próxima resposta tenha de
+        # casar por variante de novo — e é o número que o atendente vê na tela.
+        conversa.contato_telefone = telefone
+
+    if conversa.numero_id is None and numero is not None:
         # Conversa que existia antes dos números cadastrados: assume este.
         conversa.numero = numero
         conversa.numero_negocio_id = phone_number_id
-    elif conversa.status == 'ENCERRADA':
+    if conversa.status == 'ENCERRADA':
         conversa.status = 'ABERTA'
         conversa.estado_menu = 'AGUARDANDO_SETOR'
         conversa.tentativas_menu = 0
@@ -311,14 +323,21 @@ def _mensagem_citada(msg: dict):
 
 
 def _notificar_nova_mensagem(conversa: Conversa, preview: str):
-    if not conversa.fila_id:
-        return
+    """
+    Avisa quem CONSEGUE abrir a conversa, não a fila inteira.
+
+    Era `fila.membros.all()` cru: no RH, onde cada atendente só enxerga o que é
+    dele ou o que ainda não tem dono, isso mandava para a colega o aviso de uma
+    conversa que ela abre e leva 404 — o "está notificando pra Ana as minhas
+    conversas e vice-versa". Na TI o resultado é o mesmo de antes, porque lá o
+    atendimento é compartilhado e todo membro da fila passa no filtro.
+    """
     notificacoes = [
         WhatsAppNotificacao(
             conversa=conversa, usuario_notificado=membro,
             tipo='NOVA_MENSAGEM', mensagem=preview[:255],
         )
-        for membro in conversa.fila.membros.all()
+        for membro in services.membros_avisaveis(conversa)
     ]
     if notificacoes:
         WhatsAppNotificacao.objects.bulk_create(notificacoes)
@@ -609,8 +628,12 @@ def _conversa_para_disparo(destinatario, disparo):
     atendimento paralelo. Conversa nova nasce EM_ATENDIMENTO porque fomos nós que
     puxamos o assunto — mandar o menu de setores depois seria absurdo.
     """
+    # Pelo par (telefone, número), e por todas as formas do telefone: um aviso do
+    # RH não deve entrar na conversa que a pessoa tem aberta com a TI, e o
+    # telefone da agenda quase nunca está escrito como a Meta o devolve.
     conversa = (Conversa.objects
-                .filter(contato_telefone=destinatario.telefone, status='ABERTA')
+                .filter(services.filtro_telefone(destinatario.telefone), status='ABERTA')
+                .filter(Q(numero=disparo.numero) | Q(numero__isnull=True))
                 .order_by('-created_at').first())
     if conversa is not None:
         return conversa

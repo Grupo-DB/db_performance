@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 
+from . import services
 from .models import (
     Contato, Disparo, DisparoDestinatario, Fila, Conversa, Mensagem, MensagemAnexo,
     NumeroNegocio, WhatsAppNotificacao,
@@ -19,14 +20,28 @@ class FilaSerializer(serializers.ModelSerializer):
         queryset=User.objects.all(), source='membros', write_only=True,
         many=True, required=False,
     )
+    # Atendimento pessoal (RH) x compartilhado (TI). A tela usa isto para separar
+    # "aguardando atendimento" de "em atendimento": onde cada conversa tem dono,
+    # a pilha sem dono É o trabalho a fazer, e ela some no meio da lista.
+    atendimento_pessoal = serializers.SerializerMethodField()
 
     class Meta:
         model = Fila
         fields = [
             'id', 'nome', 'descricao', 'ativa', 'ordem', 'palavras_chave',
             'is_padrao', 'membros', 'membros_ids', 'criado_por', 'criado_em',
+            'atendimento_pessoal',
         ]
         read_only_fields = ['criado_por', 'criado_em']
+
+    def get_atendimento_pessoal(self, obj) -> bool:
+        # Memoizado no contexto da requisição: esta fila vem aninhada em CADA
+        # conversa da listagem, e resolver o escopo consulta os números da
+        # empresa — sem o cache seriam duas consultas por linha da lista.
+        cache = self.context.setdefault('_pessoal_por_numero', {})
+        if obj.numero_id not in cache:
+            cache[obj.numero_id] = services.atendimento_pessoal_do_numero(obj.numero_id)
+        return cache[obj.numero_id]
 
 
 class MensagemAnexoSerializer(serializers.ModelSerializer):
