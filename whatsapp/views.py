@@ -216,7 +216,14 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
     def reabrir(self, request, pk=None):
         conversa = self.get_object()
         conversa.status = 'ABERTA'
-        conversa.save(update_fields=['status'])
+        # Volta para a fila sem dono, como a reabertura pelo cliente (ver
+        # tasks._processar_mensagem_recebida): no RH o dono é o único que recebe
+        # aviso e enxerga a conversa, então manter quem encerrou dias atrás
+        # devolveria o atendimento reaberto para uma pessoa só. Quem reabriu
+        # continua vendo (conversa sem dono é visível para a equipe do número) e
+        # assume no botão, ou responde — responder já assume.
+        conversa.responsavel = None
+        conversa.save(update_fields=['status', 'responsavel'])
         return Response(ConversaDetailSerializer(conversa).data)
 
     @action(detail=False, methods=['get'])

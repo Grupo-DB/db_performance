@@ -186,9 +186,14 @@ def _conversa_do_echo(telefone: str, numero, phone_number_id: str):
     if conversa.status == 'ENCERRADA':
         # Retomada pelo celular: reabre EM_ATENDIMENTO, e não em
         # AGUARDANDO_SETOR como na volta pelo cliente — já tem gente falando.
+        #
+        # Sem dono, pelo mesmo motivo da volta pelo cliente: o echo não diz QUEM
+        # digitou no celular, então deixar a conversa com quem a encerrou antes
+        # esconderia dela a equipe inteira.
         conversa.status = 'ABERTA'
         conversa.estado_menu = 'EM_ATENDIMENTO'
-        campos += ['status', 'estado_menu']
+        conversa.responsavel = None
+        campos += ['status', 'estado_menu', 'responsavel']
     if conversa.fila_id is None and numero is not None:
         conversa.fila = numero.fila_padrao()
         campos.append('fila')
@@ -250,6 +255,16 @@ def _processar_mensagem_recebida(value: dict, msg: dict):
         conversa.status = 'ABERTA'
         conversa.estado_menu = 'AGUARDANDO_SETOR'
         conversa.tentativas_menu = 0
+        # Conversa que volta é atendimento NOVO: solta o dono anterior.
+        #
+        # No RH cada conversa tem dono, e dono é quem recebe o aviso e quem
+        # consegue abrir (services.usuarios_para_avisar / filtro_de_conversas).
+        # Mantendo o `responsavel` de quem encerrou dias atrás, o cliente que
+        # escrevia de novo virava badge de uma pessoa só — as colegas não eram
+        # avisadas e nem enxergavam a conversa para assumir. Zerando aqui, ela
+        # entra sem dono: a equipe do número toda é avisada e quem estiver livre
+        # assume, exatamente como numa conversa que nasce agora.
+        conversa.responsavel = None
     if not conversa.contato_nome and contato_nome:
         conversa.contato_nome = contato_nome
 

@@ -13,17 +13,21 @@ subir para exercitar as regras de visibilidade.
 SECRET_KEY = 'apenas-para-teste'
 DEBUG = False
 
+# `kanban` entra porque `ConversaDetailSerializer` conta as tarefas abertas a
+# partir do atendimento (`conversa.tarefas_kanban`): sem o app, qualquer teste que
+# passe pelo serializer quebra com AttributeError. Ele só depende de `auth`.
 INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.auth',
     'whatsapp',
+    'kanban',
 ]
 
 DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
 
 # As migrations do projeto são gitignored: as tabelas de teste saem direto dos
 # modelos, que é o que interessa aqui.
-MIGRATION_MODULES = {'whatsapp': None, 'auth': None, 'contenttypes': None}
+MIGRATION_MODULES = {'whatsapp': None, 'kanban': None, 'auth': None, 'contenttypes': None}
 
 USE_TZ = True
 DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
