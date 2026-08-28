@@ -8,10 +8,12 @@ Roda em sqlite de memória — NÃO usar o settings de produção:
 É teste de PERMISSÃO: um erro aqui vaza conversa de um setor para o outro, e o
 sintoma (alguém enxergando o que não devia) não aparece sozinho.
 """
-from django.contrib.auth.models import Group, User
-from django.test import TestCase
+from unittest import mock
 
-from whatsapp import services
+from django.contrib.auth.models import Group, User
+from django.test import TestCase, override_settings
+
+from whatsapp import graph_api, services
 from whatsapp.models import Conversa, Fila, NumeroNegocio, WhatsAppNotificacao
 
 
@@ -202,6 +204,108 @@ class TelefoneTest(TestCase):
         self.assertEqual(services.variantes_telefone(''), [])
         self.assertEqual(services.variantes_telefone(None), [])
         self.assertEqual(services.chave_telefone('abc'), '')
+
+
+class TelefoneParaEnvioTest(TestCase):
+    """
+    O 131026 de agosto/2026.
+
+    Contatos gravados sem o código do país. A Cloud API lê os dígitos da frente
+    como DDI, e o DDD 51 colide com o DDI do **Peru**: `51992393150` virava um
+    celular peruano bem formado, que a Meta aceitava e não conseguia entregar.
+    Só apareceu em DDD 51 porque o DDD precisava colidir com um DDI existente.
+    """
+
+    def test_celular_sem_ddi_ganha_o_55(self):
+        """O caso do RH: DDD 51 sem o 55 é lido como Peru."""
+        self.assertEqual(services.telefone_para_envio('51992393150'), '5551992393150')
+        self.assertEqual(services.telefone_para_envio('(51) 99239-3150'), '5551992393150')
+
+    def test_ddd_55_tambem_precisa_do_ddi(self):
+        """
+        Este passava por acaso: `55996294108` a Meta lê como Brasil porque o DDD
+        é 55, mas o que sobra tem 9 dígitos e não é número nenhum.
+        """
+        self.assertEqual(services.telefone_para_envio('55996294108'), '5555996294108')
+
+    def test_numero_ja_completo_nao_muda(self):
+        self.assertEqual(services.telefone_para_envio('5551992393150'), '5551992393150')
+        self.assertEqual(services.telefone_para_envio('555192393150'), '555192393150')
+        self.assertEqual(services.telefone_para_envio('555433334444'), '555433334444')
+
+    def test_estrangeiro_nao_ganha_ddi(self):
+        """Pôr 55 num alemão daria o telefone de outra pessoa."""
+        self.assertEqual(services.telefone_para_envio('4915112345678'), '4915112345678')
+        self.assertEqual(services.telefone_para_envio('12025550123'), '12025550123')
+
+    def test_ddd_inexistente_nao_ganha_ddi(self):
+        """
+        20 não é DDD brasileiro. Sem a lista de DDDs reais, um número americano
+        de 10 dígitos teria a mesma cara de um fixo daqui e ganharia o 55.
+        """
+        self.assertEqual(services.telefone_para_envio('2025550123'), '2025550123')
+
+    def test_vazio(self):
+        self.assertEqual(services.telefone_para_envio(''), '')
+        self.assertEqual(services.telefone_para_envio(None), '')
+
+    def test_outra_variante_alterna_o_nono_digito(self):
+        """A forma que o retry de 131026 tenta depois da falha."""
+        self.assertEqual(services.outra_variante_de_envio('5551992393150'), '555192393150')
+        self.assertEqual(services.outra_variante_de_envio('555192393150'), '5551992393150')
+        self.assertEqual(services.outra_variante_de_envio('51992393150'), '555192393150')
+
+    def test_fixo_nao_tem_variante(self):
+        """Enfiar um 9 num fixo produz o celular de outra pessoa."""
+        self.assertEqual(services.outra_variante_de_envio('555433334444'), '')
+        self.assertEqual(services.outra_variante_de_envio('4915112345678'), '')
+
+
+@override_settings(WHATSAPP_API_VERSION='v21.0',
+                   WHATSAPP_PHONE_NUMBER_ID='999',
+                   WHATSAPP_ACCESS_TOKEN='token-de-teste')
+class DestinoNormalizadoNoEnvioTest(TestCase):
+    """
+    O `to` que sai na requisição, não o que está gravado.
+
+    Este é o teste que fecha o buraco: mesmo que uma conversa antiga guarde o
+    número sem DDI, nenhuma requisição pode sair assim. Normalizar em cada
+    chamador seria esquecer um — por isso a garantia está no `graph_api`, que é
+    por onde toda saída passa.
+    """
+
+    def _to_enviado(self, funcao, *args, **kwargs):
+        capturado = {}
+
+        def falso_post(url, json=None, headers=None, timeout=None, **_):
+            capturado['to'] = (json or {}).get('to')
+
+            class Resposta:
+                @staticmethod
+                def raise_for_status():
+                    return None
+
+                @staticmethod
+                def json():
+                    return {'messages': [{'id': 'wamid.teste'}]}
+
+            return Resposta()
+
+        with mock.patch.object(graph_api.requests, 'post', falso_post):
+            funcao(*args, **kwargs)
+        return capturado['to']
+
+    def test_texto_sai_com_ddi(self):
+        self.assertEqual(
+            self._to_enviado(graph_api.enviar_mensagem_texto, '51992393150', 'oi'),
+            '5551992393150',
+        )
+
+    def test_template_sai_com_ddi(self):
+        self.assertEqual(
+            self._to_enviado(graph_api.enviar_template, '51992393150', 'abertura_rh'),
+            '5551992393150',
+        )
 
 
 class RespostaAoTemplateTest(TestCase):

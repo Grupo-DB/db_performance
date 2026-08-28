@@ -358,6 +358,89 @@ def _notificar_nova_mensagem(conversa: Conversa, preview: str):
         WhatsAppNotificacao.objects.bulk_create(notificacoes)
 
 
+# A Meta devolve este código quando não consegue entregar a mensagem ao
+# destinatário: número que não tem conta no WhatsApp na forma exata em que foi
+# mandado. Quase sempre, aqui, é o nono dígito.
+CODIGO_NAO_ENTREGAVEL = 131026
+
+
+def _fixar_telefone_que_entregou(conversa, telefone: str):
+    """
+    Grava na conversa a forma que a Meta aceitou.
+
+    Só é chamado quando o envio veio de um retry: aí já se sabe que a string
+    gravada NÃO entrega, então trocá-la pela que a Meta aceitou não perde nada e
+    faz o próximo envio nascer certo — em vez de o mesmo contato falhar todo dia.
+    """
+    if telefone and conversa.contato_telefone != telefone:
+        conversa.contato_telefone = telefone
+        conversa.save(update_fields=['contato_telefone'])
+
+
+def _retentou_em_outra_variante(wa_message_id: str, status: dict) -> bool:
+    """
+    Reenvia uma vez na outra forma do número quando a Meta diz 131026.
+
+    A entrega falha de um jeito mudo: o POST volta 200 com id, e a recusa chega
+    minutos depois por webhook. Para o atendente isso é um "falhou" sem saída —
+    o RH reenviou o mesmo template três vezes para o mesmo contato antes de
+    alguém desconfiar do número.
+
+    Retentar aqui é barato porque a mensagem JÁ falhou: não há entrega a perder.
+    Uma vez só, marcada no `payload_bruto`, senão duas formas que ambas falham
+    ficariam se revezando para sempre.
+
+    Mídia e cartão de contato ficam de fora de propósito: o `media_id` daquele
+    upload já foi consumido e refazer a subida a partir daqui seria um segundo
+    caminho de envio para manter. Texto e template são o que o RH usa para
+    alcançar quem nunca respondeu, que é onde o defeito aparece.
+    """
+    codigos = {erro.get('code') for erro in status.get('errors') or []}
+    if CODIGO_NAO_ENTREGAVEL not in codigos:
+        return False
+
+    mensagem = (Mensagem.objects
+                .select_related('conversa')
+                .filter(wa_message_id=wa_message_id).first())
+    if mensagem is None:
+        return False
+
+    payload = dict(mensagem.payload_bruto or {})
+    if payload.get('retentativa_variante'):
+        return False
+
+    alternativa = services.outra_variante_de_envio(mensagem.conversa.contato_telefone)
+    if not alternativa or alternativa == mensagem.conversa.contato_telefone:
+        return False
+
+    if mensagem.template_nome:
+        reenviar = lambda: enviar_template_whatsapp.delay(  # noqa: E731
+            mensagem.id, mensagem.template_nome,
+            payload.get('idioma') or 'pt_BR', payload.get('componentes'),
+            telefone_alternativo=alternativa,
+        )
+    elif mensagem.tipo == 'TEXTO' and not mensagem.anexos.exists():
+        reenviar = lambda: enviar_mensagem_whatsapp.delay(  # noqa: E731
+            mensagem.id, telefone_alternativo=alternativa,
+        )
+    else:
+        return False
+
+    payload['retentativa_variante'] = alternativa
+    # Volta para PENDENTE: a bolha continua "enviando" em vez de piscar um erro
+    # que o próprio sistema está tratando. O `wa_message_id` sai porque o campo é
+    # único e o reenvio vai trazer outro.
+    Mensagem.objects.filter(pk=mensagem.pk).update(
+        payload_bruto=payload, status_entrega='PENDENTE', wa_message_id=None, erro_detalhe='',
+    )
+    logger.warning(
+        'WhatsApp 131026 em %s: retentando %s como %s',
+        wa_message_id, mensagem.conversa.contato_telefone, alternativa,
+    )
+    reenviar()
+    return True
+
+
 def _motivo_da_falha(status: dict) -> str:
     """
     Texto legível a partir do array `errors` do status.
@@ -383,6 +466,11 @@ def _processar_status(status: dict):
         'read': 'LIDA', 'failed': 'FALHOU',
     }.get(status.get('status'))
     if not novo_status:
+        return
+
+    # Antes de dar a mensagem por perdida: 131026 costuma ser a forma do número,
+    # e a outra variante ainda não foi tentada.
+    if novo_status == 'FALHOU' and _retentou_em_outra_variante(wa_message_id, status):
         return
 
     campos = {'status_entrega': novo_status}
@@ -451,7 +539,7 @@ def _marcar_falha(mensagem: Mensagem, exc: Exception, contexto: str):
 
 
 @shared_task
-def enviar_mensagem_whatsapp(mensagem_id: int):
+def enviar_mensagem_whatsapp(mensagem_id: int, telefone_alternativo: str = ''):
     """
     Entrega ao WhatsApp a mensagem que o atendente escreveu.
 
@@ -471,7 +559,9 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
         .prefetch_related('anexos')
         .get(id=mensagem_id)
     )
-    telefone = mensagem.conversa.contato_telefone
+    # `telefone_alternativo` só vem do retry de 131026: é a outra forma do mesmo
+    # celular (com/sem o nono dígito) depois de a gravada não ter entregado.
+    telefone = telefone_alternativo or mensagem.conversa.contato_telefone
     anexo = mensagem.anexos.first()
     texto_para_cliente = services.assinar_para_cliente(mensagem.texto, mensagem)
     # Só cita o que a Meta conhece: mensagem nossa que ainda não saiu (ou anterior
@@ -486,6 +576,7 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
                 graph_api.enviar_mensagem_texto(
                 telefone, texto_para_cliente, citando=citando, numero=mensagem.conversa.numero),
             )
+            _fixar_telefone_que_entregou(mensagem.conversa, telefone_alternativo)
         except Exception as exc:
             _marcar_falha(mensagem, exc, 'Falha ao enviar texto do WhatsApp')
         return
@@ -534,7 +625,8 @@ def enviar_mensagem_whatsapp(mensagem_id: int):
 
 
 @shared_task
-def enviar_template_whatsapp(mensagem_id: int, nome_template: str, idioma: str, componentes: list | None):
+def enviar_template_whatsapp(mensagem_id: int, nome_template: str, idioma: str,
+                             componentes: list | None, telefone_alternativo: str = ''):
     """
     Envia um template aprovado — o único caminho fora da janela de 24h.
 
@@ -545,10 +637,12 @@ def enviar_template_whatsapp(mensagem_id: int, nome_template: str, idioma: str, 
     mensagem = Mensagem.objects.select_related('conversa').get(id=mensagem_id)
     try:
         resposta = graph_api.enviar_template(
-            mensagem.conversa.contato_telefone, nome_template, idioma, componentes,
+            telefone_alternativo or mensagem.conversa.contato_telefone,
+            nome_template, idioma, componentes,
             numero=mensagem.conversa.numero,
         )
         _marcar_enviada(mensagem, resposta)
+        _fixar_telefone_que_entregou(mensagem.conversa, telefone_alternativo)
     except Exception as exc:
         _marcar_falha(mensagem, exc, 'Falha ao enviar template do WhatsApp')
 
@@ -651,9 +745,15 @@ def _conversa_para_disparo(destinatario, disparo):
                 .filter(Q(numero=disparo.numero) | Q(numero__isnull=True))
                 .order_by('-created_at').first())
     if conversa is not None:
+        # Mesma correção do `iniciar_conversa`: a conversa pode ter nascido com o
+        # número sem DDI, e é o dela que vai no `to`.
+        canonico = services.telefone_para_envio(conversa.contato_telefone)
+        if canonico != conversa.contato_telefone:
+            conversa.contato_telefone = canonico
+            conversa.save(update_fields=['contato_telefone'])
         return conversa
     return Conversa.objects.create(
-        contato_telefone=destinatario.telefone,
+        contato_telefone=services.telefone_para_envio(destinatario.telefone),
         contato_nome=destinatario.nome or '',
         numero=disparo.numero,
         fila=disparo.numero.fila_padrao(),

@@ -525,9 +525,17 @@ class ContatoViewSet(viewsets.ModelViewSet):
         `get_queryset` da conversa filtra por `fila__membros`, então conversa sem
         fila ficaria invisível para quem acabou de criá-la.
         """
-        telefone = ''.join(c for c in str(request.data.get('telefone') or '') if c.isdigit())
-        if len(telefone) < 10:
-            return Response({'detail': 'Telefone inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Com DDI, sempre. Aceitar 10/11 dígitos era o que deixava entrar número
+        # sem código do país: a Meta lê os dígitos da frente como DDI, e um
+        # celular de DDD 51 sem o `55` vira um número do PERU (DDI 51), que não
+        # existe e devolve 131026 três dias depois. Ver `telefone.py`.
+        telefone = services.telefone_para_envio(request.data.get('telefone'))
+        if len(telefone) < 12:
+            return Response(
+                {'detail': 'Telefone incompleto: informe DDI + DDD + número '
+                           '(ex.: 5551999998888).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         nome_template = (request.data.get('template') or '').strip()
         if not nome_template:
@@ -554,7 +562,16 @@ class ContatoViewSet(viewsets.ModelViewSet):
                     .filter(services.filtro_telefone(telefone), status='ABERTA')
                     .filter(Q(numero=numero_da_fila) | Q(numero__isnull=True))
                     .order_by('-created_at').first())
-        if conversa is None:
+        if conversa is not None:
+            # Editar o número na agenda NÃO consertava o envio: quem vai no `to`
+            # é o `contato_telefone` DESTA conversa, e ela é reaproveitada por
+            # variante — então a string velha (sem DDI) sobrevivia a qualquer
+            # correção feita pela tela. Aproveitamos a passagem para arrumá-la.
+            canonico = services.telefone_para_envio(conversa.contato_telefone)
+            if canonico != conversa.contato_telefone:
+                conversa.contato_telefone = canonico
+                conversa.save(update_fields=['contato_telefone'])
+        else:
             contato = Contato.objects.filter(
                 telefone__in=services.variantes_telefone(telefone)).first()
             conversa = Conversa.objects.create(
@@ -789,7 +806,7 @@ class DisparoViewSet(viewsets.ModelViewSet):
         """
         encontrados = []
         for bruto in telefones:
-            digitos = ''.join(c for c in str(bruto) if c.isdigit())
+            digitos = services.telefone_para_envio(bruto)
             if len(digitos) < 10:
                 continue
             # Pelas variantes: o mesmo celular gravado com o nono dígito e sem

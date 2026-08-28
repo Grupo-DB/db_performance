@@ -83,17 +83,22 @@ TEMPLATES = [
         # Sem variável de propósito: é o cadastro mais simples que existe, e sem
         # exemplo não há o que a Meta reprove no preenchimento.
         #
-        # A categoria pode ser reclassificada para MARKETING pela Meta — ela lê
-        # UTILITY como ligado a uma transação ou a um pedido do destinatário, e
-        # bolinho de aniversário não é. Não é fatal: fica mais caro e passa a
-        # contar no limite de marketing.
+        # MARKETING não é escolha nossa: nasceu UTILITY e a Meta reclassificou em
+        # 26/08/2026 ("incluiu conteúdo da categoria marketing"). Para ela, UTILITY
+        # é mensagem ligada a uma transação ou a um pedido do próprio destinatário,
+        # e presente de aniversário é oferta espontânea. Já vai cadastrado como
+        # MARKETING para não repetir a dança da reclassificação.
+        #
+        # ⚠️ Não é o emoji. Tirar o 🎂 não devolve a categoria — a regra é sobre
+        # propósito, não sobre forma. E reescrever para "parecer" utilidade arrisca
+        # reprovação ou marca de política, o que é pior que a tarifa de marketing.
         'corpo': (
             'Olá! Aqui é o RH do Grupo Dagoberto Barcellos. '
             'Temos um bolinho reservado para você pela passagem do seu aniversário 🎂 '
             'Quando puder, passe no RH para retirar. Parabéns!'
         ),
         'exemplos': [],
-        'categoria': 'UTILITY',
+        'categoria': 'MARKETING',
     },
 ]
 

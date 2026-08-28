@@ -293,64 +293,19 @@ def pode_atender(usuario, conversa) -> bool:
 
 # ── Telefone: o mesmo celular escrito de várias formas ───────────────────────
 #
-# A Meta devolve o `wa_id` na forma canônica DELA, e para o Brasil essa forma
-# nem sempre traz o nono dígito. A agenda, importada de .vcf, tem número com e
-# sem o 55. Comparar a string crua faz o cliente que responde a um template
-# nascer numa conversa NOVA, com o histórico do atendimento partido em dois —
-# que é exatamente o defeito relatado pelo RH.
+# As transformações moraram aqui até o `graph_api` também precisar delas para
+# normalizar o destinatário no envio. Como `services` importa `graph_api`, a ida
+# de volta seria ciclo — então elas foram para `telefone.py`, que não importa
+# nada do app. Continuam acessíveis como `services.x` porque é assim que o resto
+# do módulo (views, tasks, testes) já as chamava.
 
-def so_digitos(telefone) -> str:
-    return ''.join(c for c in str(telefone or '') if c.isdigit())
-
-
-def variantes_telefone(telefone) -> list:
-    """
-    Todas as formas com que ESTE telefone pode estar gravado no banco.
-
-    Duas transformações, e só elas: pôr/tirar o `55` e pôr/tirar o nono dígito.
-
-    O nono dígito só entra em CELULAR — assinante de 8 dígitos começando em 6..9.
-    Fixo começa em 2..5, e enfiar um 9 num fixo produziria o número de OUTRA
-    PESSOA: 54 3333-4444 (fixo) viraria 54 9 3333-4444, que existe e é de outro
-    alguém. Casar a conversa errada é bem pior que abrir uma conversa a mais,
-    então na dúvida não se expande — é por isso que número que não tem forma
-    brasileira (DDD ou assinante fora do padrão) sai daqui como entrou.
-    """
-    digitos = so_digitos(telefone)
-    if not digitos:
-        return []
-
-    nacional = digitos[2:] if digitos.startswith('55') and len(digitos) in (12, 13) else digitos
-    ddd, assinante = nacional[:2], nacional[2:]
-    if not ('11' <= ddd <= '99'):
-        return [digitos]
-
-    if len(assinante) == 9 and assinante[0] == '9' and '6' <= assinante[1] <= '9':
-        curtas = {nacional, ddd + assinante[1:]}          # celular, sem o nono
-    elif len(assinante) == 8 and '6' <= assinante[0] <= '9':
-        curtas = {nacional, ddd + '9' + assinante}        # celular antigo, com o nono
-    elif len(assinante) == 8 and '2' <= assinante[0] <= '5':
-        curtas = {nacional}                               # fixo: só o 55 varia
-    else:
-        return [digitos]
-
-    formas = {digitos}
-    for forma in curtas:
-        formas.add(forma)
-        formas.add('55' + forma)
-    return sorted(formas)
-
-
-def chave_telefone(telefone) -> str:
-    """
-    Uma forma só por celular, para agrupar (agenda, contagens).
-
-    É a mais longa das variantes — com o 55 e com o nono dígito. Não serve para
-    ENVIAR (para isso vale o que a Meta devolveu), só para dizer "estes dois
-    registros são a mesma pessoa".
-    """
-    formas = variantes_telefone(telefone)
-    return max(formas, key=len) if formas else ''
+from .telefone import (  # noqa: F401
+    chave_telefone,
+    outra_variante_de_envio,
+    so_digitos,
+    telefone_para_envio,
+    variantes_telefone,
+)
 
 
 def filtro_telefone(telefone) -> Q:

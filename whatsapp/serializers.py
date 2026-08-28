@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 
 from . import services
+from .telefone import telefone_para_envio
 from .models import (
     Contato, Disparo, DisparoDestinatario, Fila, Conversa, Mensagem, MensagemAnexo,
     NumeroNegocio, WhatsAppNotificacao,
@@ -211,16 +212,24 @@ class ContatoSerializer(serializers.ModelSerializer):
 
     def validate_telefone(self, valor):
         """
-        Guarda só dígitos.
+        Guarda só dígitos, com DDI.
 
-        A tela deixa digitar "(55) 99629-4108", mas a Meta identifica o cliente
+        A tela deixa digitar "(51) 99239-3150", mas a Meta identifica o cliente
         por `wa_id`, que é dígito puro com DDI. Normalizar na entrada evita o
         mesmo contato cadastrado duas vezes com máscaras diferentes — o `unique`
         do campo não pegaria isso.
+
+        O `< 10` de antes deixava passar celular sem código do país, e era daí
+        que vinha o 131026: `51992393150` é lido pela Meta como Peru (DDI 51),
+        não como DDD 51. `telefone_para_envio` põe o `55` quando o número tem
+        forma brasileira; o que sobra abaixo de 12 dígitos é ambíguo de verdade
+        e precisa ser digitado por extenso.
         """
-        digitos = ''.join(c for c in (valor or '') if c.isdigit())
-        if len(digitos) < 10:
-            raise serializers.ValidationError('Telefone incompleto. Use DDI + DDD + número.')
+        digitos = telefone_para_envio(valor)
+        if len(digitos) < 12:
+            raise serializers.ValidationError(
+                'Telefone incompleto: informe DDI + DDD + número (ex.: 5551999998888).'
+            )
         return digitos
 
 

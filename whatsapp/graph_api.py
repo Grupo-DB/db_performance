@@ -4,6 +4,11 @@ import mimetypes
 import requests
 from django.conf import settings
 
+# Único ponto por onde TODA saída passa: normalizar o destinatário aqui garante
+# que nenhum caminho de envio mande número sem DDI, venha ele da agenda, de uma
+# conversa antiga ou de um disparo. Ver `telefone.telefone_para_envio`.
+from .telefone import telefone_para_envio
+
 # Timeout maior no upload/download: são arquivos, não JSON de algumas centenas de bytes.
 TIMEOUT_PADRAO = 15
 TIMEOUT_MIDIA = 60
@@ -126,7 +131,7 @@ def enviar_mensagem_texto(telefone: str, texto: str, citando: str = '', numero=N
     url = f"{_base_url()}/{_id_do_numero(numero)}/messages"
     payload = {
         'messaging_product': 'whatsapp',
-        'to': telefone,
+        'to': telefone_para_envio(telefone),
         'type': 'text',
         'text': {'body': texto},
     }
@@ -191,7 +196,7 @@ def enviar_midia(
     url = f"{_base_url()}/{_id_do_numero(numero)}/messages"
     payload = {
         'messaging_product': 'whatsapp',
-        'to': telefone,
+        'to': telefone_para_envio(telefone),
         'type': categoria,
         categoria: corpo,
     }
@@ -237,7 +242,7 @@ def enviar_contatos(telefone: str, cartoes: list[dict], citando: str = '', numer
     url = f"{_base_url()}/{_id_do_numero(numero)}/messages"
     payload = {
         'messaging_product': 'whatsapp',
-        'to': telefone,
+        'to': telefone_para_envio(telefone),
         'type': 'contacts',
         'contacts': cartoes,
     }
@@ -271,7 +276,7 @@ def enviar_template(
     url = f"{_base_url()}/{_id_do_numero(numero)}/messages"
     payload = {
         'messaging_product': 'whatsapp',
-        'to': telefone,
+        'to': telefone_para_envio(telefone),
         'type': 'template',
         'template': template,
     }
