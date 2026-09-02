@@ -79,6 +79,36 @@ TEMPLATES = [
         'categoria': 'UTILITY',
     },
     {
+        'nome': 'comparecer_rh',
+        # Pedido do RH em 02/09/2026, no texto que eles escreveram. É irmão do
+        # `abertura_rh`: mesma abertura com o nome de quem fala, e a chamada muda
+        # de "responda esta mensagem" para "venha até o RH".
+        #
+        # ⚠️ RISCO DE REPROVAÇÃO, e é o mesmo do "Oi, tudo bem?" que ficou de
+        # fora: "preciso falar contigo" NÃO diz sobre o quê. A Meta reprova
+        # template sem propósito declarado, e foi exatamente por isso que o
+        # `abertura_rh` ganhou o {{2}} do motivo. Este vai como o RH pediu, sem
+        # o motivo, porque a graça dele é ser curto e não exigir que o atendente
+        # digite o assunto. Se a revisão reprovar, o caminho é trocar o corpo por:
+        #
+        #     'Oi! Aqui é {{1}}, do RH do Grupo Dagoberto Barcellos. '
+        #     'Preciso falar com você sobre {{2}}. Consegue passar aqui no RH?'
+        #     exemplos: ['Karyna', 'seu atestado médico']
+        #
+        # e recriar — template reprovado não se reenvia igual.
+        #
+        # ⚠️ "é a" pressupõe nome feminino. Serve para Karyna e Ana, que são quem
+        # usa hoje; se algum homem do RH for mandar, o texto sai errado e o
+        # conserto é trocar por "aqui é {{1}}" — o que exige NOVO template, porque
+        # corpo aprovado não se edita sem passar por revisão de novo.
+        'corpo': (
+            'Oi, é a {{1}}, preciso falar contigo, '
+            'consegue passar aqui no RH?'
+        ),
+        'exemplos': ['Karyna'],
+        'categoria': 'UTILITY',
+    },
+    {
         'nome': 'aniversario_bolinho',
         # Sem variável de propósito: é o cadastro mais simples que existe, e sem
         # exemplo não há o que a Meta reprove no preenchimento.
