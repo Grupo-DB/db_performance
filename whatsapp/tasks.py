@@ -323,6 +323,12 @@ def _processar_mensagem_recebida(value: dict, msg: dict):
     else:
         services.resolver_fila_por_texto(texto, conversa)
 
+    # Depois de tudo, e para os três ramos: o aviso de "não há atendente online"
+    # se soma ao fluxo normal, não o substitui — a mensagem do cliente já está
+    # gravada e já notificou a equipe. Só sai se a chave do número estiver ligada,
+    # e no máximo uma vez a cada `INTERVALO_AVISO_SEM_ATENDENTE` por conversa.
+    services.avisar_sem_atendente(conversa)
+
 
 def _mensagem_citada(msg: dict):
     """

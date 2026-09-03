@@ -4,8 +4,8 @@ from django.contrib.auth.models import User
 from . import services
 from .telefone import telefone_para_envio
 from .models import (
-    Contato, Disparo, DisparoDestinatario, Fila, Conversa, Mensagem, MensagemAnexo,
-    NumeroNegocio, WhatsAppNotificacao,
+    ConfiguracaoAtendimento, Contato, Disparo, DisparoDestinatario, Fila, Conversa,
+    Mensagem, MensagemAnexo, NumeroNegocio, WhatsAppNotificacao,
 )
 
 
@@ -262,9 +262,26 @@ class NumeroNegocioSerializer(serializers.ModelSerializer):
     daqui nem para usuário autenticado.
     """
 
+    # O texto que o cliente receberia com a chave ligada. Vem resolvido (o do
+    # número, ou o geral) para a tela mostrar exatamente o que vai sair, em vez de
+    # o atendente ligar uma chave sem saber o que ela manda.
+    texto_sem_atendente = serializers.SerializerMethodField()
+    # Quem não pode alternar não vê a chave: mostrar e devolver 403 no clique é
+    # pior do que não mostrar.
+    pode_gerenciar = serializers.SerializerMethodField()
+
     class Meta:
         model = NumeroNegocio
-        fields = ['id', 'nome', 'telefone', 'phone_number_id', 'ativo', 'is_padrao']
+        fields = ['id', 'nome', 'telefone', 'phone_number_id', 'ativo', 'is_padrao',
+                  'sem_atendente', 'texto_sem_atendente', 'pode_gerenciar']
+        read_only_fields = ['sem_atendente']
+
+    def get_texto_sem_atendente(self, obj) -> str:
+        return (ConfiguracaoAtendimento.carregar(obj).texto_sem_atendente or '').strip()
+
+    def get_pode_gerenciar(self, obj) -> bool:
+        usuario = getattr(self.context.get('request'), 'user', None)
+        return services.pode_gerenciar_numero(usuario, obj)
 
 
 class DisparoDestinatarioSerializer(serializers.ModelSerializer):

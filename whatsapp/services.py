@@ -2,6 +2,7 @@
 import unicodedata
 import logging
 import re
+from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
@@ -150,6 +151,30 @@ def eh_gestor_de(usuario, escopo: str) -> bool:
         return True
     grupo = ESCOPOS.get(escopo, {}).get('gestor')
     return bool(grupo) and usuario.groups.filter(name=grupo).exists()
+
+
+def pode_gerenciar_numero(usuario, numero) -> bool:
+    """
+    Quem pode mexer nas chaves de comportamento de um número — hoje, a de "sem
+    atendente online".
+
+    Atendente TAMBÉM pode, não só gestor: quem sai para o almoço, entra em reunião
+    ou fecha o plantão é quem está atendendo, e esperar o gestor para ligar um
+    aviso automático não faria sentido. A chave só ACRESCENTA um aviso; não
+    desliga o canal, não esconde conversa e não impede ninguém de responder.
+
+    Número que não casa com escopo nenhum (cadastro com nome trocado) fica
+    liberado para autenticado — é a regra antiga do módulo, e travar o
+    atendimento por causa de cadastro é pior que o contrário.
+    """
+    if not usuario or not usuario.is_authenticated:
+        return False
+    if usuario.is_staff:
+        return True
+    escopo = escopo_do_numero(getattr(numero, 'id', numero))
+    if not escopo:
+        return True
+    return escopo in escopos_do_usuario(usuario)
 
 
 def filtro_de_conversas(usuario):
@@ -502,6 +527,54 @@ def saudar_se_configurado(conversa) -> None:
     texto = (ConfiguracaoAtendimento.carregar(conversa.numero).texto_saudacao or '').strip()
     if texto:
         responder_automatico(conversa, texto)
+
+
+# Espaçamento mínimo entre dois avisos de "sem atendente" na MESMA conversa.
+#
+# Sem ele, cliente que manda "bom dia", "tudo bem?" e "preciso de ajuda" em três
+# bolhas recebia o aviso três vezes. Seis horas cobrem um turno: quem escreve às
+# 19h e volta a escrever às 20h já foi avisado; quem escreve no dia seguinte é
+# avisado de novo, porque a situação pode ter mudado.
+INTERVALO_AVISO_SEM_ATENDENTE = timedelta(hours=6)
+
+
+def avisar_sem_atendente(conversa) -> bool:
+    """
+    Avisa o cliente de que não há atendente online, quando a chave do número está
+    ligada. Devolve se avisou.
+
+    A chave é do NÚMERO (`NumeroNegocio.sem_atendente`) e o texto vem dos textos
+    automáticos, com a mesma queda para o geral dos outros: a chave é situação de
+    momento de um setor, e o texto é redação — misturar os dois faria ligar no RH
+    mudar o comportamento da TI.
+
+    ⚠️ Isto NÃO substitui o atendimento: a mensagem do cliente continua entrando
+    na Central, virando notificação e esperando resposta. É só um aviso de que a
+    resposta vai demorar — por isso sai depois do menu/roteamento, e não em lugar
+    deles.
+
+    Texto livre, e não template da Meta: o cliente acabou de escrever, então a
+    janela de 24h está aberta e não há por que pedir aprovação de template.
+    """
+    numero = conversa.numero
+    if numero is None or not numero.sem_atendente:
+        return False
+
+    texto = (ConfiguracaoAtendimento.carregar(numero).texto_sem_atendente or '').strip()
+    if not texto:
+        # Chave ligada e texto apagado: não inventa mensagem nenhuma, como a
+        # saudação em branco.
+        return False
+
+    agora = timezone.now()
+    ultimo = conversa.aviso_sem_atendente_em
+    if ultimo and agora - ultimo < INTERVALO_AVISO_SEM_ATENDENTE:
+        return False
+
+    responder_automatico(conversa, texto)
+    conversa.aviso_sem_atendente_em = agora
+    conversa.save(update_fields=['aviso_sem_atendente_em'])
+    return True
 
 
 def montar_texto_menu(filas=None, numero=None) -> str:

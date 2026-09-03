@@ -924,3 +924,34 @@ class NumeroNegocioViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = NumeroNegocioSerializer
     queryset = NumeroNegocio.objects.filter(ativo=True).order_by('-is_padrao', 'nome')
+
+    @action(detail=True, methods=['post'], url_path='sem-atendente')
+    def sem_atendente(self, request, pk=None):
+        """
+        Liga/desliga o aviso automático de "não há atendente online" deste número.
+
+        Só esta chave é editável por aqui — o resto do cadastro (phone_number_id,
+        token, WABA) segue sendo de admin. Ela é situação de momento: o atendente
+        sai para o almoço, liga; volta, desliga. O TEXTO do aviso é redação e mora
+        nos textos automáticos, no admin, como a saudação e o menu.
+
+        ⚠️ É por NÚMERO. Com dois setores no ar, uma chave global faria o RH
+        silenciar-se ao mesmo tempo que a TI.
+        """
+        numero = self.get_object()
+        if not services.pode_gerenciar_numero(request.user, numero):
+            return Response(
+                {'detail': 'Você não atende este número.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ativo = request.data.get('ativo')
+        if not isinstance(ativo, bool):
+            return Response(
+                {'detail': 'Informe "ativo": true ou false.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        numero.sem_atendente = ativo
+        numero.save(update_fields=['sem_atendente'])
+        return Response(self.get_serializer(numero).data)

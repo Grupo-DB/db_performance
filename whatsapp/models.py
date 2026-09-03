@@ -46,6 +46,16 @@ class NumeroNegocio(models.Model):
                   'Desligado, a conversa entra direto na fila e a Central funciona como '
                   'caixa de entrada compartilhada.',
     )
+    sem_atendente = models.BooleanField(
+        # `db_default` porque a coluna nasce NOT NULL: entre a migration e o deploy
+        # do código, todo INSERT que omitir o campo morreria com o 1364 do MySQL —
+        # foi o que derrubou o canal em 21/08.
+        default=False, db_default=False,
+        help_text='Ligue quando não houver ninguém para responder (fora do horário, '
+                  'reunião, feriado): quem escrever recebe uma vez o aviso de que o '
+                  'atendimento não está online. A mensagem do cliente continua chegando '
+                  'na Central normalmente. O texto está em Configuração do atendimento.',
+    )
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -141,6 +151,12 @@ class Conversa(models.Model):
     tentativas_menu = models.PositiveSmallIntegerField(default=0)
     ultima_mensagem_em = models.DateTimeField(null=True, blank=True, db_index=True)
     ultima_mensagem_cliente_em = models.DateTimeField(null=True, blank=True, help_text='Base do cálculo da janela de 24h do WhatsApp')
+    aviso_sem_atendente_em = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Quando o aviso de "sem atendente online" foi enviado nesta conversa. '
+                  'É o que impede o cliente que escreve cinco vezes seguidas de receber '
+                  'cinco avisos.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -284,6 +300,12 @@ class Contato(models.Model):
         return f'{self.nome} ({self.telefone})'
 
 
+TEXTO_SEM_ATENDENTE_PADRAO = (
+    'Recebemos a sua mensagem! Neste momento não há atendente online, mas ela já está '
+    'na nossa fila e vamos responder no próximo horário de atendimento.'
+)
+
+
 class ConfiguracaoAtendimento(models.Model):
     """
     Textos que o robô manda sozinho, editáveis sem deploy.
@@ -316,6 +338,13 @@ class ConfiguracaoAtendimento(models.Model):
         help_text='Resposta automática à PRIMEIRA mensagem de um atendimento, em número '
                   'sem menu. Sai uma vez por atendimento, não a cada mensagem. '
                   'Em branco = o cliente não recebe nada até uma pessoa responder.',
+    )
+    texto_sem_atendente = models.TextField(
+        blank=True, default=TEXTO_SEM_ATENDENTE_PADRAO, db_default=TEXTO_SEM_ATENDENTE_PADRAO,
+        help_text='Aviso enviado enquanto "sem atendente" estiver ligado no número '
+                  '(Números de negócio). Sai no máximo uma vez a cada 6 horas por '
+                  'atendimento, para o cliente que escreve três vezes não receber três '
+                  'avisos. Em branco = a chave liga mas nada é enviado.',
     )
     assinatura = models.CharField(
         max_length=60, blank=True, default='Setor de TI Grupo DB',

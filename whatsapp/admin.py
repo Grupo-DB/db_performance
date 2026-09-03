@@ -38,6 +38,13 @@ class ConfiguracaoAtendimentoAdmin(admin.ModelAdmin):
             'fields': ('texto_roteamento',),
             'description': 'Escreva <code>{setor}</code> onde o nome do setor deve entrar.',
         }),
+        ('Aviso de sem atendente online', {
+            'fields': ('texto_sem_atendente',),
+            'description': 'Enviado enquanto <b>Sem atendente online</b> estiver ligado no '
+                           'número (em Números de negócio, ou pela chave na Central). Sai no '
+                           'máximo uma vez a cada 6 horas por atendimento. Em branco, a '
+                           'chave liga mas nada é enviado.',
+        }),
         ('Assinatura das respostas', {
             'fields': ('assinatura',),
             'description': 'Rótulo do setor, que vai na frente de toda resposta do atendente '
@@ -61,15 +68,19 @@ class ConfiguracaoAtendimentoAdmin(admin.ModelAdmin):
 @admin.register(NumeroNegocio)
 class NumeroNegocioAdmin(admin.ModelAdmin):
     list_display = ('nome', 'telefone', 'phone_number_id', 'ativo', 'is_padrao',
-                    'menu_automatico')
+                    'menu_automatico', 'sem_atendente')
+    list_editable = ('sem_atendente',)
     list_filter = ('ativo', 'is_padrao')
     search_fields = ('nome', 'telefone', 'phone_number_id')
     fieldsets = (
         (None, {'fields': ('nome', 'telefone', 'phone_number_id', 'ativo', 'is_padrao')}),
         ('Comportamento do robô', {
-            'fields': ('menu_automatico',),
-            'description': 'Número que também é atendido no app do celular precisa disto '
-                           'DESLIGADO, senão o robô responde por cima da pessoa.',
+            'fields': ('menu_automatico', 'sem_atendente'),
+            'description': 'Número que também é atendido no app do celular precisa do menu '
+                           'DESLIGADO, senão o robô responde por cima da pessoa.<br>'
+                           '<b>Sem atendente online</b> é chave de momento (almoço, fora do '
+                           'horário, feriado) e também pode ser ligada na Central; o texto '
+                           'do aviso está em Configuração do atendimento.',
         }),
         ('Só se o número estiver em OUTRA WABA', {
             'fields': ('waba_id', 'access_token'),
