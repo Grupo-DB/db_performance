@@ -2,6 +2,7 @@ import hmac
 import hashlib
 import json
 import logging
+import mimetypes
 from datetime import date
 
 from django.conf import settings
@@ -337,6 +338,80 @@ class ConversaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         # Só APPROVED: oferecer um template em análise ou reprovado só gera erro
         # na hora do envio.
         return Response([t for t in todos if t.get('status') == 'APPROVED'])
+
+    @action(detail=False, methods=['post'], url_path='midia-template',
+            parser_classes=[MultiPartParser, FormParser])
+    def midia_template(self, request):
+        """
+        Sobe a imagem do CABEÇALHO de um template e devolve o `media_id`.
+
+        Template com cabeçalho de mídia não carrega a imagem dentro de si: a que
+        foi enviada no cadastro é só amostra para a Meta aprovar. Todo envio tem
+        de mandar a sua, no componente `header`. Este endpoint é o passo que
+        transforma o arquivo escolhido na tela no id que vai nesse componente.
+
+        O `media_id` é específico do NÚMERO que subiu o arquivo, e é por isso que
+        o número é resolvido aqui do mesmo jeito que na hora do envio: explícito
+        (disparo), pelo da conversa (central) ou pelo da fila de quem envia
+        (agenda). Subir por um número e enviar por outro devolve um id inválido.
+
+        Vale 30 dias, o que cobre com folga um disparo — mas um disparo pausado e
+        retomado depois desse prazo precisa de imagem nova.
+        """
+        arquivo = request.FILES.get('imagem')
+        if arquivo is None:
+            return Response({'detail': 'Envie o arquivo no campo "imagem".'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Só JPEG e PNG: a Cloud API aceita webp como mensagem de imagem, mas
+        # recusa no cabeçalho de template. Barrar aqui dá um recado legível, em
+        # vez do 400 genérico da Meta depois do upload inteiro.
+        mime = (getattr(arquivo, 'content_type', '') or '').split(';')[0].strip().lower()
+        if not mime or mime == 'application/octet-stream':
+            mime = (mimetypes.guess_type(arquivo.name)[0] or '').lower()
+        if mime not in ('image/jpeg', 'image/png'):
+            return Response(
+                {'detail': 'O cabeçalho de imagem aceita só JPG ou PNG.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        numero = self._numero_para_midia(request)
+        try:
+            media_id = graph_api.upload_midia(arquivo.read(), arquivo.name, mime, numero=numero)
+        except graph_api.MidiaMuitoGrande as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            logger.exception('Falha ao subir a imagem de cabeçalho de template')
+            return Response(
+                {'detail': f'A Meta recusou a imagem: {graph_api.detalhe_do_erro(exc)}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response({'media_id': media_id}, status=status.HTTP_201_CREATED)
+
+    def _numero_para_midia(self, request):
+        """
+        De qual número o arquivo sobe — na mesma ordem em que cada tela escolhe o
+        número do envio. `None` cai no número do `.env`, como no resto do módulo.
+        """
+        numero_id = request.data.get('numero')
+        if numero_id:
+            return NumeroNegocio.objects.filter(id=numero_id, ativo=True).first()
+
+        conversa_id = request.data.get('conversa')
+        if conversa_id:
+            # Pelo queryset visível, não pelo manager: o id de uma conversa de
+            # outro setor não pode virar um upload no número daquele setor.
+            conversa = self.get_queryset().filter(id=conversa_id).first()
+            if conversa is not None and conversa.numero_id:
+                return conversa.numero
+
+        fila_id = request.data.get('fila')
+        filas = Fila.objects.filter(ativa=True, membros=request.user)
+        fila = (filas.filter(id=fila_id).first() if fila_id
+                else filas.order_by('ordem', 'nome').first())
+        if fila is not None and fila.numero_id:
+            return fila.numero
+        return NumeroNegocio.objects.filter(is_padrao=True, ativo=True).first()
 
     @action(detail=True, methods=['post'], url_path='enviar-contato')
     def enviar_contato(self, request, pk=None):
