@@ -248,8 +248,8 @@ class AmostraViewSet(viewsets.ModelViewSet):
         amostras = (Amostra.objects
                     .filter(ordem__isnull=True, expressa__isnull=True)
                     .filter(filtro_periodo(limite_periodo(request)))
-                    .select_related('produto_amostra')
-                    .prefetch_related('imagens')
+                    .select_related('produto_amostra', 'amostra_origem')
+                    .prefetch_related('imagens', 'derivadas')
                     .order_by('-id'))
         serializer = self.get_serializer(amostras, many=True)
         return Response(serializer.data)

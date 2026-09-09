@@ -87,8 +87,12 @@ class AmostraSerializer(serializers.ModelSerializer):
         É o que o laudo usa para oferecer os dois valores: partindo da original
         ele acha as derivadas aqui, e partindo de uma derivada acha as irmãs
         pela `amostra_origem_detalhes`.
+
+        A ordenação é em PYTHON: `.order_by('id')` monta um queryset novo, ignora
+        o `prefetch_related('derivadas')` da listagem e vira uma query por linha —
+        o mesmo tropeço que `get_ultimo_ensaio` já evita.
         """
-        return [self._resumo(d) for d in obj.derivadas.all().order_by('id')]
+        return [self._resumo(d) for d in sorted(obj.derivadas.all(), key=lambda d: d.id)]
 
     def validate(self, attrs):
         """Na edição, impede trocar o número por um que já exista.

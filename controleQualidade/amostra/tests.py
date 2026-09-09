@@ -24,6 +24,7 @@ import copy
 from io import StringIO
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import connection
 from django.test import TestCase, TransactionTestCase
 from rest_framework.test import APIClient
@@ -33,6 +34,64 @@ from controleQualidade.ordem.models import OrdemExpressa
 from .models import Amostra
 from .numeracao import (formatar_numero, normalizar_prefixo, numeros_duplicados,
                         proximo_numero_derivada, separar_derivada, sequencial_de)
+
+
+class ReligaDerivadaTests(TestCase):
+    """O conserto das duplicatas que nasceram sem vínculo (o caso da 00.0587)."""
+
+    def setUp(self):
+        self.origem = Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0530')
+        self.orfa = Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0587',
+            finalidade='Reanálise')
+
+    def religar(self, **extra):
+        saida = StringIO()
+        call_command('religa_derivada', amostra='calcario 00.0587',
+                     origem='calcario 00.0530', stdout=saida, **extra)
+        return saida.getvalue()
+
+    def test_simulacao_nao_grava(self):
+        saida = self.religar()
+
+        self.orfa.refresh_from_db()
+        self.assertEqual(self.orfa.numero, 'calcario 00.0587')
+        self.assertIsNone(self.orfa.amostra_origem)
+        self.assertIn('calcario 00.0530.1', saida)
+
+    def test_aplicar_religa_e_renumera(self):
+        self.religar(aplicar=True)
+
+        self.orfa.refresh_from_db()
+        self.assertEqual(self.orfa.numero, 'calcario 00.0530.1')
+        self.assertEqual(self.orfa.amostra_origem_id, self.origem.pk)
+
+    def test_sequencial_liberado_volta_a_ser_o_proximo(self):
+        """Sem buraco na numeração: a 0587 vira derivada e libera o sequencial.
+
+        O 0586 existe aqui porque é o que há em produção — é ele que passa a ser
+        o maior depois de a 0587 sair da contagem.
+        """
+        Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0586')
+
+        self.religar(aplicar=True)
+
+        resposta = APIClient().post('/amostra/amostra/', {
+            'laboratorio': 'Matriz', 'material': 'Calcário',
+            'finalidade': 'Controle de Qualidade', 'numero': '',
+        }, format='json')
+
+        self.assertEqual(resposta.data['numero'], 'calcario 00.0587')
+
+    def test_recusa_renumerar_quem_ja_tem_derivada(self):
+        Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0587.1',
+            amostra_origem=self.orfa)
+
+        with self.assertRaises(CommandError):
+            self.religar(aplicar=True)
 
 
 class NumeracaoHelpersTests(TestCase):

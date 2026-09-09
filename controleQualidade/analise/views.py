@@ -268,11 +268,17 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         'amostra__ordem',
         'amostra__produto_amostra',
         'amostra__expressa',
+        # A original da duplicata/reanálise: o AmostraSerializer resume as duas pontas
+        # da família (amostra_origem_detalhes / derivadas_detalhes) em toda linha.
+        'amostra__amostra_origem',
     )
     _RELACOES_LISTA_M2M = (
         'ensaios',
         'calculos',
         'amostra__imagens',
+        # Sem isto `derivadas.all()` do serializer vira uma query POR LINHA — era
+        # exatamente esse padrão que fazia a listagem custar ~6.200 queries.
+        'amostra__derivadas',
         # plano da ordem: o serializer expande ensaios e cálculos de cada plano
         'amostra__ordem__plano_analise',
         'amostra__ordem__plano_analise__ensaios__tipo_ensaio',
