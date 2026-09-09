@@ -79,6 +79,15 @@ class Amostra(models.Model):
     status = models.CharField(max_length=255, null=True, blank=True)
     data_descarte = models.DateField(null=True, blank=True) #data de descarte
     laboratorio = models.CharField(max_length=255, null=False, blank=False)
+    # Amostra da qual esta é duplicata ou reanálise (finalidade 'Duplicata' /
+    # 'Reanálise'). Preenchida, o número sai como 'calcario 00.0526.1' em vez de
+    # consumir um sequencial novo — ver amostra/numeracao.py.
+    #
+    # SET_NULL e não CASCADE: apagar a original não pode levar junto a reanálise,
+    # que tem análise e laudo próprios. Órfã, ela vira uma amostra comum com um
+    # número que ainda diz de onde veio.
+    amostra_origem = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='derivadas')
     class Meta:
         verbose_name = 'Amostra'
         verbose_name_plural = 'Amostras'

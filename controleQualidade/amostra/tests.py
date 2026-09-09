@@ -11,6 +11,9 @@ garantias que essa mudança precisa manter:
 2. a sequência continua de onde a numeração legada parou;
 3. na EDIÇÃO, apontar para um número de outra amostra é 400, não duplicata.
 
+E as da duplicata/reanálise (09/2026): a derivada recebe '.1', '.2' na mesma
+família e NÃO desloca o sequencial do prefixo.
+
     venv/bin/python manage.py test controleQualidade.amostra.tests \
         --settings=db_performance.settings_teste_projeto
 
@@ -28,7 +31,8 @@ from rest_framework.test import APIClient
 from controleQualidade.ordem.models import OrdemExpressa
 
 from .models import Amostra
-from .numeracao import formatar_numero, normalizar_prefixo, numeros_duplicados, sequencial_de
+from .numeracao import (formatar_numero, normalizar_prefixo, numeros_duplicados,
+                        proximo_numero_derivada, separar_derivada, sequencial_de)
 
 
 class NumeracaoHelpersTests(TestCase):
@@ -46,6 +50,17 @@ class NumeracaoHelpersTests(TestCase):
         self.assertEqual(sequencial_de('Calcário 08.392'), 8392)   # numeração antiga
         self.assertIsNone(sequencial_de('cal'))
         self.assertIsNone(sequencial_de(''))
+
+    def test_separar_derivada(self):
+        self.assertEqual(separar_derivada('calcario 00.0526.1'), ('calcario 00.0526', 1))
+        self.assertEqual(separar_derivada('calcario 00.0526.12'), ('calcario 00.0526', 12))
+        # Número normal e legado não são derivadas: têm um grupo de dígitos só.
+        self.assertEqual(separar_derivada('calcario 00.0526'), ('calcario 00.0526', None))
+        self.assertEqual(separar_derivada('Calcário 08.392'), ('Calcário 08.392', None))
+
+    def test_derivada_nao_desloca_o_sequencial_do_prefixo(self):
+        """O estrago que o sufixo faria: '00.0526.1' lido como 5.261."""
+        self.assertEqual(sequencial_de('calcario 00.0526.1'), 526)
 
 
 class NumeracaoNaApiTests(TestCase):
@@ -99,6 +114,101 @@ class NumeracaoNaApiTests(TestCase):
         self.assertEqual(resposta.status_code, 201, resposta.data)
         self.assertNotEqual(resposta.data['numero'], original.numero)
         self.assertEqual(resposta.data['numero'], 'cal 00.0441')
+
+    def test_duplicata_recebe_indice_na_familia_da_original(self):
+        original = Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0526')
+
+        primeira = self.client.post('/amostra/amostra/', self.payload(
+            material='Calcário', finalidade='Duplicata', amostra_origem=original.id,
+        ), format='json')
+        segunda = self.client.post('/amostra/amostra/', self.payload(
+            material='Calcário', finalidade='Reanálise', amostra_origem=original.id,
+        ), format='json')
+
+        self.assertEqual(primeira.status_code, 201, primeira.data)
+        self.assertEqual(primeira.data['numero'], 'calcario 00.0526.1')
+        self.assertEqual(segunda.data['numero'], 'calcario 00.0526.2')
+
+    def test_derivada_nao_consome_sequencial_do_material(self):
+        """Depois de duas duplicatas, a próxima amostra comum ainda é a 0527."""
+        original = Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0526')
+        for _ in range(2):
+            self.client.post('/amostra/amostra/', self.payload(
+                material='Calcário', finalidade='Duplicata', amostra_origem=original.id,
+            ), format='json')
+
+        nova = self.client.post(
+            '/amostra/amostra/', self.payload(material='Calcário'), format='json')
+
+        self.assertEqual(nova.data['numero'], 'calcario 00.0527')
+
+    def test_duplicata_de_derivada_vira_irma(self):
+        """`.1.1` não existe: pedir a partir da .1 devolve a .2."""
+        original = Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0526')
+        derivada = Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0526.1',
+            amostra_origem=original)
+
+        resposta = self.client.post('/amostra/amostra/', self.payload(
+            material='Calcário', finalidade='Duplicata', amostra_origem=derivada.id,
+        ), format='json')
+
+        self.assertEqual(resposta.data['numero'], 'calcario 00.0526.2')
+
+    def test_familia_vizinha_nao_entra_na_contagem(self):
+        """'calcario 00.05261' começa com o mesmo texto mas é outra amostra."""
+        original = Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0526')
+        Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.05261')
+
+        self.assertEqual(proximo_numero_derivada(original), 'calcario 00.0526.1')
+
+    def test_busca_filtra_por_material_nas_duas_grafias(self):
+        """A base tem 'Calcario' e 'Calcário'; escolher um material pega os dois."""
+        Amostra.objects.create(laboratorio='Matriz', material='Calcário', numero='calcario 00.0001')
+        Amostra.objects.create(laboratorio='Matriz', material='Calcario', numero='calcario 00.0002')
+        Amostra.objects.create(laboratorio='Matriz', material='Cal', numero='cal 00.0001')
+
+        resposta = self.client.get('/amostra/amostra/buscar/?material=Calcário')
+
+        numeros = sorted(a['numero'] for a in resposta.data)
+        self.assertEqual(numeros, ['calcario 00.0001', 'calcario 00.0002'])
+
+    def test_previa_do_numero_da_derivada(self):
+        original = Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0526')
+
+        resposta = self.client.get(
+            f'/amostra/amostra/{original.id}/proximo-numero-derivada/')
+
+        self.assertEqual(resposta.status_code, 200, resposta.data)
+        self.assertEqual(resposta.data['numero'], 'calcario 00.0526.1')
+
+    def test_serializer_liga_os_dois_lados(self):
+        original = Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0526')
+        criada = self.client.post('/amostra/amostra/', self.payload(
+            material='Calcário', finalidade='Duplicata', amostra_origem=original.id,
+        ), format='json').data
+
+        self.assertEqual(criada['amostra_origem_detalhes']['numero'], 'calcario 00.0526')
+
+        vista_da_original = self.client.get(f'/amostra/amostra/{original.id}/').data
+        numeros = [d['numero'] for d in vista_da_original['derivadas_detalhes']]
+        self.assertEqual(numeros, ['calcario 00.0526.1'])
+
+    def test_amostra_nao_pode_ser_duplicata_dela_mesma(self):
+        amostra = Amostra.objects.create(
+            laboratorio='Matriz', material='Calcário', numero='calcario 00.0526')
+
+        resposta = self.client.patch(
+            f'/amostra/amostra/{amostra.id}/', {'amostra_origem': amostra.id}, format='json')
+
+        self.assertEqual(resposta.status_code, 400, resposta.data)
 
     def test_sem_material_recusa(self):
         resposta = self.client.post(

@@ -14,6 +14,12 @@ continuam lá e o índice único ainda precisa ser criado no MySQL de produção
 Ordem obrigatória: `--corrigir` primeiro, `--criar-indice` depois — o índice não
 nasce com duplicata na tabela.
 
+⚠️ `--corrigir` não sabe de duplicata/reanálise: renumerar uma amostra que tem
+derivadas ('calcario 00.0526' com uma '...0526.1') deixa a família com números de
+troncos diferentes. O vínculo em si sobrevive, porque é a FK `amostra_origem` que
+o guarda — mas o número deixa de contar a história. Confira as derivadas antes
+(`Amostra.objects.filter(amostra_origem__isnull=False)`).
+
 ⚠️ `--corrigir` TROCA o número de amostras já cadastradas. Fica com o número
 original a amostra **EM USO** — a que tem OS (ordem ou expressa) ou análise
 vinculada, porque é a que já apareceu em laudo e etiqueta; no empate, a mais

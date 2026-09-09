@@ -310,6 +310,37 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                 .prefetch_related(*self._RELACOES_LISTA_M2M)
                 .order_by('-id'))
 
+    @action(detail=True, methods=['get'], url_path='familia')
+    def familia(self, request, pk=None):
+        """Análises das duplicatas/reanálises da mesma amostra desta análise.
+
+        É o que o laudo usa para oferecer os dois valores lado a lado: a amostra
+        original e as derivadas dela (`Amostra.amostra_origem`) formam uma
+        família, e o laboratório escolhe, ensaio a ensaio, qual resultado vai ao
+        documento. O número impresso continua sendo o da ORIGINAL — a derivada
+        entra com o valor, não com a identidade.
+
+        Devolve todas as análises da família MENOS a desta chamada, com o mesmo
+        serializer da listagem (é dele que saem `ultimo_ensaio` e
+        `ultimo_calculo`, que é onde o laudo lê os resultados).
+
+        A família é montada a partir do TRONCO: partindo de uma derivada, entram
+        a original e as irmãs; partindo da original, as derivadas.
+        """
+        analise = self.get_object()
+        amostra = analise.amostra
+        if amostra is None:
+            return Response([])
+
+        tronco = amostra.amostra_origem or amostra
+        familia = [tronco.id] + list(
+            tronco.derivadas.values_list('id', flat=True))
+
+        analises = (self._queryset_lista()
+                    .filter(amostra_id__in=familia)
+                    .exclude(pk=analise.pk))
+        return Response(self.get_serializer(analises, many=True).data)
+
     @action(detail=False, methods=['get'], url_path='abertas')
     def abertas(self, request):
         analises = self._queryset_lista(request, finalizada=0)

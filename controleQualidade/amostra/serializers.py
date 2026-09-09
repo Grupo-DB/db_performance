@@ -49,6 +49,13 @@ class AmostraSerializer(serializers.ModelSerializer):
     produto_amostra = serializers.PrimaryKeyRelatedField(queryset=ProdutoAmostra.objects.all(), write_only=True, required=False, allow_null=True)
     produto_amostra_detalhes = ProdutoAmostraSerializer(source='produto_amostra', read_only=True)
     imagens = AmostraImagemSerializer(many=True, read_only=True)
+    amostra_origem = serializers.PrimaryKeyRelatedField(
+        queryset=Amostra.objects.all(), required=False, allow_null=True)
+    # Resumo, não o serializer inteiro: a original e as derivadas aparecem em toda
+    # listagem de amostra, e expandi-las por completo traria produto, ordem e
+    # imagens de cada uma — de quebra, uma cadeia recursiva sem fim.
+    amostra_origem_detalhes = serializers.SerializerMethodField()
+    derivadas_detalhes = serializers.SerializerMethodField()
     uploaded_images = serializers.ListField(
         child=serializers.FileField(),
         write_only=True,
@@ -57,6 +64,31 @@ class AmostraSerializer(serializers.ModelSerializer):
     class Meta:
         model = Amostra
         fields = '__all__'
+
+    @staticmethod
+    def _resumo(amostra):
+        if amostra is None:
+            return None
+        return {
+            'id': amostra.id,
+            'numero': amostra.numero,
+            'material': amostra.material,
+            'finalidade': amostra.finalidade,
+            'data_entrada': amostra.data_entrada,
+            'data_coleta': amostra.data_coleta,
+        }
+
+    def get_amostra_origem_detalhes(self, obj):
+        return self._resumo(obj.amostra_origem)
+
+    def get_derivadas_detalhes(self, obj):
+        """As duplicatas/reanálises desta amostra, da mais antiga para a mais nova.
+
+        É o que o laudo usa para oferecer os dois valores: partindo da original
+        ele acha as derivadas aqui, e partindo de uma derivada acha as irmãs
+        pela `amostra_origem_detalhes`.
+        """
+        return [self._resumo(d) for d in obj.derivadas.all().order_by('id')]
 
     def validate(self, attrs):
         """Na edição, impede trocar o número por um que já exista.
@@ -75,6 +107,11 @@ class AmostraSerializer(serializers.ModelSerializer):
             if ja_existe:
                 raise serializers.ValidationError(
                     {'numero': f'Já existe outra amostra com o número {numero}.'})
+
+        origem = attrs.get('amostra_origem')
+        if origem is not None and self.instance is not None and origem.pk == self.instance.pk:
+            raise serializers.ValidationError(
+                {'amostra_origem': 'A amostra não pode ser duplicata dela mesma.'})
         return attrs
 
     def create(self, validated_data):

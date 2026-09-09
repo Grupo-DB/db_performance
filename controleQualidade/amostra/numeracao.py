@@ -24,6 +24,24 @@ deslocar a numeração que o laboratório já usa:
 * sequencial com 6 dígitos, quebrado em 2 + 4: 440 → `00.0440`;
 * o "maior sequencial" olha todo `numero` que COMEÇA com o prefixo, então
   `cal` continua enxergando `calcario ...` e `cal hidratada ...`.
+
+DUPLICATA E REANÁLISE
+---------------------
+Uma amostra criada como duplicata ou reanálise de outra NÃO consome um sequencial
+novo: ela pendura um índice no número da original.
+
+    calcario 00.0526      original
+    calcario 00.0526.1    primeira duplicata/reanálise
+    calcario 00.0526.2    segunda
+
+É o que o laboratório já escrevia à mão. A consequência importante está em
+`sequencial_de`: sem tratamento, 'calcario 00.0526.1' viraria o sequencial
+5.261 e a próxima amostra de calcário nasceria como `calcario 52.6200`. Por isso
+o sufixo é removido ANTES de ler o sequencial — a derivada é invisível para a
+contagem do prefixo.
+
+Derivada de derivada não existe: `.1.1` seria ambíguo com o formato. Pedir uma
+duplicata de `calcario 00.0526.1` cria `calcario 00.0526.2`, irmã e não filha.
 """
 import re
 import unicodedata
@@ -48,6 +66,23 @@ def normalizar_prefixo(material):
     return sem_acento.lower().strip()
 
 
+# 'calcario 00.0526.1' → base 'calcario 00.0526' + índice 1.
+#
+# Exige um ponto ANTES do sufixo (`.+\.\d+`) justamente para não confundir a
+# derivada com o formato normal: 'cal 00.0440' e o legado 'Calcário 08.392' têm
+# um grupo de dígitos só depois do ponto e não casam aqui.
+DERIVADA_RE = re.compile(r'^(?P<base>.+\.\d+)\.(?P<indice>\d+)$')
+
+
+def separar_derivada(numero):
+    """'calcario 00.0526.1' → ('calcario 00.0526', 1). Não sendo derivada, (numero, None)."""
+    texto = str(numero or '').strip()
+    casou = DERIVADA_RE.match(texto)
+    if not casou:
+        return texto, None
+    return casou.group('base'), int(casou.group('indice'))
+
+
 def formatar_numero(prefixo, sequencial):
     """('cal', 440) → 'cal 00.0440'."""
     digitos = f'{int(sequencial):0{LARGURA_SEQUENCIAL}d}'
@@ -60,10 +95,15 @@ def sequencial_de(numero):
     Leitura idêntica à do endpoint antigo (último trecho depois do espaço, sem
     os pontos) de propósito: assim continuam contando os números legados de
     outro formato, como 'Calcário 08.392' → 8392.
+
+    A DERIVADA devolve o sequencial da ORIGINAL: 'calcario 00.0526.1' → 526.
+    Ela não é um número novo, é a mesma amostra reanalisada, e deixá-la contar
+    como 5.261 empurraria toda a numeração do prefixo para frente.
     """
     if not numero:
         return None
-    partes = str(numero).strip().split(' ')
+    base, _ = separar_derivada(numero)
+    partes = str(base).strip().split(' ')
     if len(partes) < 2:
         return None
     digitos = partes[-1].replace('.', '')
@@ -103,20 +143,73 @@ def proximo_sequencial(material):
     return maior_sequencial(prefixo) + 1
 
 
-def reservar_numero(material, numero_informado=None):
+def reservar_numero(material, numero_informado=None, origem=None):
     """Número definitivo da amostra, reservado até o fim da transação em curso.
 
     Tem de ser chamada dentro de `transaction.atomic()` e o INSERT precisa
     acontecer na MESMA transação — é a trava do `maior_sequencial` que impede
     dois cadastros simultâneos de saírem com o mesmo número.
 
-    Sem material dá para derivar prefixo nenhum; nesse caso devolve o que o
-    cliente mandou (o model não aceita `numero` vazio).
+    Com `origem` a amostra é duplicata/reanálise: em vez de consumir um
+    sequencial novo, pendura o próximo índice no número da original
+    ('calcario 00.0526' → 'calcario 00.0526.1'). O material nem entra na conta,
+    porque o prefixo é o da original — uma duplicata cadastrada com o material
+    escrito de outro jeito continua na mesma família.
+
+    Sem material e sem origem dá para derivar prefixo nenhum; nesse caso devolve
+    o que o cliente mandou (o model não aceita `numero` vazio).
     """
+    if origem is not None:
+        derivado = proximo_numero_derivada(origem, travar=True)
+        if derivado:
+            return derivado
+
     prefixo = normalizar_prefixo(material)
     if not prefixo:
         return numero_informado
     return formatar_numero(prefixo, maior_sequencial(prefixo, travar=True) + 1)
+
+
+def maior_indice_derivada(base, travar=False):
+    """Maior índice já pendurado em `base` ('calcario 00.0526' → 2 se existe .2).
+
+    Com `travar=True` prende as linhas da família até o fim da transação, pelo
+    mesmo motivo de `maior_sequencial`: duas duplicatas pedidas ao mesmo tempo
+    sairiam ambas como `.1`.
+
+    O filtro é `istartswith` da base com o ponto — 'calcario 00.0526.' — para
+    não arrastar 'calcario 00.05261' (que não é da família) nem a própria base.
+    """
+    from .models import Amostra
+
+    consulta = Amostra.objects.filter(numero__istartswith=f'{base}.')
+    if travar and connection.features.has_select_for_update:
+        consulta = consulta.select_for_update()
+
+    maior = 0
+    for numero in consulta.values_list('numero', flat=True):
+        familia, indice = separar_derivada(numero)
+        if indice and chave_colacao(familia) == chave_colacao(base):
+            maior = max(maior, indice)
+    return maior
+
+
+def numero_base_de(origem):
+    """Número-tronco da família de `origem` — a própria, ou a mãe se ela for derivada.
+
+    Duplicata de duplicata vira irmã: pedir a partir de 'calcario 00.0526.1'
+    devolve 'calcario 00.0526', e o índice novo sai `.2`.
+    """
+    base, _ = separar_derivada(getattr(origem, 'numero', origem))
+    return base
+
+
+def proximo_numero_derivada(origem, travar=False):
+    """Número da próxima duplicata/reanálise de `origem`: 'calcario 00.0526.3'."""
+    base = numero_base_de(origem)
+    if not base:
+        return None
+    return f'{base}.{maior_indice_derivada(base, travar=travar) + 1}'
 
 
 def chave_colacao(texto):

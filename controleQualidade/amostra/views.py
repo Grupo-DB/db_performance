@@ -8,10 +8,12 @@ from .serializers import AmostraSerializer, TipoAmostraSerializer, ProdutoAmostr
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 import pandas as pd
 
 from controleQualidade.periodo_listagem import filtro_periodo, limite_periodo
-from .numeracao import proximo_sequencial, reservar_numero
+from .numeracao import (normalizar_prefixo, proximo_numero_derivada,
+                        proximo_sequencial, reservar_numero)
 
 class TipoAmostraViewSet(viewsets.ModelViewSet):
     queryset = TipoAmostra.objects.all()
@@ -120,12 +122,16 @@ class AmostraViewSet(viewsets.ModelViewSet):
         material saem com números diferentes em vez de esperarem a sorte.
 
         Quem chamou recebe o número real no corpo da resposta — é ele que a tela
-        deve exibir, não a prévia.
+        deve exibir, não a prévia. Vale também para a duplicata/reanálise: o
+        índice ('.1', '.2') é decidido aqui, com a mesma trava.
         """
         with transaction.atomic():
             numero = reservar_numero(
                 serializer.validated_data.get('material'),
                 numero_informado=serializer.validated_data.get('numero'),
+                # Duplicata/reanálise não consome sequencial: pendura '.1' no
+                # número da original.
+                origem=serializer.validated_data.get('amostra_origem'),
             )
             if not numero:
                 raise ValidationError(
@@ -139,6 +145,78 @@ class AmostraViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
     
+    @action(detail=False, methods=['get'], url_path='buscar')
+    def buscar(self, request):
+        """Busca enxuta de amostra por número/material/produto, para seletores.
+
+        Existe para o campo "amostra de origem" da duplicata/reanálise: ali o
+        laboratório procura uma amostra QUALQUER, inclusive antiga e já analisada,
+        e baixar a tabela inteira no navegador para preencher um combo não se
+        sustenta. A busca é feita aqui e volta no máximo `LIMITE` linhas.
+
+        `?material=Calcário` recorta pelo material já escolhido no formulário: a
+        duplicata é da MESMA coisa, então oferecer amostras de outro material é
+        oferecer erro. Sem o parâmetro devolve todos.
+
+        A carga útil é o resumo — o suficiente para o rótulo da lista. Os dados
+        que o formulário copia saem de uma leitura da amostra inteira, feita só
+        na escolhida.
+        """
+        LIMITE = 40
+        termo = (request.query_params.get('q') or '').strip()
+        material = (request.query_params.get('material') or '').strip()
+
+        amostras = Amostra.objects.select_related('produto_amostra').order_by('-id')
+
+        if material:
+            # A base tem 'Calcario' E 'Calcário' como materiais distintos. O MySQL de
+            # produção compara sem acento por collation, mas o SQLite local não —
+            # então as duas grafias vão explícitas na consulta, e o filtro funciona
+            # igual nos dois bancos. Ver amostra/numeracao.py:normalizar_prefixo.
+            sem_acento = normalizar_prefixo(material)
+            amostras = amostras.filter(
+                Q(material__iexact=material) | Q(material__iexact=sem_acento))
+
+        if termo:
+            amostras = amostras.filter(
+                Q(numero__icontains=termo)
+                | Q(material__icontains=termo)
+                | Q(produto_amostra__nome__icontains=termo)
+                | Q(numero_lote__icontains=termo)
+            )
+
+        return Response([{
+            'id': a.id,
+            'numero': a.numero,
+            'material': a.material,
+            'finalidade': a.finalidade,
+            'data_coleta': a.data_coleta,
+            'data_entrada': a.data_entrada,
+            'produto_amostra': a.produto_amostra_id,
+            'produto_nome': a.produto_amostra.nome if a.produto_amostra else '',
+            'tipo_amostra': a.tipo_amostra,
+            'subtipo': a.subtipo,
+            'local_coleta': a.local_coleta,
+            'numero_lote': a.numero_lote,
+            'laboratorio': a.laboratorio,
+        } for a in amostras[:LIMITE]])
+
+    @action(detail=True, methods=['get'], url_path='proximo-numero-derivada')
+    def previa_numero_derivada(self, request, pk=None):
+        # Nome diferente do da função importada de propósito: dentro do método o
+        # que vale é o global, mas um leitor apressado lê recursão.
+        """Prévia do número que uma duplicata/reanálise desta amostra receberia.
+
+        Prévia como a do sequencial: entre a tela mostrar e o POST chegar, outra
+        pessoa pode levar o índice. Quem decide é o `perform_create`.
+        """
+        origem = self.get_object()
+        return Response({
+            'origem_id': origem.id,
+            'origem_numero': origem.numero,
+            'numero': proximo_numero_derivada(origem),
+        })
+
     @action(detail=False, methods=['get'], url_path='locais-coleta')
     def locais_coleta(self, request):
         """
