@@ -11,6 +11,13 @@ planilha seja copiada para o servidor: assim a carga viaja junto com o `git pull
 fica revisável no diff e pode ser repetida sem depender de um arquivo no
 `Downloads` de alguém. Para uma rodada nova, use `--planilha`.
 
+Segunda rodada, 09/09/2026: outras 89 análises apareceram sem classificação (a
+base cresceu desde agosto). A carga é `classificacao_2026_09_08.json` — 88 com
+valor e 1 sem, a análise 184, cuja OS também está sem classificação.
+
+    python manage.py importa_classificacao_analises --dados classificacao_2026_09_08.json
+    python manage.py importa_classificacao_analises --dados classificacao_2026_09_08.json --aplicar
+
 Não grava nada sem `--aplicar`.
 """
 import json
@@ -24,8 +31,8 @@ from controleQualidade.analise.models import Analise
 # sem `choices` — nada no banco impede um valor torto, então a validação é aqui.
 CLASSIFICACOES_VALIDAS = ('Simples', 'Parcial', 'Complexa', 'Super Complexa')
 
-DADOS_PADRAO = (Path(__file__).resolve().parent.parent
-                / 'dados' / 'classificacao_2026_08_28.json')
+DIRETORIO_DADOS = Path(__file__).resolve().parent.parent / 'dados'
+DADOS_PADRAO = DIRETORIO_DADOS / 'classificacao_2026_08_28.json'
 
 
 class Command(BaseCommand):
@@ -35,6 +42,12 @@ class Command(BaseCommand):
         parser.add_argument(
             '--aplicar', action='store_true',
             help='Grava as classificações. Sem isto, só relata.',
+        )
+        parser.add_argument(
+            '--dados', default='',
+            help='Outro JSON de management/dados/ (rodada nova). Aceita o nome do '
+                 'arquivo ou o caminho completo. Ex.: '
+                 '--dados classificacao_2026_09_08.json (88 análises da base de 08/09).',
         )
         parser.add_argument(
             '--planilha', default='',
@@ -51,7 +64,7 @@ class Command(BaseCommand):
     def handle(self, *args, **opcoes):
         aplicar = opcoes['aplicar']
         itens = (self._le_planilha(opcoes['planilha']) if opcoes['planilha']
-                 else self._le_json())
+                 else self._le_json(opcoes['dados']))
 
         invalidos = [r for r in itens if r['classificacao'] not in CLASSIFICACOES_VALIDAS]
         if invalidos:
@@ -99,10 +112,20 @@ class Command(BaseCommand):
 
     # ── Fontes ───────────────────────────────────────────────────────────────
 
-    def _le_json(self):
-        if not DADOS_PADRAO.exists():
-            raise CommandError(f'Arquivo de dados não encontrado: {DADOS_PADRAO}')
-        dados = json.loads(DADOS_PADRAO.read_text(encoding='utf-8'))
+    def _le_json(self, nome=''):
+        """Carga embutida. Sem `--dados`, a de 28/08; com, a que for pedida.
+
+        Nome solto (sem barra) é procurado em management/dados/ — é onde as cargas
+        moram, e digitar o caminho inteiro na VM só rende erro de digitação.
+        """
+        caminho = DADOS_PADRAO
+        if nome:
+            caminho = Path(nome).expanduser()
+            if not caminho.is_absolute() and len(caminho.parts) == 1:
+                caminho = DIRETORIO_DADOS / nome
+        if not caminho.exists():
+            raise CommandError(f'Arquivo de dados não encontrado: {caminho}')
+        dados = json.loads(caminho.read_text(encoding='utf-8'))
         self.stdout.write(
             f"Fonte: {dados.get('origem')} "
             f"(preenchida em {dados.get('preenchido_em')}) — "

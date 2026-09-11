@@ -159,13 +159,30 @@ class AnaliseSerializer(serializers.ModelSerializer):
         return []
 
     def update(self, instance, validated_data):
-        ensaios_data = validated_data.pop('ensaios', [])
-        calculos_data = validated_data.pop('calculos', [])
+        """Grava a análise e, quando a requisição fala deles, refaz ensaios e cálculos.
+
+        `None` e `[]` são coisas diferentes aqui, e confundi-los era um bug:
+
+        * `None` — a requisição não mencionou o campo. É o caso de todo PATCH parcial
+          da tela (massa específica, flexão, aderência, `excluded_ensaios`...), que
+          não pode encostar nos resultados salvos.
+        * `[]` — a requisição mencionou e não sobrou nada. É o que a tela manda quando
+          o laboratório REMOVE todos os ensaios ou todos os cálculos da análise.
+
+        Com `pop(..., [])` os dois viravam lista vazia e o `if` os descartava junto:
+        as linhas antigas continuavam no banco e voltavam por `ultimo_calculo` /
+        `ultimo_ensaio` — o item removido reaparecia no drawer "Visualizar OS" (aberta
+        ou em arquivo) e no laudo, mesmo sumindo da tela da análise. Visto na análise
+        1329 (`argamassa 00.0133.1`): ensaios zerados corretamente, porque a tela manda
+        um contêiner de ensaios vazio, e os dois cálculos removidos ainda de pé.
+        """
+        ensaios_data = validated_data.pop('ensaios', None)
+        calculos_data = validated_data.pop('calculos', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        if ensaios_data:
+        if ensaios_data is not None:
             instance.ensaios.all().delete()
             for ensaio in ensaios_data:
                 AnaliseEnsaio.objects.create(
@@ -176,7 +193,7 @@ class AnaliseSerializer(serializers.ModelSerializer):
                     ensaios=ensaio.get('ensaios'),
                 )
 
-        if calculos_data:
+        if calculos_data is not None:
             instance.calculos.all().delete()
             for calc in calculos_data:
                 AnaliseCalculo.objects.create(
