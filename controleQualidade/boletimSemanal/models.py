@@ -123,7 +123,14 @@ class IndicadorBoletim(models.Model):
         help_text='Restringe a produtos específicos. Vazio = qualquer produto que passe nos '
                   'demais filtros (mais seguro, porque o nome do produto na amostra varia).',
     )
-    campo_data = models.CharField(max_length=20, choices=DATA_CHOICES, default=DATA_ENTRADA)
+    campo_data = models.CharField(
+        max_length=20, choices=DATA_CHOICES, default=DATA_ENTRADA,
+        help_text='De que data sai a semana do resultado. Regra do laboratório (15/09/2026): '
+                  'CAL pela data de entrada (a coleta da cal é digitada à mão e costuma faltar) '
+                  'e CALCÁRIO pela data da amostra (a Media de cada fábrica tem a data preenchida '
+                  'e é ela que diz a semana de produção). Indicador novo nasce em "entrada": '
+                  'sendo de calcário, troque para "data de coleta".',
+    )
 
     # ── Como apresentar e cobrar ─────────────────────────────────────────────
     unidade = models.CharField(max_length=20, blank=True, default='%')
