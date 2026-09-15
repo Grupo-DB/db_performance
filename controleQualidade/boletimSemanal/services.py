@@ -18,6 +18,7 @@ from datetime import date, timedelta
 from django.db.models import Q
 
 from controleQualidade.analise.models import Analise, AnaliseCalculo, AnaliseEnsaio
+from controleQualidade.amostra.derivadas import sem_derivadas
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +191,9 @@ def _queryset_do_indicador(indicador, ano: int):
         | Q(finalizada_at__range=(inicio, fim))
         | Q(data__range=(inicio, fim))
     )
-    return qs.distinct()
+    # Duplicata e reanálise são a MESMA amostra medida de novo: contadas aqui,
+    # entrariam duas vezes na média da semana. Ver amostra/derivadas.py.
+    return sem_derivadas(qs).distinct()
 
 
 def valores_por_analise(indicador, ano: int, ignorar_exclusoes: bool = False):

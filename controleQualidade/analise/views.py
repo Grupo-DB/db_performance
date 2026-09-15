@@ -17,6 +17,7 @@ import pandas as pd
 from django.db.models import Q
 
 from controleQualidade.periodo_listagem import filtro_periodo, limite_periodo
+from controleQualidade.amostra.derivadas import eh_derivada, sem_derivadas
 
 # Gestão do laboratório. Mesma lista de shared/grupos.ts no frontend; o nome tem de
 # bater com o do grupo no admin do Django.
@@ -1036,6 +1037,9 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                     # Usada pelo relatório PDF por classificação do dashboard de qualidade
                     # (agrupa por origem/produto/finalidade/local de coleta).
                     'finalidade': amostra.finalidade if amostra else None,
+                    # Duplicata/reanálise continua na lista (quem confere precisa
+                    # vê-la), mas sai da média — a tela marca a linha por este campo.
+                    'derivada': eh_derivada(amostra),
                     # Vai junto para a tela poder MOSTRAR o que filtrou (Media/Pontual) —
                     # o filtro é resolvido aqui, mas conferir sem ver o valor é adivinhação.
                     'tipo_amostragem': amostra.tipo_amostragem if amostra else None,
@@ -1065,7 +1069,12 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         analises_excluidas = set(data.get('analises_excluidas', []))
 
         if ensaio_id_filtro or ensaio_nome_filtro or campo_especial:
-            ids_para_calcular = [a['id'] for a in analises_list if a['id'] not in analises_excluidas]
+            # Duplicata e reanálise são a mesma amostra medida de novo: entram na
+            # lista, não na estatística (ver amostra/derivadas.py).
+            ids_para_calcular = [
+                a['id'] for a in analises_list
+                if a['id'] not in analises_excluidas and not (a['amostra'] or {}).get('derivada')
+            ]
             amostra_por_analise = {a['id']: (a['amostra'] or {}).get('numero') for a in analises_list}
 
             valores_por_analise = {}
@@ -1309,6 +1318,8 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
             analise__data__lte=data_final,
             #analise__finalizada=True
         )
+        # Duplicata/reanálise é a mesma amostra medida de novo: fora da média.
+        queryset = sem_derivadas(queryset, 'analise__amostra__')
         
         # Filtrar por ensaios específicos se fornecidos
         if ensaio_ids:
@@ -1532,6 +1543,9 @@ class AnaliseEnsaioViewSet(viewsets.ModelViewSet):
                 data__gte=data_inicial,
                 data__lte=data_final
             ).select_related('amostra')
+
+        # Duplicata/reanálise é a mesma amostra medida de novo: fora da média.
+        queryset = sem_derivadas(queryset)
         
         # Filtrar por local de coleta
         if local_coleta:
@@ -3301,12 +3315,14 @@ class AnaliseCalculoViewSet(viewsets.ModelViewSet):
                 "error": "Formato de data inválido. Use YYYY-MM-DD"
             }, status=400)
         
-        # Iniciar queryset base com filtro de período
+        # Iniciar queryset base com filtro de período (sem duplicata/reanálise:
+        # é a mesma amostra medida de novo e pesaria duas vezes na média)
         queryset = AnaliseCalculo.objects.filter(
             analise__data__gte=data_inicial,
             analise__data__lte=data_final,
             #analise__finalizada=True
         ).select_related('analise', 'analise__amostra')
+        queryset = sem_derivadas(queryset, 'analise__amostra__')
         
         # Filtrar por cálculo(s) se fornecido
         if calculos_descricoes:
