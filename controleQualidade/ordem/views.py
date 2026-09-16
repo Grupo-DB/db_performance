@@ -20,7 +20,19 @@ import pandas as pd
 import requests
 
 class OrdemViewSet(viewsets.ModelViewSet):
-    queryset = Ordem.objects.all()
+    # O `OrdemSerializer` expande `plano_detalhes`, e o `PlanoAnaliseSerializer`
+    # expande os ensaios e os cálculos de cada plano — com `tipo_ensaio` e
+    # `variavel` de CADA ensaio. Sem prefetch isso vira uma cascata de queries por
+    # ordem, e a tela de Ordens pede a lista inteira ao abrir. É o mesmo padrão que
+    # custava ~6.200 queries na listagem de análises (ver `_RELACOES_LISTA_M2M` em
+    # analise/views.py), e os caminhos aqui são os mesmos de lá, sem o prefixo.
+    queryset = Ordem.objects.prefetch_related(
+        'plano_analise',
+        'plano_analise__ensaios__tipo_ensaio',
+        'plano_analise__ensaios__variavel',
+        'plano_analise__calculos_ensaio__ensaios__tipo_ensaio',
+        'plano_analise__calculos_ensaio__ensaios__variavel',
+    )
     serializer_class = OrdemSerializer
     def partial_update(self, request, *args, **kwargs):
         istance = self.get_object()
@@ -31,12 +43,14 @@ class OrdemViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='proximo-numero')
     def proximo_numero(self, request):
-        # Filtra apenas números válidos
-        qs = Ordem.objects.all()
+        # Só a coluna `numero`: instanciar o model inteiro de cada ordem (e arrastar
+        # o prefetch da listagem junto) para ler um campo é desperdício. O filtro
+        # continua em Python porque `numero` é texto e a base tem valores não
+        # numéricos — uma agregação SQL engasgaria neles.
         numeros = []
-        for ordem in qs:
+        for numero in Ordem.objects.values_list('numero', flat=True):
             try:
-                numeros.append(int(ordem.numero))
+                numeros.append(int(numero))
             except (ValueError, TypeError):
                 continue
         max_numero = max(numeros) if numeros else 0
@@ -45,7 +59,15 @@ class OrdemViewSet(viewsets.ModelViewSet):
     
 
 class ExpressaViewSet(viewsets.ModelViewSet):
-    queryset = OrdemExpressa.objects.all()
+    # Mesma história da OrdemViewSet: `get_ensaio_detalhes` e
+    # `get_calculo_ensaio_detalhes` percorrem as tabelas intermediárias e
+    # serializam cada ensaio com tipo e variáveis.
+    queryset = OrdemExpressa.objects.prefetch_related(
+        'ensaios_intermediarios__ensaio__tipo_ensaio',
+        'ensaios_intermediarios__ensaio__variavel',
+        'calculos_intermediarios__calculo__ensaios__tipo_ensaio',
+        'calculos_intermediarios__calculo__ensaios__variavel',
+    )
     serializer_class = OrdemExpressaSerializer
 
     def partial_update(self, request, *args, **kwargs):
