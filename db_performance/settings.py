@@ -116,6 +116,7 @@ INSTALLED_APPS = [
     'whatsapp',
     'emprestimos',
     'recrutamento',
+    'pesquisas',
 ]
 
 MIDDLEWARE = [

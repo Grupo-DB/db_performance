@@ -51,6 +51,7 @@ urlpatterns = [
     path('whatsapp/', include('whatsapp.urls')),
     path('emprestimos/', include('emprestimos.urls')),
     path('recrutamento/', include('recrutamento.urls')),
+    path('pesquisas/', include('pesquisas.urls')),
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
