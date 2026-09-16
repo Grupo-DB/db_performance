@@ -285,6 +285,10 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'grupodagobertobarcellos@gmail.com'  # Seu endereço de e-mail
 EMAIL_HOST_PASSWORD = 'zrwehfczwugpsssp'  # Sua senha de e-mail
+# Remetente padrao. Sem isso o Django usa 'webmaster@localhost', endereco invalido
+# que faz o destinatario tratar a mensagem como spam mesmo o Gmail aceitando o envio.
+DEFAULT_FROM_EMAIL = 'Grupo DB <grupodagobertobarcellos@gmail.com>'
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 
 
