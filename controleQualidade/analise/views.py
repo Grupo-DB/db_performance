@@ -224,6 +224,211 @@ class AnaliseViewSet(viewsets.ModelViewSet):
     queryset = Analise.objects.all()
     serializer_class = AnaliseSerializer
 
+    @action(detail=False, methods=['post'], url_path='estatisticas-lote')
+    def estatisticas_lote(self, request):
+        """
+        As estatísticas de VÁRIOS ensaios num pedido só.
+
+        O painel de médias do dashboard pede oito (PN, PF, RE, PRNT, Umidade, CO₂,
+        CaO, MgO). Com `filtrar-e-calcular` isso eram oito requisições, e cada uma
+        refazia o mesmo trabalho: montar a lista de análises do período, carregar
+        os `AnaliseEnsaio` e fazer parse do JSON de cada um — oito vezes sobre os
+        MESMOS registros, para extrair um ensaio diferente de cada vez.
+
+        Aqui o queryset, a lista e o parse acontecem UMA vez; os alvos são casados
+        em memória sobre o resultado já parseado.
+
+        Parâmetros (POST): os mesmos filtros de `filtrar-e-calcular`, mais
+          - alvos: lista de {chave, tipo, id?, descricao?, campo?, peneira_malha?,
+            peneira_metrica?}, com tipo em 'ensaio' | 'calculo' | 'especial'.
+
+        Resposta: {'resultados': {<chave>: {<mesmo bloco de `estatisticas`>}}}.
+        A lista de análises NÃO volta — quem precisa dela usa `filtrar-e-calcular`.
+        """
+        import json
+
+        data = request.data
+        alvos = data.get('alvos') or []
+        if not isinstance(alvos, list) or not alvos:
+            return Response({'error': "Informe 'alvos' com pelo menos um ensaio."}, status=400)
+
+        qs = self._queryset_analises_filtrado(data)
+        analises_excluidas = set(data.get('analises_excluidas', []))
+
+        # Uma passada só pela lista: ids elegíveis e o número da amostra de cada.
+        ids_para_calcular = []
+        amostra_por_analise = {}
+        total = 0
+        for analise in qs:
+            total += 1
+            amostra = analise.amostra
+            amostra_por_analise[analise.id] = amostra.numero if amostra else None
+            # Duplicata e reanálise são a mesma amostra medida de novo: fora da conta.
+            if analise.id in analises_excluidas or eh_derivada(amostra):
+                continue
+            ids_para_calcular.append(analise.id)
+
+        # ── O parse caro, feito UMA vez ─────────────────────────────────────
+        # {analise_id: [lista de ensaios do JSON]}, na ordem em que o
+        # filtrar-e-calcular lê (o registro mais novo primeiro, e dentro dele os
+        # ensaios de trás para frente).
+        ensaios_por_analise = {}
+        for ae in (AnaliseEnsaio.objects
+                   .filter(analise_id__in=ids_para_calcular)
+                   .order_by('analise_id', '-id')):
+            if ae.analise_id in ensaios_por_analise:
+                continue  # já pegou o registro mais novo desta análise
+            try:
+                if isinstance(ae.ensaios_utilizados, list):
+                    ensaios_json = ae.ensaios_utilizados
+                elif isinstance(ae.ensaios_utilizados, str):
+                    ensaios_json = json.loads(ae.ensaios_utilizados)
+                else:
+                    continue
+            except (json.JSONDecodeError, TypeError):
+                continue
+            ensaios_por_analise[ae.analise_id] = list(reversed(ensaios_json))
+
+        # Os campos JSON da própria Analise, carregados só se algum alvo precisar.
+        analises_por_id = {}
+        if any((a.get('tipo') == 'especial') for a in alvos):
+            analises_por_id = {a.id: a for a in Analise.objects.filter(id__in=ids_para_calcular)}
+
+        # Cálculos compostos: um só filtro para todos os alvos do tipo, em vez de
+        # um `icontains` por alvo.
+        calculos_por_analise = {}
+        if any((a.get('tipo') == 'calculo') for a in alvos):
+            for ac in (AnaliseCalculo.objects
+                       .filter(analise_id__in=ids_para_calcular)
+                       .order_by('analise_id', '-id')):
+                calculos_por_analise.setdefault(ac.analise_id, []).append(ac)
+
+        resultados = {}
+        for alvo in alvos:
+            chave = str(alvo.get('chave') or alvo.get('id') or alvo.get('descricao') or '')
+            resultados[chave] = self._estatistica_de_alvo(
+                alvo, ids_para_calcular, amostra_por_analise,
+                ensaios_por_analise, calculos_por_analise, analises_por_id,
+            )
+
+        return Response({'total_analises': total, 'resultados': resultados})
+
+    def _estatistica_de_alvo(self, alvo, ids, amostra_por_analise,
+                             ensaios_por_analise, calculos_por_analise, analises_por_id):
+        """Casa UM alvo contra os dados já carregados. Mesmo formato de `estatisticas`."""
+        tipo = alvo.get('tipo')
+        valores_por_analise = {}
+
+        if tipo == 'ensaio' or tipo == 'calculo':
+            ensaio_id = alvo.get('id')
+            descricao = alvo.get('descricao')
+            for analise_id in ids:
+                for ensaio in ensaios_por_analise.get(analise_id, []):
+                    # Cada tipo casa por um critério só. Aceitar os dois deixaria
+                    # um ensaio com `descricao` junto casar pelo nome de outro — é
+                    # o mesmo engano do `includes` cru que fez CaO herdar a Soma de
+                    # Óxidos no laudo.
+                    if tipo == 'ensaio':
+                        casou = ensaio_id is not None and ensaio.get('id') == int(ensaio_id)
+                    else:
+                        casou = bool(descricao) and _mesmo_ensaio(ensaio.get('descricao'), descricao)
+                    if not casou:
+                        continue
+                    try:
+                        valor_float = float(ensaio.get('valor'))
+                    except (ValueError, TypeError):
+                        continue
+                    valores_por_analise[analise_id] = {
+                        'analise_id': analise_id,
+                        'amostra_numero': amostra_por_analise.get(analise_id),
+                        'valor': valor_float,
+                        'ensaio_id': ensaio.get('id'),
+                        'ensaio_descricao': ensaio.get('descricao'),
+                        'unidade': ensaio.get('unidade', ''),
+                        'fonte': 'ensaio',
+                    }
+                    break
+
+            # Composto que não está em `ensaios_utilizados` cai no AnaliseCalculo,
+            # como o fallback do filtrar-e-calcular.
+            if tipo == 'calculo' and descricao:
+                for analise_id in ids:
+                    if analise_id in valores_por_analise:
+                        continue
+                    for ac in calculos_por_analise.get(analise_id, []):
+                        if not ac.calculos or descricao.lower() not in ac.calculos.lower():
+                            continue
+                        if ac.resultados is None:
+                            continue
+                        valores_por_analise[analise_id] = {
+                            'analise_id': analise_id,
+                            'amostra_numero': amostra_por_analise.get(analise_id),
+                            'valor': ac.resultados,
+                            'ensaio_id': None,
+                            'ensaio_descricao': ac.calculos,
+                            'unidade': '',
+                            'fonte': 'calculo',
+                        }
+                        break
+
+        elif tipo == 'especial':
+            campo = alvo.get('campo')
+            malha = alvo.get('peneira_malha')
+            metrica = alvo.get('peneira_metrica')
+            if campo in ('peneiras_secas', 'peneiras_umidas'):
+                descricao_campo = 'Peneiras {} — {} — {}'.format(
+                    'Secas' if campo == 'peneiras_secas' else 'Úmidas',
+                    malha or '', _LABEL_METRICA_PENEIRA.get(metrica, metrica or ''),
+                )
+                unidade_campo = '%'
+                extrair = lambda a: _extrair_valor_peneira(a, campo, malha, metrica)
+            elif campo in CAMPOS_ESPECIAIS:
+                nome_campo, extrator, descricao_campo, unidade_campo = CAMPOS_ESPECIAIS[campo]
+                extrair = lambda a: extrator(getattr(a, nome_campo, None))
+            else:
+                extrair = None
+                descricao_campo, unidade_campo = alvo.get('descricao', ''), ''
+
+            if extrair:
+                for analise_id in ids:
+                    analise = analises_por_id.get(analise_id)
+                    if not analise:
+                        continue
+                    valor = extrair(analise)
+                    if valor is None:
+                        continue
+                    try:
+                        valor_float = float(valor)
+                    except (ValueError, TypeError):
+                        continue
+                    valores_por_analise[analise_id] = {
+                        'analise_id': analise_id,
+                        'amostra_numero': amostra_por_analise.get(analise_id),
+                        'valor': valor_float,
+                        'ensaio_id': None,
+                        'ensaio_descricao': descricao_campo,
+                        'unidade': unidade_campo,
+                        'fonte': 'especial',
+                    }
+
+        detalhes = sorted(valores_por_analise.values(), key=lambda x: x['analise_id'])
+        valores = [v['valor'] for v in detalhes]
+        if not valores:
+            return {
+                'ensaio_descricao': alvo.get('descricao', ''),
+                'unidade': '', 'media': None, 'valor_minimo': None,
+                'valor_maximo': None, 'quantidade_medicoes': 0, 'detalhes': [],
+            }
+        return {
+            'ensaio_descricao': detalhes[0]['ensaio_descricao'] or alvo.get('descricao', ''),
+            'unidade': detalhes[0]['unidade'],
+            'media': sum(valores) / len(valores),
+            'valor_minimo': min(valores),
+            'valor_maximo': max(valores),
+            'quantidade_medicoes': len(valores),
+            'detalhes': detalhes,
+        }
+
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -1052,9 +1257,15 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                 } if amostra else None,
             })
 
+        # `sem_lista`: quem só quer a estatística não precisa das análises de volta.
+        # O dashboard pedia oito ensaios e descartava as oito listas — o custo era
+        # todo de rede e de JSON. A lista continua sendo MONTADA porque o cálculo
+        # abaixo depende dela (ids, derivada e número da amostra).
+        sem_lista = str(data.get('sem_lista', '')).lower() in ('1', 'true', 'sim')
+
         resposta = {
             'total_analises': len(analises_list),
-            'analises': analises_list,
+            'analises': [] if sem_lista else analises_list,
             'estatisticas': None,
             # Contrato com a tela: ela confere se todo filtro que mandou está aqui.
             'filtros_aceitos': FILTROS_SUPORTADOS,
