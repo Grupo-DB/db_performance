@@ -926,6 +926,22 @@ class NotificationViewSet(viewsets.ViewSet):
         request.user.notifications.mark_all_as_read()
         return Response({"success": "Todas as notificações foram marcadas como lidas"}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['post'], url_path='marcar_como_lida')
+    def marcar_como_lida(self, request, pk=None):
+        """Marca UMA notificação como lida.
+
+        O `list` já devolve só as não lidas, então esta é a única forma de um
+        card sair da tela para valer: sem ela o "dispensar" valia só enquanto a
+        página estava aberta e tudo voltava na recarga.
+
+        Filtra por `request.user`: ninguém marca a notificação de outro.
+        """
+        notificacao = request.user.notifications.filter(pk=pk).first()
+        if notificacao is None:
+            return Response({"detail": "Notificação não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+        notificacao.mark_as_read()
+        return Response({"success": "Notificação marcada como lida"}, status=status.HTTP_200_OK)
+
 
 
     @action(detail=False, methods=['get'])
