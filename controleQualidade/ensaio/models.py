@@ -82,3 +82,53 @@ class PlanoPeneira(models.Model):
 
     def __str__(self):
         return f'{self.descricao} ({self.get_tipo_display()})'
+
+
+class CadastroSimples(models.Model):
+    """Base dos cadastros de lista da amostra: só um nome, ligado ou desligado.
+
+    Finalidade e Fornecedor eram arrays fixos dentro de `amostra.ts`, no
+    frontend: acrescentar um fornecedor exigia alterar código e publicar. Aqui
+    viram cadastro, com a tela de Amostras podendo criar pelo modal.
+
+    Moram no app `ensaio` — e não no `amostra`, que seria o vizinho óbvio —
+    porque o `amostra` é um dos apps sem nenhum arquivo de migration na VM (as
+    migrations estão no .gitignore do backend): um `makemigrations amostra`
+    geraria um `0001_initial` tentando recriar as tabelas que já existem. O
+    `ensaio` tem a cadeia íntegra, então estas entram como incremento. O app
+    virou, na prática, o lugar dos cadastros do laboratório.
+    """
+
+    nome = models.CharField(max_length=150, unique=True)
+    ativo = models.BooleanField(default=True)
+    ordem = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        abstract = True
+        ordering = ['ordem', 'nome']
+
+    def __str__(self):
+        return self.nome
+
+
+class Finalidade(CadastroSimples):
+    """Para que a amostra entrou no laboratório (Controle de Qualidade, SAC...).
+
+    O nome é gravado como TEXTO em `Amostra.finalidade`, e a tela de análise
+    compara com 'SAC' para pedir o número do SAC. Renomear uma finalidade aqui
+    não renomeia o que já foi gravado nas amostras antigas.
+    """
+
+    class Meta(CadastroSimples.Meta):
+        abstract = False
+        verbose_name = 'Finalidade'
+        verbose_name_plural = 'Finalidades'
+
+
+class Fornecedor(CadastroSimples):
+    """Quem forneceu o material da amostra. Também gravado como texto na amostra."""
+
+    class Meta(CadastroSimples.Meta):
+        abstract = False
+        verbose_name = 'Fornecedor'
+        verbose_name_plural = 'Fornecedores'

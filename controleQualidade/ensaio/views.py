@@ -1,7 +1,10 @@
 from django.shortcuts import render
 from rest_framework import viewsets
-from .models import TipoEnsaio, Ensaio, Variavel, PlanoPeneira
-from .serializers import TipoEnsaioSerializer, EnsaioSerializer, VariavelSerializer, PlanoPeneiraSerializer
+from .models import TipoEnsaio, Ensaio, Variavel, PlanoPeneira, Finalidade, Fornecedor
+from .serializers import (
+    TipoEnsaioSerializer, EnsaioSerializer, VariavelSerializer, PlanoPeneiraSerializer,
+    FinalidadeSerializer, FornecedorSerializer,
+)
 from django.http import JsonResponse
 from rest_framework.response import Response
 from rest_framework import status, viewsets
@@ -80,3 +83,37 @@ class PlanoPeneiraViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)
+
+
+class CadastroSimplesViewSet(viewsets.ModelViewSet):
+    """CRUD dos cadastros de lista da amostra (finalidade, fornecedor).
+
+    `?ativo=true` é o que a tela de Amostras pede: o select só oferece o que está
+    em uso, enquanto o cadastro lista tudo para poder reativar.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        ativo = self.request.query_params.get('ativo')
+        if ativo is not None:
+            qs = qs.filter(ativo=str(ativo).lower() in ('1', 'true', 'sim'))
+        return qs
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
+
+class FinalidadeViewSet(CadastroSimplesViewSet):
+    queryset = Finalidade.objects.all()
+    serializer_class = FinalidadeSerializer
+
+
+class FornecedorViewSet(CadastroSimplesViewSet):
+    queryset = Fornecedor.objects.all()
+    serializer_class = FornecedorSerializer

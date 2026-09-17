@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import TipoEnsaio, Ensaio, Variavel, PlanoPeneira
+from .models import TipoEnsaio, Ensaio, Variavel, PlanoPeneira, Finalidade, Fornecedor
 
 class TipoEnsaioSerializer(serializers.ModelSerializer):
     class Meta:
@@ -96,3 +96,30 @@ class PlanoPeneiraSerializer(serializers.ModelSerializer):
             if malha not in malhas:
                 malhas.append(malha)
         return malhas
+
+
+class CadastroSimplesSerializer(serializers.ModelSerializer):
+    """Serializer dos cadastros de lista (nome/ativo/ordem).
+
+    O nome é gravado como texto na amostra, então espaço sobrando vira item
+    duplicado que parece igual na tela — daí o strip antes de salvar.
+    """
+
+    class Meta:
+        fields = '__all__'
+
+    def validate_nome(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('Informe o nome.')
+        return value
+
+
+class FinalidadeSerializer(CadastroSimplesSerializer):
+    class Meta(CadastroSimplesSerializer.Meta):
+        model = Finalidade
+
+
+class FornecedorSerializer(CadastroSimplesSerializer):
+    class Meta(CadastroSimplesSerializer.Meta):
+        model = Fornecedor
