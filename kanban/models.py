@@ -67,6 +67,16 @@ class KanbanTask(models.Model):
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='tasks_responsavel'
     )  # permite transferência para outro usuário
+    # "Atribuídas a mim" é caixa de entrada: a tarefa fica lá até o responsável
+    # organizá-la numa lista. Antes o critério era só "o quadro não é meu", então
+    # tarefa atribuída a mim dentro de um quadro COMPARTILHADO (onde não sou o
+    # criador) nunca saía da caixa — aparecia ao mesmo tempo na lista e nas
+    # atribuídas, e voltava a cada recarga por mais que fosse movida.
+    organizada_em = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Quando o responsável tirou a tarefa da caixa "Atribuídas a mim", '
+                  'colocando-a numa lista. Volta a nulo se a tarefa for transferida.',
+    )
     titulo = models.CharField(max_length=255)
     descricao = models.TextField(blank=True)
     prioridade = models.CharField(max_length=10, choices=PRIORIDADE_CHOICES, default='media')

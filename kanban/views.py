@@ -156,6 +156,11 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
 
         task.coluna = coluna
         task.ordem = _proxima_ordem(coluna)
+        # Arrastar para uma lista É organizar: tira a tarefa da caixa "Atribuídas
+        # a mim" de quem a recebeu. Só quando quem move é o responsável — o dono
+        # do quadro arrumando o próprio board não decide pela caixa do outro.
+        if task.responsavel_id == request.user.id and task.organizada_em is None:
+            task.organizada_em = timezone.now()
         # marca concluído_em se moveu para coluna cujo título contém "conclui"
         if 'conclui' in coluna.titulo.lower() and not task.concluido_em:
             task.concluido_em = timezone.now()
@@ -174,7 +179,11 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
         except User.DoesNotExist:
             return Response({'detail': 'Usuário não encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        task.responsavel = User.objects.get(pk=responsavel_id) if responsavel_id else None
+        # Transferir devolve a tarefa para a caixa de quem recebe: para o novo
+        # responsável ela é novidade, mesmo que o anterior já a tivesse organizado.
+        if task.responsavel_id != responsavel.id:
+            task.organizada_em = None
+        task.responsavel = responsavel
         task.save()
         return Response(KanbanTaskSerializer(task, context={'request': request}).data)
     
@@ -227,7 +236,9 @@ class KanbanTaskViewSet(viewsets.ModelViewSet):
     def recebidas(self, request):
         """Tarefas transferidas para o usuário atual (não são de quadros onde ele é criador)."""
         tasks = KanbanTask.objects.filter(
-            responsavel=request.user
+            responsavel=request.user,
+            # Já colocada numa lista pelo próprio responsável: saiu da caixa.
+            organizada_em__isnull=True,
         ).exclude(
             Q(coluna__quadro__criado_por=request.user)
         ).select_related(

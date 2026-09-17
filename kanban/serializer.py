@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
+from django.utils import timezone
 from .models import KanbanBoard, KanbanColumn, KanbanTask, KanbanAnexo
 
 class UserMinSerializer(serializers.ModelSerializer):
@@ -51,8 +52,9 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
             'data_inicio', 'prazo', 'concluido_em','anexos',
             'esta_atrasada', 'criado_em', 'atualizado_em','recorrente', 'recorrencia',
             'conversa_whatsapp', 'origem_whatsapp', 'notificar_whatsapp',
+            'organizada_em',
         ]
-        read_only_fields = ['dono', 'ordem', 'criado_em', 'atualizado_em']
+        read_only_fields = ['dono', 'ordem', 'criado_em', 'atualizado_em', 'organizada_em']
 
     def get_origem_whatsapp(self, obj):
         """Contato de origem, para o cartão mostrar de onde a tarefa veio."""
@@ -84,6 +86,28 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
                 'Só é possível avisar pelo WhatsApp em tarefa criada a partir de uma conversa.'
             )
         return ligado
+
+    def update(self, instance, validated_data):
+        """Mantém a caixa "Atribuídas a mim" em dia nas edições pelo modal.
+
+        Dois movimentos mexem nela e nenhum passa pelo `mover`/`transferir`:
+        trocar o responsável (a tarefa vira novidade para quem recebe) e o próprio
+        responsável escolher uma lista no select "Lista" (que é organizar).
+        """
+        usuario = getattr(self.context.get('request'), 'user', None)
+
+        responsavel_novo = validated_data.get('responsavel', instance.responsavel)
+        coluna_nova = validated_data.get('coluna', instance.coluna)
+
+        if 'responsavel' in validated_data and responsavel_novo != instance.responsavel:
+            validated_data['organizada_em'] = None
+        elif (coluna_nova != instance.coluna
+              and usuario is not None
+              and usuario == instance.responsavel
+              and instance.organizada_em is None):
+            validated_data['organizada_em'] = timezone.now()
+
+        return super().update(instance, validated_data)
 
     def validate_coluna_id(self, coluna):
         request = self.context['request']
