@@ -1,10 +1,11 @@
 from django.shortcuts import render
 from rest_framework import viewsets
-from .models import TipoEnsaio, Ensaio, Variavel
-from .serializers import TipoEnsaioSerializer, EnsaioSerializer, VariavelSerializer
+from .models import TipoEnsaio, Ensaio, Variavel, PlanoPeneira
+from .serializers import TipoEnsaioSerializer, EnsaioSerializer, VariavelSerializer, PlanoPeneiraSerializer
 from django.http import JsonResponse
 from rest_framework.response import Response
 from rest_framework import status, viewsets
+from rest_framework.permissions import IsAuthenticated
 import pandas as pd
 
 class TipoEnsaioViewSet(viewsets.ModelViewSet):
@@ -46,3 +47,36 @@ class EnsaioViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
 
+
+
+class PlanoPeneiraViewSet(viewsets.ModelViewSet):
+    """CRUD dos planos de peneiramento (cadastro do Controle de Qualidade).
+
+    Aceita `?tipo=peneiras_secas|peneiras_umidas` e `?ativo=true|false`: a tela
+    de análise e a de relatórios pedem só os ativos, enquanto o cadastro lista
+    tudo para poder reativar um plano desligado.
+    """
+
+    queryset = PlanoPeneira.objects.all()
+    serializer_class = PlanoPeneiraSerializer
+    # O projeto não define DEFAULT_PERMISSION_CLASSES (tudo fica AllowAny). Aqui
+    # é cadastro que muda o que o laboratório inteiro enxerga na digitação, então
+    # exige o token — o front já manda o Bearer em toda requisição.
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tipo = self.request.query_params.get('tipo')
+        if tipo:
+            qs = qs.filter(tipo=tipo)
+        ativo = self.request.query_params.get('ativo')
+        if ativo is not None:
+            qs = qs.filter(ativo=str(ativo).lower() in ('1', 'true', 'sim'))
+        return qs
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import TipoEnsaio, Ensaio, Variavel
+from .models import TipoEnsaio, Ensaio, Variavel, PlanoPeneira
 
 class TipoEnsaioSerializer(serializers.ModelSerializer):
     class Meta:
@@ -54,3 +54,45 @@ class EnsaioSerializer(serializers.ModelSerializer):
         
         instance.save()
         return instance
+
+class PlanoPeneiraSerializer(serializers.ModelSerializer):
+    """Cadastro dos planos de peneiramento.
+
+    `tipo_display` existe para a listagem do front não precisar repetir o de/para
+    de 'peneiras_secas' -> 'Peneiras Secas'.
+    """
+
+    tipo_display = serializers.CharField(source='get_tipo_display', read_only=True)
+
+    class Meta:
+        model = PlanoPeneira
+        fields = '__all__'
+
+    def validate_descricao(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('Informe a descrição do plano.')
+        return value
+
+    def validate_peneiras(self, value):
+        """Lista de malhas, sem repetição e sem item vazio.
+
+        A malha é casada por igualdade de string com o que está gravado na
+        análise: um espaço a mais ou um item duplicado não dá erro nenhum na
+        gravação e depois vira coluna vazia (ou dobrada) no relatório.
+        """
+        if value in (None, ''):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Envie uma lista de malhas.')
+
+        malhas = []
+        for item in value:
+            if not isinstance(item, str):
+                raise serializers.ValidationError('Cada malha deve ser um texto.')
+            malha = item.strip()
+            if not malha:
+                continue
+            if malha not in malhas:
+                malhas.append(malha)
+        return malhas
