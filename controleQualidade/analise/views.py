@@ -1292,10 +1292,18 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         if ensaio_id_filtro or ensaio_nome_filtro or campo_especial:
             # Duplicata e reanálise são a mesma amostra medida de novo: entram na
             # lista, não na estatística (ver amostra/derivadas.py).
+            #
+            # "Não entrar na estatística" é ficar fora da MÉDIA/mínimo/máximo — não
+            # é sumir. O valor delas continua vindo em `detalhes`, que é de onde a
+            # tela tira o número da coluna do ensaio: tirá-las daqui deixava a linha
+            # da reanálise com '-' em tudo (e, num resultado só de reanálises, a
+            # tabela inteira vazia), justamente para quem foi conferir a remedição.
             ids_para_calcular = [
-                a['id'] for a in analises_list
-                if a['id'] not in analises_excluidas and not (a['amostra'] or {}).get('derivada')
+                a['id'] for a in analises_list if a['id'] not in analises_excluidas
             ]
+            ids_derivadas = {
+                a['id'] for a in analises_list if (a['amostra'] or {}).get('derivada')
+            }
             amostra_por_analise = {a['id']: (a['amostra'] or {}).get('numero') for a in analises_list}
 
             valores_por_analise = {}
@@ -1430,8 +1438,11 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                             'fonte': 'especial',
                         }
 
-            valores = [v['valor'] for v in valores_por_analise.values()]
             detalhes = sorted(valores_por_analise.values(), key=lambda x: x['analise_id'])
+            for detalhe in detalhes:
+                detalhe['derivada'] = detalhe['analise_id'] in ids_derivadas
+            # A conta é só do que não é remedição da mesma amostra.
+            valores = [d['valor'] for d in detalhes if not d['derivada']]
 
             # Descrição/unidade de fallback quando não há nenhum valor encontrado
             if campo_especial in ('peneiras_secas', 'peneiras_umidas'):
@@ -1466,14 +1477,17 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                 resposta['estatisticas'] = {
                     'ensaio_id': ensaio_id_filtro,
                     'ensaio_nome': ensaio_nome_filtro,
-                    'ensaio_descricao': descricao_fallback,
-                    'unidade': '',
+                    'ensaio_descricao': descricao_repr,
+                    'unidade': unidade_repr,
                     'quantidade_medicoes': 0,
                     'analises_excluidas': list(analises_excluidas),
                     'media': None,
                     'valor_minimo': None,
                     'valor_maximo': None,
-                    'detalhes': [],
+                    # `detalhes` e não []: aqui se cai quando nenhum valor entra na
+                    # média — inclusive no caso de TODAS as análises do resultado
+                    # serem reanálises. A tabela da tela lê daqui.
+                    'detalhes': detalhes,
                 }
 
         return Response(resposta)
