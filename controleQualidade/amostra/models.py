@@ -45,6 +45,10 @@ class Amostra(models.Model):
     material = models.CharField(max_length=255, null=False, blank=False) #add os 10 tipos
     finalidade = models.CharField(max_length=255, null=True, blank=True) #(sac, controle de qualidade, desenvolvimento de produtos)
     numero_sac = models.CharField(max_length=255, null=True, blank=True) #numero do sac quando for da finalidade sac
+    # Preenchido só quando a finalidade é 'Desenvolvimento de Produto': o que se quer
+    # desenvolver/testar nesta amostra. TextField porque é texto corrido do analista,
+    # e não um código — CharField estouraria em produção (MySQL recusa com 1406).
+    especificacao_desenvolvimento = models.TextField(null=True, blank=True)
     data_envio = models.DateField(null=True, blank=True) #data de envio
     destino_envio = models.CharField(max_length=255, null=True, blank=True) #destino do envio
     data_recebida = models.DateField(null=True, blank=True) #data de recebimento    
