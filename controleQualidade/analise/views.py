@@ -1236,12 +1236,22 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                     'numero': amostra.numero if amostra else None,
                     'material': amostra.material if amostra else None,
                     'laboratorio': amostra.laboratorio if amostra else None,
+                    # A tela mostra UMA data na lista e deixa escolher qual. Não dá
+                    # para usar `analise.data`: é auto_now, ou seja, a última vez que
+                    # a análise foi alterada — não é nem a entrada nem a coleta.
+                    'data_entrada': amostra.data_entrada if amostra else None,
+                    'data_coleta': amostra.data_coleta if amostra else None,
                     'local_coleta': amostra.local_coleta if amostra else None,
                     'tipo_amostra': amostra.tipo_amostra if amostra else None,
                     'fornecedor': amostra.fornecedor if amostra else None,
                     # Usada pelo relatório PDF por classificação do dashboard de qualidade
                     # (agrupa por origem/produto/finalidade/local de coleta).
                     'finalidade': amostra.finalidade if amostra else None,
+                    # Texto livre da finalidade 'Desenvolvimento de Produto'. A lista
+                    # mostra a coluna quando alguma amostra do resultado TEM essa
+                    # finalidade, mesmo com o texto em branco — ver
+                    # shared/desenvolvimento.ts.
+                    'especificacao_desenvolvimento': amostra.especificacao_desenvolvimento if amostra else None,
                     # Duplicata/reanálise continua na lista (quem confere precisa
                     # vê-la), mas sai da média — a tela marca a linha por este campo.
                     'derivada': eh_derivada(amostra),
