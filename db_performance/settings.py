@@ -291,6 +291,12 @@ EMAIL_HOST_PASSWORD = 'zrwehfczwugpsssp'  # Sua senha de e-mail
 DEFAULT_FROM_EMAIL = 'Grupo DB <grupodagobertobarcellos@gmail.com>'
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
+# Avisos de vencimento da Gestão de Documentos (manage.py avisar_vencimentos).
+# O aviso vai para quem cadastrou o documento e para o Responsável Interno casado
+# pelo nome no cadastro de Colaboradores; esta lista recebe SEMPRE, e é o que
+# garante que um documento sem responsável identificado não avise ninguém.
+EMAILS_AVISO_DOCUMENTOS = []
+
 
 
 CELERY_BROKER_URL = 'redis://localhost:6379/0'

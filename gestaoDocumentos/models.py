@@ -1,6 +1,21 @@
 from django.db import models
+from django.contrib.auth.models import User
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
+
+
+# ── Fluxo de aprovação de contratos ─────────────────────────────────────────
+MODO_APROVACAO_CHOICES = [
+    ('PARALELO',   'Paralelo — todos os aprovadores são acionados de uma vez'),
+    ('SEQUENCIAL', 'Sequencial — um aprovador por vez, na ordem definida'),
+]
+
+SITUACAO_APROVACAO_CHOICES = [
+    ('SEM_FLUXO', 'Sem fluxo de aprovação'),
+    ('PENDENTE',  'Aguardando aprovação'),
+    ('APROVADO',  'Aprovado'),
+    ('REPROVADO', 'Reprovado'),
+]
 
 class Diretorio(models.Model):
     id = models.AutoField(primary_key=True)
@@ -102,7 +117,10 @@ class Contrato(models.Model):
     data_inicio = models.DateField(null=True, blank=True)
     data_fim = models.DateField(null=True, blank=True)
     vigencia = models.CharField(max_length=255, null=True, blank=True)
-    prazo_aviso = models.CharField(max_length=255, null=True, blank=True)
+    prazo_aviso = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Quantos dias antes do término avisar os interessados',
+    )
     responsavel_contratante = models.CharField(max_length=855, null=True, blank=True)
     responsavel_contratado = models.CharField(max_length=855, null=True, blank=True)
     multa_recisao = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -123,6 +141,19 @@ class Contrato(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.CharField(max_length=255, null=True, blank=True)
     updated_by = models.CharField(max_length=255, null=True, blank=True)
+    # Fluxo de aprovação
+    criado_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='contratos_criados',
+        help_text='Usuário que cadastrou — recebe o retorno das aprovações',
+    )
+    modo_aprovacao = models.CharField(
+        max_length=20, choices=MODO_APROVACAO_CHOICES, null=True, blank=True,
+    )
+    situacao_aprovacao = models.CharField(
+        max_length=20, choices=SITUACAO_APROVACAO_CHOICES,
+        default='SEM_FLUXO', db_index=True,
+    )
     class Meta:
         verbose_name = 'Contrato'
         verbose_name_plural = 'Contratos'
@@ -382,3 +413,111 @@ class DocumentoAnexo(models.Model):
         indexes = [
             models.Index(fields=['content_type', 'object_id']),
         ]
+
+class AprovacaoContrato(models.Model):
+    """Uma linha por aprovador de um contrato.
+
+    No modo PARALELO todas as linhas nascem notificadas; no SEQUENCIAL só a de
+    menor `ordem` é acionada, e a seguinte só é avisada quando a anterior aprova.
+    """
+
+    SITUACAO_CHOICES = [
+        ('PENDENTE',  'Pendente'),
+        ('APROVADO',  'Aprovado'),
+        ('REPROVADO', 'Reprovado'),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    contrato = models.ForeignKey(Contrato, on_delete=models.CASCADE, related_name='aprovacoes')
+    aprovador = models.ForeignKey(User, on_delete=models.CASCADE, related_name='aprovacoes_contratos')
+    ordem = models.PositiveIntegerField(default=1, help_text='Posição na fila (usada no modo sequencial)')
+    situacao = models.CharField(max_length=20, choices=SITUACAO_CHOICES, default='PENDENTE', db_index=True)
+    parecer = models.TextField(null=True, blank=True)
+    notificado_em = models.DateTimeField(null=True, blank=True)
+    decidido_em = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Aprovação de Contrato'
+        verbose_name_plural = 'Aprovações de Contrato'
+        ordering = ['ordem', 'id']
+        unique_together = ('contrato', 'aprovador')
+        indexes = [
+            models.Index(fields=['aprovador', 'situacao']),
+        ]
+
+    def __str__(self):
+        return f'{self.aprovador} — contrato {self.contrato_id} ({self.get_situacao_display()})'
+
+
+class DocumentoNotificacao(models.Model):
+    """Notificação de fluxo de documentos, exibida no sino do ManagerDB."""
+
+    TIPO_CHOICES = [
+        ('APROVACAO_SOLICITADA', 'Aprovação solicitada'),
+        ('APROVACAO_APROVADA',   'Aprovação registrada'),
+        ('APROVACAO_REPROVADA',  'Contrato reprovado'),
+        ('APROVACAO_CONCLUIDA',  'Contrato aprovado por todos'),
+        ('APROVACAO_LEMBRETE',   'Lembrete de aprovação pendente'),
+        ('VENCIMENTO_PROXIMO',   'Documento perto do vencimento'),
+        ('VENCIMENTO_HOJE',      'Documento vence hoje'),
+        ('VENCIDO',              'Documento vencido'),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    # Aprovação só existe em contrato; vencimento vale para qualquer documento,
+    # por isso o par genérico ao lado da FK.
+    contrato = models.ForeignKey(
+        Contrato, on_delete=models.CASCADE, related_name='notificacoes', null=True, blank=True,
+    )
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
+    object_id = models.PositiveIntegerField(null=True, blank=True)
+    documento = GenericForeignKey('content_type', 'object_id')
+    documento_tipo = models.CharField(max_length=60, null=True, blank=True)
+    usuario_notificado = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notificacoes_documentos')
+    tipo = models.CharField(max_length=30, choices=TIPO_CHOICES)
+    mensagem = models.TextField()
+    lido = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = 'Notificação de Documento'
+        verbose_name_plural = 'Notificações de Documento'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['usuario_notificado', '-created_at']),
+            models.Index(fields=['usuario_notificado', 'lido']),
+        ]
+
+    def __str__(self):
+        return f'{self.get_tipo_display()} — {self.documento_tipo or "contrato"} {self.contrato_id or self.object_id}'
+
+
+class AvisoVencimento(models.Model):
+    """Registro do que já foi avisado, para o comando poder rodar quantas vezes
+    quiser no dia sem mandar o mesmo e-mail de novo.
+
+    `marco` é o degrau do aviso em dias restantes: 90, 30, 15, 7, 1, 0 (vence
+    hoje) e -1 (já venceu). A unicidade é por documento + degrau.
+    """
+
+    id = models.AutoField(primary_key=True)
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField()
+    documento = GenericForeignKey('content_type', 'object_id')
+    marco = models.IntegerField(help_text='Dias restantes no momento do aviso; -1 = vencido')
+    data_vencimento = models.DateField(null=True, blank=True)
+    destinatarios = models.TextField(null=True, blank=True, help_text='E-mails avisados')
+    enviado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Aviso de Vencimento'
+        verbose_name_plural = 'Avisos de Vencimento'
+        ordering = ['-enviado_em']
+        unique_together = ('content_type', 'object_id', 'marco')
+        indexes = [
+            models.Index(fields=['content_type', 'object_id']),
+        ]
+
+    def __str__(self):
+        return f'{self.content_type} {self.object_id} — marco {self.marco}'

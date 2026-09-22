@@ -3,6 +3,7 @@ from gestaoDocumentos.views import (
     DiretorioViewSet,
     ContratoViewSet,
     DocumentoAnexoViewSet,
+    DocumentoNotificacaoViewSet,
     ProcessoInternoViewSet,
     AcaoViewSet,
     AlvaraViewSet,
@@ -29,5 +30,6 @@ router.register(r'societarios', SocietarioViewSet, basename='societario')
 router.register(r'seguros', SeguroViewSet, basename='seguro')
 router.register(r'processos-externos', ProcessoExternoViewSet, basename='processo-externo')
 router.register(r'veiculos', VeiculoViewSet, basename='veiculo')
+router.register(r'notificacoes', DocumentoNotificacaoViewSet, basename='documento-notificacao')
 
 urlpatterns = router.urls

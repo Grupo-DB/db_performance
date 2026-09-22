@@ -1,5 +1,9 @@
 from rest_framework import serializers
-from gestaoDocumentos.models import Acao, Alvara, Atas, Diretorio, Contrato, DocumentoAnexo, Patrimonial, ProcessoInterno, ProcessoExterno, Procuracao, Seguro, Societario, Veiculo
+from gestaoDocumentos.models import (
+    Acao, Alvara, AprovacaoContrato, Atas, Diretorio, Contrato, DocumentoAnexo,
+    DocumentoNotificacao, Patrimonial, ProcessoInterno, ProcessoExterno,
+    Procuracao, Seguro, Societario, Veiculo,
+)
 
 
 class DocumentoAnexoSerializer(serializers.ModelSerializer):
@@ -106,10 +110,43 @@ class SeguroSerializer(serializers.ModelSerializer):
             'updated_by'
         ]
 
+class AprovacaoContratoSerializer(serializers.ModelSerializer):
+    aprovador_nome = serializers.SerializerMethodField()
+    situacao_label = serializers.CharField(source='get_situacao_display', read_only=True)
+
+    class Meta:
+        model = AprovacaoContrato
+        fields = [
+            'id', 'contrato', 'aprovador', 'aprovador_nome', 'ordem',
+            'situacao', 'situacao_label', 'parecer',
+            'notificado_em', 'decidido_em', 'created_at',
+        ]
+        read_only_fields = fields
+
+    def get_aprovador_nome(self, obj):
+        from gestaoDocumentos.aprovacoes import nome_usuario
+        return nome_usuario(obj.aprovador)
+
+
+class DocumentoNotificacaoSerializer(serializers.ModelSerializer):
+    contrato_id = serializers.IntegerField(source='contrato.id', read_only=True)
+    contrato_numero = serializers.CharField(source='contrato.numero', read_only=True)
+
+    class Meta:
+        model = DocumentoNotificacao
+        fields = [
+            'id', 'contrato_id', 'contrato_numero', 'documento_tipo', 'object_id',
+            'usuario_notificado', 'tipo', 'mensagem', 'lido', 'created_at',
+        ]
+        read_only_fields = fields
+
+
 class ContratoSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
     diretorio_detalhes = DiretorioSerializer(source='diretorio', read_only=True)
     anexos = DocumentoAnexoSerializer(many=True, read_only=True)
+    aprovacoes = AprovacaoContratoSerializer(many=True, read_only=True)
+    criado_por_nome = serializers.SerializerMethodField()
 
     class Meta:
         model = Contrato
@@ -144,8 +181,20 @@ class ContratoSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'created_by',
-            'updated_by'
+            'updated_by',
+            # Fluxo de aprovação
+            'criado_por',
+            'criado_por_nome',
+            'modo_aprovacao',
+            'situacao_aprovacao',
+            'aprovacoes',
         ]
+        read_only_fields = ['criado_por', 'situacao_aprovacao']
+
+    def get_criado_por_nome(self, obj):
+        from gestaoDocumentos.aprovacoes import nome_usuario
+        return nome_usuario(obj.criado_por) if obj.criado_por_id else (obj.created_by or '—')
+
 
 class ProcessoInternoSerializer(serializers.ModelSerializer):
     diretorio = serializers.PrimaryKeyRelatedField(queryset=Diretorio.objects.all(), write_only=True)
