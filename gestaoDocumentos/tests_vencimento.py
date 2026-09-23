@@ -161,6 +161,35 @@ class AvisoVencimentoTest(TestCase):
         _, emails = vencimentos.destinatarios_do_documento(contrato)
         self.assertEqual(emails, ['documentos@db.com.br'])
 
+    @override_settings(GRUPO_AVISO_DOCUMENTOS='Gestão de Documentos')
+    def test_sem_ninguem_identificado_avisa_o_grupo_no_sino(self):
+        from django.contrib.auth.models import Group
+        gestora = User.objects.create_user('gestora', 'gestora@db.com.br', 'x')
+        Group.objects.create(name='Gestão de Documentos').user_set.add(gestora)
+        User.objects.create_superuser('admin', 'admin@db.com.br', 'x')
+
+        Contrato.objects.create(numero='C-antigo', data_fim=self.hoje - timedelta(days=25))
+        for pendencia in vencimentos.documentos_a_avisar(hoje=self.hoje):
+            vencimentos.avisar(pendencia)
+
+        # O grupo tem gente: o superusuário fica de fora.
+        self.assertEqual(
+            list(DocumentoNotificacao.objects.values_list('usuario_notificado__username', 'tipo')),
+            [('gestora', 'VENCIDO')])
+        self.assertIn('gestora@db.com.br', mail.outbox[0].to)
+
+    @override_settings(GRUPO_AVISO_DOCUMENTOS='Grupo que não existe')
+    def test_sem_grupo_cai_nos_superusuarios(self):
+        admin = User.objects.create_superuser('admin', 'admin@db.com.br', 'x')
+        contrato = Contrato.objects.create(numero='C-antigo', data_fim=self.hoje)
+        usuarios, _ = vencimentos.destinatarios_do_documento(contrato)
+        self.assertEqual(usuarios, [admin])
+
+    def test_com_criador_o_grupo_nao_entra(self):
+        User.objects.create_superuser('admin', 'admin@db.com.br', 'x')
+        usuarios, _ = vencimentos.destinatarios_do_documento(self._contrato(dias=10))
+        self.assertEqual(usuarios, [self.autor])
+
 
 @override_settings(EMAILS_AVISO_DOCUMENTOS=['documentos@db.com.br'])
 class ComandoAvisarVencimentosTest(TestCase):

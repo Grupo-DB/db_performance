@@ -296,6 +296,10 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL
 # pelo nome no cadastro de Colaboradores; esta lista recebe SEMPRE, e é o que
 # garante que um documento sem responsável identificado não avise ninguém.
 EMAILS_AVISO_DOCUMENTOS = []
+# Documento sem ninguém identificado (sem `criado_por` e sem Responsável Interno
+# casado) avisa os membros deste grupo, no sino e por e-mail; sem o grupo ou com
+# ele vazio, os superusuários ativos.
+GRUPO_AVISO_DOCUMENTOS = 'Gestão de Documentos'
 
 
 

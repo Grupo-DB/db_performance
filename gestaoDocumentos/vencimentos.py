@@ -99,6 +99,22 @@ def _colaborador_por_nome(nome):
     return Colaborador.objects.filter(nome__iexact=str(nome).strip()).first()
 
 
+def usuarios_gestores():
+    """Quem recebe o aviso de um documento sem responsável identificado.
+
+    Membros ativos do grupo ``settings.GRUPO_AVISO_DOCUMENTOS``; sem o grupo, ou
+    com ele vazio, os superusuários ativos.
+    """
+    from django.contrib.auth.models import User
+
+    nome_grupo = getattr(settings, 'GRUPO_AVISO_DOCUMENTOS', None)
+    if nome_grupo:
+        membros = list(User.objects.filter(groups__name=nome_grupo, is_active=True).distinct())
+        if membros:
+            return membros
+    return list(User.objects.filter(is_superuser=True, is_active=True))
+
+
 def destinatarios_do_documento(documento):
     """Quem recebe o aviso: (lista de Users, lista de e-mails).
 
@@ -118,6 +134,12 @@ def destinatarios_do_documento(documento):
             usuarios.append(colaborador.user)
         elif colaborador.email:
             emails.append(colaborador.email)
+
+    # Documento sem ninguém no sistema — os cadastrados antes de `criado_por`
+    # existir, ou com Responsável Interno que não casa com Colaborador — vai para
+    # quem cuida do módulo, senão o sino nunca mostraria o vencimento.
+    if not usuarios:
+        usuarios.extend(usuarios_gestores())
 
     emails.extend(getattr(settings, 'EMAILS_AVISO_DOCUMENTOS', []) or [])
     emails.extend(e for e in (email_usuario(u) for u in usuarios) if e)
