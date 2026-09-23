@@ -87,6 +87,10 @@ class Seguro(models.Model):
     data_inicio = models.DateField(null=True, blank=True)
     data_fim = models.DateField(null=True, blank=True)
     vigencia = models.CharField(max_length=255, null=True, blank=True)
+    prazo_aviso = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Quantos dias antes do vencimento avisar',
+    )
     status = models.CharField(max_length=255, null=True, blank=True)
     observacoes = models.TextField(null=True, blank=True)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='seguros')

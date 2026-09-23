@@ -63,7 +63,7 @@ def _titulo_processo(d):
 # Cada entrada diz onde está a data e como o documento se chama no aviso.
 TIPOS = [
     {'modelo': Contrato,       'rotulo': 'Contrato',        'campo_data': 'data_fim',        'campo_dias': 'prazo_aviso', 'titulo': _titulo_contrato},
-    {'modelo': Seguro,         'rotulo': 'Seguro',          'campo_data': 'data_fim',        'campo_dias': None,          'titulo': _titulo_seguro},
+    {'modelo': Seguro,         'rotulo': 'Seguro',          'campo_data': 'data_fim',        'campo_dias': 'prazo_aviso', 'titulo': _titulo_seguro},
     {'modelo': Alvara,         'rotulo': 'Alvará',          'campo_data': 'data_fim',        'campo_dias': None,          'titulo': _titulo_alvara},
     {'modelo': Procuracao,     'rotulo': 'Procuração',      'campo_data': 'data_fim',        'campo_dias': None,          'titulo': _titulo_procuracao},
     {'modelo': Veiculo,        'rotulo': 'Veículo',         'campo_data': 'data_vencimento', 'campo_dias': None,          'titulo': _titulo_veiculo},

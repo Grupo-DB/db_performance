@@ -94,6 +94,7 @@ class SeguroSerializer(serializers.ModelSerializer):
             'data_inicio',
             'data_fim',
             'vigencia',
+            'prazo_aviso',
             'status',
             'observacoes',
             'anexo',
