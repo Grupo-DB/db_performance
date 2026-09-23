@@ -423,14 +423,44 @@ class FichaEntrevista(models.Model):
         (DISP_TODAS, 'Todas'),
     ]
 
+    # Qual folha foi usada. O F-018.1 é a entrevista de quem já trabalhou na
+    # empresa e quer voltar: troca o roteiro pessoal do F-018 por perguntas sobre
+    # o que o candidato aprendeu desde que saiu.
+    MODELO_PADRAO = 'PADRAO'
+    MODELO_EX_FUNCIONARIO = 'EX_FUNCIONARIO'
+    MODELO_CHOICES = [
+        (MODELO_PADRAO, 'F-018 — Ficha padrão'),
+        (MODELO_EX_FUNCIONARIO, 'F-018.1 — Ex funcionário'),
+    ]
+
     RESULTADO_APROVADO = 'APROVADO'
     RESULTADO_PRE_SELECIONADO = 'PRE_SELECIONADO'
+    RESULTADO_PRE_SEL_ETAPA = 'PRE_SEL_ETAPA'
+    RESULTADO_PRE_SEL_FUTURO = 'PRE_SEL_FUTURO'
     RESULTADO_NAO_APROVADO = 'NAO_APROVADO'
     RESULTADO_CHOICES = [
         (RESULTADO_APROVADO, 'Aprovado(a) para a vaga'),
         (RESULTADO_PRE_SELECIONADO, 'Pré-selecionado(a) para a próxima vaga'),
+        # As duas abaixo são o "Encaminhamento" do F-018.1.
+        (RESULTADO_PRE_SEL_ETAPA, 'Pré-selecionado(a) para a próxima etapa'),
+        (RESULTADO_PRE_SEL_FUTURO, 'Pré-selecionado(a) para futuras oportunidades'),
         (RESULTADO_NAO_APROVADO, 'Não aprovado(a)'),
     ]
+
+    # O F-018.1 tem meio-termo ("atende parcialmente"), que o booleano
+    # `atende_requisitos` do F-018 não comporta.
+    REQUISITOS_ATENDE = 'ATENDE'
+    REQUISITOS_PARCIAL = 'PARCIAL'
+    REQUISITOS_NAO_ATENDE = 'NAO_ATENDE'
+    REQUISITOS_CHOICES = [
+        (REQUISITOS_ATENDE, 'Atende aos requisitos da função'),
+        (REQUISITOS_PARCIAL, 'Atende parcialmente aos requisitos'),
+        (REQUISITOS_NAO_ATENDE, 'Não atende aos requisitos'),
+    ]
+
+    modelo = models.CharField(
+        max_length=20, choices=MODELO_CHOICES, default=MODELO_PADRAO, db_index=True,
+    )
 
     candidato = models.ForeignKey(Candidato, on_delete=models.CASCADE, related_name='fichas')
     processo = models.ForeignKey(
@@ -515,6 +545,16 @@ class FichaEntrevista(models.Model):
     avaliador_2 = models.CharField(max_length=120, blank=True)
     avaliador_3 = models.CharField(max_length=120, blank=True)
 
+    # --- F-018.1 (ex funcionário) ---
+    # As ~20 perguntas abertas e as competências marcadas ficam num JSON: são
+    # texto livre lido só pela própria ficha e pelo PDF, sem filtro nem conta.
+    # Chaves em ``PERGUNTAS_EX_FUNCIONARIO`` do front (fichas.ts).
+    respostas_ex_funcionario = models.JSONField(default=dict, blank=True)
+    avaliacao_requisitos = models.CharField(
+        max_length=12, choices=REQUISITOS_CHOICES, blank=True,
+        help_text='Avaliação em três níveis do F-018.1.',
+    )
+
     versao_formulario = models.CharField(max_length=10, default='7.1')
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -530,13 +570,21 @@ class FichaEntrevista(models.Model):
         ]
 
     def __str__(self):
-        return f'F-018 {self.nome or self.candidato.nome} - {self.data_entrevista or "sem data"}'
+        codigo = 'F-018.1' if self.modelo == self.MODELO_EX_FUNCIONARIO else 'F-018'
+        return f'{codigo} {self.nome or self.candidato.nome} - {self.data_entrevista or "sem data"}'
 
     def save(self, *args, **kwargs):
         # A vaga da ficha acompanha o processo quando ele existe: evita a ficha
         # dizer uma vaga e o processo outra.
         if self.processo_id and not self.vaga_id:
             self.vaga_id = self.processo.vaga_id
+        # No F-018.1 o booleano do F-018 segue a avaliação em três níveis, para a
+        # coluna "Requisitos" e os filtros continuarem valendo para as duas fichas.
+        if self.modelo == self.MODELO_EX_FUNCIONARIO:
+            self.atende_requisitos = {
+                self.REQUISITOS_ATENDE: True,
+                self.REQUISITOS_NAO_ATENDE: False,
+            }.get(self.avaliacao_requisitos)
         super().save(*args, **kwargs)
 
 

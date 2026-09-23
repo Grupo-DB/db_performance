@@ -117,6 +117,7 @@ class CandidatoSerializer(AnexoCurriculoMixin, serializers.ModelSerializer):
                 'resultado': f.resultado,
                 'atende_requisitos': f.atende_requisitos,
                 'avaliador_1': f.avaliador_1,
+                'modelo': f.modelo,
             }
             for f in obj.fichas.all().order_by('-data_entrevista', '-id')
         ]
@@ -195,6 +196,7 @@ class FichaEntrevistaListSerializer(serializers.ModelSerializer):
             'id', 'candidato', 'candidato_nome', 'candidato_cidade', 'candidato_telefone',
             'processo', 'vaga', 'vaga_descricao', 'data_entrevista',
             'cargo_funcao', 'setor', 'atende_requisitos', 'resultado',
+            'modelo', 'avaliacao_requisitos',
             'avaliador_1', 'total_anexos', 'created_at', 'updated_at',
         ]
 

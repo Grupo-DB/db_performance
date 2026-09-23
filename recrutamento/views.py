@@ -268,7 +268,7 @@ class FichaEntrevistaViewSet(viewsets.ModelViewSet):
 
     permission_classes = [IsRH]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['candidato', 'processo', 'vaga', 'resultado', 'atende_requisitos',
+    filterset_fields = ['candidato', 'processo', 'vaga', 'resultado', 'atende_requisitos', 'modelo',
                         'avaliador_1', 'setor']
     search_fields = ['candidato__nome', 'nome', 'cargo_funcao', 'setor', 'avaliador_1',
                      'parecer_recrutador', 'observacoes', 'vaga__descricao']

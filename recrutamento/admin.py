@@ -42,7 +42,7 @@ class FichaAnexoInline(admin.TabularInline):
 @admin.register(FichaEntrevista)
 class FichaEntrevistaAdmin(admin.ModelAdmin):
     list_display = ['id', 'nome', 'cargo_funcao', 'setor', 'data_entrevista', 'resultado', 'avaliador_1']
-    list_filter = ['resultado', 'atende_requisitos', 'setor', 'disponibilidade_horario']
+    list_filter = ['modelo', 'resultado', 'atende_requisitos', 'setor', 'disponibilidade_horario']
     search_fields = ['nome', 'candidato__nome', 'cargo_funcao', 'setor', 'avaliador_1']
     autocomplete_fields = ['candidato', 'vaga']
     date_hierarchy = 'data_entrevista'
