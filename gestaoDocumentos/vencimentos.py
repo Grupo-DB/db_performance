@@ -25,7 +25,7 @@ from gestaoDocumentos.models import (
     Procuracao, Seguro, Veiculo,
 )
 
-# Janela usada pelos tipos que não têm campo próprio de prazo de aviso.
+# Janela usada quando o documento está com o prazo de aviso em branco.
 DIAS_PADRAO = 30
 
 # Degraus fixos, do mais distante ao mais próximo.
@@ -64,10 +64,10 @@ def _titulo_processo(d):
 TIPOS = [
     {'modelo': Contrato,       'rotulo': 'Contrato',        'campo_data': 'data_fim',        'campo_dias': 'prazo_aviso', 'titulo': _titulo_contrato},
     {'modelo': Seguro,         'rotulo': 'Seguro',          'campo_data': 'data_fim',        'campo_dias': 'prazo_aviso', 'titulo': _titulo_seguro},
-    {'modelo': Alvara,         'rotulo': 'Alvará',          'campo_data': 'data_fim',        'campo_dias': None,          'titulo': _titulo_alvara},
-    {'modelo': Procuracao,     'rotulo': 'Procuração',      'campo_data': 'data_fim',        'campo_dias': None,          'titulo': _titulo_procuracao},
-    {'modelo': Veiculo,        'rotulo': 'Veículo',         'campo_data': 'data_vencimento', 'campo_dias': None,          'titulo': _titulo_veiculo},
-    {'modelo': ProcessoExterno,'rotulo': 'Processo Externo','campo_data': 'data_fim',        'campo_dias': None,          'titulo': _titulo_processo},
+    {'modelo': Alvara,         'rotulo': 'Alvará',          'campo_data': 'data_fim',        'campo_dias': 'prazo_aviso', 'titulo': _titulo_alvara},
+    {'modelo': Procuracao,     'rotulo': 'Procuração',      'campo_data': 'data_fim',        'campo_dias': 'prazo_aviso', 'titulo': _titulo_procuracao},
+    {'modelo': Veiculo,        'rotulo': 'Veículo',         'campo_data': 'data_vencimento', 'campo_dias': 'prazo_aviso', 'titulo': _titulo_veiculo},
+    {'modelo': ProcessoExterno,'rotulo': 'Processo Externo','campo_data': 'data_fim',        'campo_dias': 'prazo_aviso', 'titulo': _titulo_processo},
 ]
 
 

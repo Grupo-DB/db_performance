@@ -208,6 +208,10 @@ class ProcessoExterno(models.Model):
     andamento = models.TextField(null=True, blank=True)
     data_inicio = models.DateField(null=True, blank=True)
     data_fim = models.DateField(null=True, blank=True)
+    prazo_aviso = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Quantos dias antes do vencimento avisar',
+    )
     status = models.CharField(max_length=255, null=True, blank=True)
     observacoes = models.TextField(null=True, blank=True)
     diretorio = models.ForeignKey(Diretorio, on_delete=models.SET_NULL, null=True, blank=True, related_name='processos_externos')
@@ -234,6 +238,10 @@ class Veiculo(models.Model):
     situacao_veiculo = models.CharField(max_length=255, null=True, blank=True)
     data_emissao = models.DateField(null=True, blank=True)
     data_vencimento = models.DateField(null=True, blank=True)
+    prazo_aviso = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Quantos dias antes do vencimento avisar',
+    )
     vigencia = models.CharField(max_length=255, null=True, blank=True)
     ano_exercicio = models.CharField(max_length=255, null=True, blank=True)
     valor_ipva = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -292,6 +300,10 @@ class Alvara(models.Model):
     responsavel_alvara = models.CharField(max_length=255, null=True, blank=True)
     data_inicio = models.DateField(null=True, blank=True)
     data_fim = models.DateField(null=True, blank=True)
+    prazo_aviso = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Quantos dias antes do vencimento avisar',
+    )
     vigencia = models.CharField(max_length=255, null=True, blank=True)
     ultima_atualizacao = models.DateField(null=True, blank=True)
     renovavel = models.BooleanField(default=False)
@@ -323,6 +335,10 @@ class Procuracao(models.Model):
     finalidade = models.CharField(max_length=255, null=True, blank=True)
     data_inicio = models.DateField(null=True, blank=True)
     data_fim = models.DateField(null=True, blank=True)
+    prazo_aviso = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Quantos dias antes do vencimento avisar',
+    )
     vigencia = models.CharField(max_length=255, null=True, blank=True)
     substabelecer = models.BooleanField(default=False)
     substabelecimento_vinculado = models.BooleanField(default=False)
