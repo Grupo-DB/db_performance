@@ -6,3 +6,6 @@ db_performance/.env
 __pycache__/
 .vscode/
 **/migrations/
+# Cockpit Financeiro: a página tem dados financeiros embutidos e os anexos são extratos
+cockpitFinanceiro/pagina/*.html
+privado/

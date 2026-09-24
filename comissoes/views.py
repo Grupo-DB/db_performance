@@ -728,15 +728,17 @@ def calculos_comissoes(request):
         for m in qs:
             if not m.representante or not m.grupo:
                 continue
-            rep_nome_norm = re.sub(r'\s*-\s*\d+\s*$', '', m.representante.nome.strip().upper())
-            chave = f"{periodo_chave}{rep_nome_norm}"
-            if chave not in metas_db:
-                metas_db[chave] = {}
+            rep_nome_full = m.representante.nome.strip().upper()
+            rep_nome_norm = re.sub(r'\s*-\s*\d+\s*$', '', rep_nome_full)
             grupo_key = m.grupo.strip().upper()
             # Normaliza variantes de CB/CAL CREM para a chave usada no cálculo
             if any(t in grupo_key for t in CB_TERMOS):
                 grupo_key = 'CB'
-            metas_db[chave][grupo_key] = float(m.valor)
+            # Grava sem o sufixo " - NN" (como sempre foi) e também com ele: o Richard tem
+            # dois códigos no ERP (54 e 111) com regras diferentes, e o cálculo precisa
+            # achar a meta do código certo ("RICHARD GONCALVES MACHADO - 111").
+            for chave in {f"{periodo_chave}{rep_nome_norm}", f"{periodo_chave}{rep_nome_full}"}:
+                metas_db.setdefault(chave, {})[grupo_key] = float(m.valor)
     except Exception:
         pass
     # POST body tem prioridade sobre banco
@@ -854,22 +856,57 @@ def calculos_comissoes(request):
             total += venda_g * taxa_final
         return total
 
+    # Marina Gabrielly passa a ser vendedora interna das regiões MPA a partir de 09/2026
+    # (decisão do usuário, 24/09/2026): recebe a taxa padrão de interno sobre a venda desses
+    # externos e a comissão MPA (0,03%) deixa de existir. Antes do corte, nada muda —
+    # recalcular um mês antigo tem de dar o valor que foi pago.
+    MARINA_INTERNA_DESDE = datetime.date(2026, 9, 1)
+    marina_interna = data_inicio_dt >= MARINA_INTERNA_DESDE
+    _interna_mpa = 'MARINA GABRIELLY PEREIRA' if marina_interna else None
+
     # ---- Vinculação: representante externo (REPNOME exato do BD) → interno Matriz ----
     # Cada chave é uma substring do REPNOME no BD
     VINCULO_INT_MATRIZ = {
         'RODRIGO CHAVES CRUZ (FRONTEIRA)': 'HELENA VARGAS MARQUES',
         'RODRIGO CHAVES CRUZ (PLANALTO)':  'VAGNER MOREIRA PAZ',
         'GLAUBER BRITO DA PAIXAO':          'VAGNER MOREIRA PAZ',
-        'JAKLAINY DUARTE LEMOS':            None,   # sem interno vinculado
+        # Região 54 (POA). O ERP renomeou o REPCOD 54 de "JAKLAINY DUARTE LEMOS - 54" para
+        # "RICHARD GONCALVES MACHADO - 54", e o REPNOME vem sempre com o nome ATUAL — inclusive
+        # nas notas antigas. Com a chave velha a região inteira sumia do cálculo (sem comissão,
+        # fora da MPA, da meta global e da Jocelaine). A Jaklainy ficou no REPCOD 55, sem notas.
+        'RICHARD GONCALVES MACHADO':        _interna_mpa,
         'LUIS AURELIO FERREIRA MACIEL':     'HELENA VARGAS MARQUES',
         'DANIEL MARQUES MOREIRA':           'VAGNER MOREIRA PAZ',
         'JONATHAN SOARES BUENO':            None,
-        'JONATHAN S BUENO (LITORAL)':       None,
+        'JONATHAN S BUENO (LITORAL)':       _interna_mpa,
         'GUILHERME FREITAS ILHA':           'HELENA VARGAS MARQUES',
-        'GUILHERME F ILHA (METROPOLITANA 3)': None,
-        'DANIEL M MOREIRA (METROPOLITANA 1)': None,
+        'GUILHERME F ILHA (METROPOLITANA 3)': _interna_mpa,
+        'DANIEL M MOREIRA (METROPOLITANA 1)': _interna_mpa,
         'DANIEL M MOREIRA (METROPOLITANA 3)': None,
     }
+
+    # A partir de 09/2026 o Richard tem dois códigos no ERP, cada um com sua regra
+    # (decisão do usuário, 24/09/2026):
+    #   54  — vendas para construtoras. SEM comissão de externo por enquanto; a Marina
+    #         recebe a comissão de interna normal sobre ele.
+    #   111 — carteira normal: comissão de externo igual aos demais, Marina interna.
+    # Antes de 09/2026 só o 54 tinha nota e ele é a região 54 de sempre (ex-Jaklainy).
+    REPS_SEM_COMISSAO_EXTERNA = set()
+    # Darcilei vira vendedor externo CC a partir de 09/2026 (decisão do usuário, 24/09/2026):
+    # mesmas taxas por grupo, potencializador da meta individual e 0,8% de dolomita, mas
+    # fora do bônus de meta global. A Alexandra é a interna dele (taxa padrão de interno).
+    # O 0,04% sobre a ATM que ele recebia como interno deixa de existir.
+    DARCILEI_EXTERNO_DESDE = datetime.date(2026, 9, 1)
+    darcilei_externo = data_inicio_dt >= DARCILEI_EXTERNO_DESDE
+    REPS_SEM_BONUS_GLOBAL = set()
+    if darcilei_externo:
+        VINCULO_INT_MATRIZ['DARCILEI DOS SANTOS'] = 'ALEXANDRA PERUSSI'
+        REPS_SEM_BONUS_GLOBAL.add('DARCILEI DOS SANTOS')
+    if marina_interna:
+        VINCULO_INT_MATRIZ.pop('RICHARD GONCALVES MACHADO')
+        VINCULO_INT_MATRIZ['RICHARD GONCALVES MACHADO - 111'] = _interna_mpa
+        VINCULO_INT_MATRIZ['RICHARD GONCALVES MACHADO - 54'] = _interna_mpa
+        REPS_SEM_COMISSAO_EXTERNA = {'RICHARD GONCALVES MACHADO - 54'}
 
     # Nomes que geram comissão para a Jocelaine (0,01%) — todos com vinc interno
     # e também sem interno (base é todos os externos com interno na metodologia)
@@ -877,7 +914,7 @@ def calculos_comissoes(request):
 
     # Regiões MPA (0,03% sobre vendas desses reps nessas regiões)
     REP_MPA_TERMOS = [
-        'JAKLAINY DUARTE LEMOS',
+        'RICHARD GONCALVES MACHADO',   # região 54, ex-Jaklainy
         'JONATHAN SOARES BUENO', 'JONATHAN S BUENO',
         'GUILHERME F ILHA (METROPOLITANA 3)',
         'DANIEL M MOREIRA (METROPOLITANA 1)',
@@ -892,6 +929,10 @@ def calculos_comissoes(request):
         'HELENA VARGAS MARQUES': {'total': 0.0, 'detalhamento': []},
         'VAGNER MOREIRA PAZ':    {'total': 0.0, 'detalhamento': []},
     }
+    if marina_interna:
+        vendedores_internos_acum['MARINA GABRIELLY PEREIRA'] = {'total': 0.0, 'detalhamento': []}
+    if darcilei_externo:
+        vendedores_internos_acum['ALEXANDRA PERUSSI'] = {'total': 0.0, 'detalhamento': []}
     base_jocelaine_vendas = 0.0
     base_mpa_vendas = 0.0
     total_comissao_primex = 0.0  # base para Marco Alan Lopes (10%)
@@ -971,14 +1012,6 @@ def calculos_comissoes(request):
             continue
         vendas = vendas_por_grupo(df_rep)
         chave_meta = f"{periodo_chave}{rep_chave}"
-        comissao_rep, comissao_grupos = comissao_ext_com_bonus(vendas, chave_meta)
-
-        chaves_vendedores_cc_elegiveis.append(rep_chave)
-        for g in GRUPOS_CC:
-            realizado_global_por_grupo[g] += vendas.get(g, 0.0)
-
-        base_vendas[rep_chave] = vendas
-        total_comissao_primex += comissao_grupos.get('PRIMEX', 0.0)
 
         # Adicional dolomita (0,8% sobre a venda de CARBOMAX do rep), somado ao total.
         # Busca no dataframe COMPLETO (df), não só em df_cc: boa parte da venda é
@@ -987,20 +1020,48 @@ def calculos_comissoes(request):
             df['REPRESENTANTE'].str.contains(rep_chave, na=False, regex=False) |
             df['REPRESENTANTE_MASTER'].str.contains(rep_chave, na=False, regex=False)
         ]
-        venda_dolomita_rep = venda_dolomita_de(df_rep_full)
-        comissao_dolomita_rep = venda_dolomita_rep * taxa_cc_dolomita
 
-        resultado[rep_chave] = {
-            'comissao': round(comissao_rep + comissao_dolomita_rep, 2),
-            'comissao_por_grupo': comissao_grupos,
-            'vendas_por_grupo': vendas,
-            'vendedor_interno': vinc_int,
-            'venda_dolomita': round(venda_dolomita_rep, 2),
-            'comissao_dolomita': round(comissao_dolomita_rep, 2),
-            'taxa_dolomita': taxa_cc_dolomita,
-            'lancamentos': _monta_lancamentos(df_rep_full),
-            'tipo': 'Vendedor Externo CC'
-        }
+        if rep_chave in REPS_SEM_COMISSAO_EXTERNA:
+            # Sem comissão de externo: fica fora da meta global, da base PRIMEX, da
+            # dolomita e da tabela Base de Vendas. Só gera a comissão da interna — sem
+            # potencializador, porque este código não tem meta.
+            resultado[rep_chave] = {
+                'comissao': 0.0,
+                'comissao_por_grupo': {g: 0.0 for g in GRUPOS_CC},
+                'vendas_por_grupo': vendas,
+                'vendedor_interno': vinc_int,
+                'sem_comissao_externa': True,
+                'observacao': 'Vendas para construtoras — sem comissão de externo',
+                'lancamentos': _monta_lancamentos(df_rep_full),
+                'tipo': 'Vendedor Externo CC'
+            }
+            chave_meta = None
+        else:
+            comissao_rep, comissao_grupos = comissao_ext_com_bonus(vendas, chave_meta)
+
+            # Sem bônus global: nem recebe o rateio, nem soma no realizado da meta global.
+            if rep_chave not in REPS_SEM_BONUS_GLOBAL:
+                chaves_vendedores_cc_elegiveis.append(rep_chave)
+                for g in GRUPOS_CC:
+                    realizado_global_por_grupo[g] += vendas.get(g, 0.0)
+
+            base_vendas[rep_chave] = vendas
+            total_comissao_primex += comissao_grupos.get('PRIMEX', 0.0)
+
+            venda_dolomita_rep = venda_dolomita_de(df_rep_full)
+            comissao_dolomita_rep = venda_dolomita_rep * taxa_cc_dolomita
+
+            resultado[rep_chave] = {
+                'comissao': round(comissao_rep + comissao_dolomita_rep, 2),
+                'comissao_por_grupo': comissao_grupos,
+                'vendas_por_grupo': vendas,
+                'vendedor_interno': vinc_int,
+                'venda_dolomita': round(venda_dolomita_rep, 2),
+                'comissao_dolomita': round(comissao_dolomita_rep, 2),
+                'taxa_dolomita': taxa_cc_dolomita,
+                'lancamentos': _monta_lancamentos(df_rep_full),
+                'tipo': 'Vendedor Externo CC'
+            }
 
         # Acumula para interno Matriz com detalhamento por grupo
         if vinc_int in vendedores_internos_acum:
@@ -1058,14 +1119,20 @@ def calculos_comissoes(request):
     total_comissao_primex += comissao_grupos_agner.get('PRIMEX', 0.0)
     comissao_int_agner_total = comissao_int_com_bonus(vendas_agner, f"{periodo_chave}AGNER LORETO WALMRATH")
     comissao_int_agner_proporcional = comissao_int_agner_total * proporcao_agner_matriz
-    agner_int_helena = comissao_int_agner_proporcional / 2
-    vendedores_internos_acum['HELENA VARGAS MARQUES']['total'] += agner_int_helena
-    vendedores_internos_acum['HELENA VARGAS MARQUES']['detalhamento'].append({
-        'representante_externo': 'AGNER LORETO WALMRATH',
-        'comissao_por_grupo': {g: round(vendas_agner.get(g, 0) * taxas_interno[g] * proporcao_agner_matriz / 2, 2) for g in taxas_interno},
-        'comissao': round(agner_int_helena, 2),
-    })
-    jocelaine_agner = comissao_int_agner_proporcional / 2
+    # Interna do Agner na parte da Matriz: até 08/2026 metade Helena, metade Jocelaine.
+    # A partir de 09/2026 (decisão do usuário, 24/09/2026) é toda da Jocelaine.
+    # A parte faturada pela ATM (filial do Paraná) segue com a Mariane, no bloco ATM.
+    AGNER_INT_SO_JOCELAINE_DESDE = datetime.date(2026, 9, 1)
+    fracao_helena_agner = 0.0 if data_inicio_dt >= AGNER_INT_SO_JOCELAINE_DESDE else 0.5
+    agner_int_helena = comissao_int_agner_proporcional * fracao_helena_agner
+    if fracao_helena_agner > 0:
+        vendedores_internos_acum['HELENA VARGAS MARQUES']['total'] += agner_int_helena
+        vendedores_internos_acum['HELENA VARGAS MARQUES']['detalhamento'].append({
+            'representante_externo': 'AGNER LORETO WALMRATH',
+            'comissao_por_grupo': {g: round(vendas_agner.get(g, 0) * taxas_interno[g] * proporcao_agner_matriz * fracao_helena_agner, 2) for g in taxas_interno},
+            'comissao': round(agner_int_helena, 2),
+        })
+    jocelaine_agner = comissao_int_agner_proporcional - agner_int_helena
 
     resultado['AGNER LORETO WALMRATH'] = {
         'comissao': round(float(comissao_agner), 2),
@@ -1225,7 +1292,11 @@ def calculos_comissoes(request):
     total_comissao_primex += comissao_ext_pg_adriano.get('PRIMEX', 0.0)
 
     # ---- 3. Vendedores Internos Matriz ----
+    # A Marina é montada na seção 5 (junta a parte de interna com a Quero-Quero) e a
+    # Alexandra na seção 6 (junta com a comissão de interna ATM).
     for nome, data in vendedores_internos_acum.items():
+        if nome in ('MARINA GABRIELLY PEREIRA', 'ALEXANDRA PERUSSI'):
+            continue
         resultado[nome] = {
             'comissao': round(data['total'], 2),
             'detalhamento': data['detalhamento'],
@@ -1233,10 +1304,19 @@ def calculos_comissoes(request):
         }
 
     # ---- 4. Jocelaine (Auxiliar de Vendas Matriz) ----
-    comissao_jocelaine = base_jocelaine_vendas * p('JOCELAINE_BASE', 0.0001) + jocelaine_agner
+    # A partir de 09/2026 (decisão do usuário, 24/09/2026) a Jocelaine deixa de receber o
+    # 0,01% sobre a base dos externos com interno: fica só a interna do Agner na Matriz.
+    JOCELAINE_SEM_BASE_DESDE = datetime.date(2026, 9, 1)
+    if data_inicio_dt >= JOCELAINE_SEM_BASE_DESDE:
+        comissao_jocelaine_base = 0.0
+    else:
+        comissao_jocelaine_base = base_jocelaine_vendas * p('JOCELAINE_BASE', 0.0001)
+    comissao_jocelaine = comissao_jocelaine_base + jocelaine_agner
     resultado['JOCELAINE FARIAS BAHU'] = {
         'comissao': round(comissao_jocelaine, 2),
         'base_vendas': round(float(base_jocelaine_vendas), 2),
+        'comissao_base': round(float(comissao_jocelaine_base), 2),
+        'comissao_interna_agner': round(float(jocelaine_agner), 2),
         'tipo': 'Auxiliar Vendas Matriz CC'
     }
 
@@ -1249,17 +1329,31 @@ def calculos_comissoes(request):
         'tipo': 'Comissão PRIMEX CC'
     }
 
-    # ---- 5. Marina Gabrielly Pereira (MPA) ----
+    # ---- 5. Marina Gabrielly Pereira ----
+    # Até 08/2026: Quero-Quero + 0,03% da base MPA. A partir de 09/2026: Quero-Quero +
+    # comissão de interna (taxa padrão por grupo, com bônus) dos externos das regiões MPA.
     df_quero_quero = df[df['CLIENTE_NOME'].str.contains('QUERO', na=False)]
     venda_quero_quero = df_quero_quero['VALOR_PRODUTO'].sum()
-    venda_mpa = base_mpa_vendas
-    comissao_marina = venda_quero_quero * p('MARINA_QUERO_QUERO', 0.001) + venda_mpa * p('MARINA_MPA', 0.0003)
-    resultado['MARINA GABRIELLY PEREIRA'] = {
-        'comissao': round(float(comissao_marina), 2),
-        'venda_quero_quero': round(float(venda_quero_quero), 2),
-        'venda_mpa': round(float(venda_mpa), 2),
-        'tipo': 'Vendedor Interno MPA'
-    }
+    comissao_quero_quero = venda_quero_quero * p('MARINA_QUERO_QUERO', 0.001)
+    if marina_interna:
+        _marina_int = vendedores_internos_acum['MARINA GABRIELLY PEREIRA']
+        resultado['MARINA GABRIELLY PEREIRA'] = {
+            'comissao': round(float(comissao_quero_quero + _marina_int['total']), 2),
+            'venda_quero_quero': round(float(venda_quero_quero), 2),
+            'comissao_quero_quero': round(float(comissao_quero_quero), 2),
+            'comissao_interna': round(float(_marina_int['total']), 2),
+            'detalhamento': _marina_int['detalhamento'],
+            'tipo': 'Vendedor Interno CC'
+        }
+    else:
+        venda_mpa = base_mpa_vendas
+        comissao_marina = comissao_quero_quero + venda_mpa * p('MARINA_MPA', 0.0003)
+        resultado['MARINA GABRIELLY PEREIRA'] = {
+            'comissao': round(float(comissao_marina), 2),
+            'venda_quero_quero': round(float(venda_quero_quero), 2),
+            'venda_mpa': round(float(venda_mpa), 2),
+            'tipo': 'Vendedor Interno MPA'
+        }
 
     # ---- 6. Vendedores Internos ATM ----
     REP_ATM = {
@@ -1332,7 +1426,10 @@ def calculos_comissoes(request):
 
     # Para dolomita: excluir apenas reps com interno vinculado (v != None) + reps ATM
     # Reps com None em VINCULO_INT_MATRIZ (ex: GUILHERME F ILHA METROPOLITANA 3) não têm outro destino → incluídos
-    _vinculo_com_interno = [k for k, v in VINCULO_INT_MATRIZ.items() if v is not None]
+    # As regiões da Marina continuam aqui: a comissão de interna dela é só por grupo
+    # (CB/PRIMOR/PRIMEX/FINALIZA) e não cobre dolomita — tirá-las daria a dolomita a ninguém.
+    _vinculo_com_interno = [k for k, v in VINCULO_INT_MATRIZ.items()
+                            if v is not None and v != 'MARINA GABRIELLY PEREIRA']
     todos_ext_cc_termos_dolomita = (
         _vinculo_com_interno +
         list(REP_ATM.keys()) +
@@ -1382,7 +1479,8 @@ def calculos_comissoes(request):
     # (equivalente à fórmula =SUMIFS(V:V,B:B,"F08 - UP ATM",S:S,"CC") - SUMIFS(...,F:F,"*cofco*") da planilha)
     _mask_cofco = df_atm_fil['CLIENTE_NOME'].str.contains('COFCO', case=False, na=False)
     venda_up_atm = df_atm_fil[~_mask_cofco]['VALOR_PRODUTO'].sum()
-    atm_internos['DARCILEI DOS SANTOS'] += venda_up_atm * p('DARCILEI_ATM', 0.0004)
+    if not darcilei_externo:
+        atm_internos['DARCILEI DOS SANTOS'] += venda_up_atm * p('DARCILEI_ATM', 0.0004)
 
     # DEBUG: breakdown por componente
     _atm_debug = {}
@@ -1453,50 +1551,26 @@ def calculos_comissoes(request):
         atm_internos['ALEXANDRA PERUSSI'] = 0.0
 
     for nome, val in atm_internos.items():
+        if darcilei_externo and nome == 'DARCILEI DOS SANTOS':
+            # Já é externo (loop dos externos CC). Só sobra aqui o que vier da licença
+            # maternidade da Alexandra; se não houver venda, ele nem aparece no loop.
+            if nome in resultado:
+                resultado[nome]['comissao'] = round(resultado[nome]['comissao'] + val, 2)
+                resultado[nome]['comissao_atm'] = round(val, 2)
+            elif val:
+                resultado[nome] = {'comissao': round(val, 2), 'tipo': 'Vendedor Interno ATM'}
+            continue
         resultado[nome] = {'comissao': round(val, 2), 'tipo': 'Vendedor Interno ATM'}
 
-    # ---- 7. Marco Alan Lopes (Correa) CC ----
-    # RS: soma de TODAS as filiais (inclusive ATM), mas apenas para reps CC cadastrados
-    # (planilha inclui todas as filiais; exclui Agro reps como Everton/Ildomar que têm vendas CC-RS pontuais)
-    _cc_rep_termos_rs = list(VINCULO_INT_MATRIZ.keys()) + list(REP_ATM.keys()) + ['ADRIANO L. BORN', 'ADRIANO BORN']
-    def _is_cc_rep(r):
-        return any(t in r for t in _cc_rep_termos_rs)
-
-    df_sc = df_cc[df_cc['CIDADE_FATURAMENTO'].str.endswith('-SC', na=False)]
-    _mask_yara_cc_rs = df_cc['CLIENTE_NOME'].str.contains('YARA', na=False)
-    df_rs = df_cc[
-        df_cc['CIDADE_FATURAMENTO'].str.endswith('-RS', na=False) &
-        ~_mask_yara_cc_rs &
-        df_cc['REPRESENTANTE'].apply(_is_cc_rep)
-    ]
-    venda_sc = df_sc['VALOR_PRODUTO'].sum()
-    venda_rs = df_rs['VALOR_PRODUTO'].sum()
-    comissao_sc = venda_sc * p('MARCO_CORREA_SC_TAXA', 0.005) if venda_sc >= p('MARCO_CORREA_SC_META', 600000.0) else p('MARCO_CORREA_SC_MINIMO', 3000.0)
-    comissao_rs = venda_rs * p('MARCO_CORREA_RS_TAXA', 0.0005)
-    # DEBUG: breakdown RS por filial para identificar discrepância com planilha
-    _df_rs_sem_atm = df_rs[~df_rs['EMPRESAFILIAL'].str.contains('ATM', na=False)]
-    _rs_debug = {
-        'rs_total_cc': round(float(venda_rs), 2),
-        'rs_por_filial': df_rs.groupby('EMPRESAFILIAL')['VALOR_PRODUTO'].sum().round(2).to_dict(),
-        'rs_sem_atm': round(float(_df_rs_sem_atm['VALOR_PRODUTO'].sum()), 2),
-        'rs_yara_excluido': round(float(df_cc[df_cc['CIDADE_FATURAMENTO'].str.endswith('-RS', na=False) & _mask_yara_cc_rs]['VALOR_PRODUTO'].sum()), 2),
-        'rs_sem_atm_por_vendedor': _df_rs_sem_atm.groupby('REPRESENTANTE')['VALOR_PRODUTO'].sum().sort_values(ascending=False).round(2).to_dict(),
-        'rs_sem_atm_por_vendedor_e_filial': {f"{r[0]} | {r[1]}": v for r, v in _df_rs_sem_atm.groupby(['REPRESENTANTE', 'EMPRESAFILIAL'])['VALOR_PRODUTO'].sum().sort_values(ascending=False).round(2).items()},
-        'rs_sem_atm_top_clientes': _df_rs_sem_atm.groupby('CLIENTE_NOME')['VALOR_PRODUTO'].sum().nlargest(15).round(2).to_dict(),
-        'sc_total_cc': round(float(venda_sc), 2),
-        'sc_por_filial': df_sc.groupby('EMPRESAFILIAL')['VALOR_PRODUTO'].sum().round(2).to_dict(),
-    }
-    resultado['_marco_correa_debug'] = _rs_debug
-    _marco_correa_fixo = p('MARCO_CORREA_FIXO', 12500.0)
-    resultado['MARCO ANTONIO CORREA'] = {
-        'comissao': round(comissao_sc + comissao_rs + _marco_correa_fixo, 2),
-        'comissao_sc': round(float(comissao_sc), 2),
-        'venda_sc': round(float(venda_sc), 2),
-        'comissao_rs': round(float(comissao_rs), 2),
-        'venda_rs': round(float(venda_rs), 2),
-        'fixo': _marco_correa_fixo,
-        'tipo': 'Comissão Marco Correa CC',
-    }
+    # Alexandra: interna ATM + interna do Darcilei (externo desde 09/2026). A parte do
+    # Darcilei entra depois da licença maternidade — não faz sentido ela ir para ele.
+    if darcilei_externo:
+        _alex_int = vendedores_internos_acum['ALEXANDRA PERUSSI']
+        resultado['ALEXANDRA PERUSSI']['comissao_atm'] = resultado['ALEXANDRA PERUSSI']['comissao']
+        resultado['ALEXANDRA PERUSSI']['comissao_interna'] = round(_alex_int['total'], 2)
+        resultado['ALEXANDRA PERUSSI']['detalhamento'] = _alex_int['detalhamento']
+        resultado['ALEXANDRA PERUSSI']['comissao'] = round(
+            resultado['ALEXANDRA PERUSSI']['comissao'] + _alex_int['total'], 2)
 
     # ===== AGRONEGÓCIO =====
     df_agro = df[df['SEGMENTO_PRODUTO'] == 'AGRONEGOCIO'].copy()

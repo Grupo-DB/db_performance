@@ -52,6 +52,8 @@ urlpatterns = [
     path('emprestimos/', include('emprestimos.urls')),
     path('recrutamento/', include('recrutamento.urls')),
     path('pesquisas/', include('pesquisas.urls')),
+    # Dashboard financeiro (artifact do Claude) hospedado com senha única — ver cockpitFinanceiro/views.py
+    path('financeiro/', include('cockpitFinanceiro.urls')),
 ]
 urlpatterns+=static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

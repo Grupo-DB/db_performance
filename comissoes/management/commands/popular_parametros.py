@@ -43,12 +43,6 @@ PARAMETROS_DEFAULT = [
     ('CC_DOLOMITA',         'Taxa adicional dolomita p/ os 12 vendedores externos CC (0,8%)', 0.008000),
     ('ATM_DIRETO',          'Taxa ATM direto para Alexandra/Mariane (0,5%)',  0.005000),
     ('DARCILEI_ATM',        'Taxa Darcilei sobre total ATM sem COFCO (0,04%)',0.000400),
-    # ── Marco Antônio Correa ────────────────────────────────────────────────
-    ('MARCO_CORREA_SC_TAXA',  'Taxa SC Marco Correa quando acima da meta',    0.005000),
-    ('MARCO_CORREA_SC_META',  'Meta vendas SC para taxa variável (600k)',   600000.000000),
-    ('MARCO_CORREA_SC_MINIMO','Comissão mínima SC Marco Correa (abaixo meta)',3000.000000),
-    ('MARCO_CORREA_RS_TAXA',  'Taxa RS Marco Correa (0,05%)',                 0.000500),
-    ('MARCO_CORREA_FIXO',     'Salário fixo mensal Marco Correa',          12500.000000),
     # ── Agronegócio — Felinto ───────────────────────────────────────────────
     ('FELINTO_AGRO_GERAL',  'Taxa Felinto agro não-óxido (0,1%)',             0.001000),
     ('FELINTO_AGRO_OXIDO',  'Taxa Felinto agro-óxido (1%)',                   0.010000),
