@@ -25,7 +25,8 @@ from django.utils import timezone
 from django.utils.html import escape
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import AnexoCockpit, DocumentoCockpit, UsuarioCockpit
+from .models import AnexoCockpit, DocumentoCockpit, UsuarioCockpit, VersaoPainel
+import hashlib
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PAGINA = os.path.join(APP_DIR, 'pagina', 'cockpit.html')
@@ -155,14 +156,26 @@ def _tela_troca(u, erro='', obrigatoria=False, status=200):
     return _seguranca(HttpResponse(html, status=status))
 
 
-def _html_do_painel():
+def _html_original():
     with open(PAGINA, encoding='utf-8') as f:
-        html = f.read()
+        return f.read()
+
+
+def _html_do_painel(versao=None, previa=False):
+    """HTML servido: a versão pedida (prévia), senão a ativa, senão o arquivo do servidor."""
+    if versao is None:
+        versao = VersaoPainel.objects.filter(ativa=True).first()
+    html = versao.html if versao else _html_original()
     with open(SHIM, encoding='utf-8') as f:
         shim = f.read()
     html = html.replace(XLSX_ANTIGO, XLSX_NOVO)
     # O shim tem de existir antes de qualquer script do painel rodar.
     injetar = f'<script>{shim}</script>'
+    if previa:
+        injetar += ('<div style="position:fixed;top:0;left:0;right:0;z-index:99999;padding:6px 12px;'
+                    'background:#b45309;color:#fff;font:600 13px system-ui,sans-serif;text-align:center">'
+                    'PRÉVIA — esta versão ainda não está publicada. '
+                    '<a href="publicar" style="color:#fff;text-decoration:underline">Voltar para Publicar</a></div>')
     m = re.search(r'<head[^>]*>', html, re.I)
     return html[:m.end()] + injetar + html[m.end():] if m else injetar + html
 
@@ -175,7 +188,138 @@ def painel(request):
         return _login()
     if u.trocar_senha:
         return redirect('./trocar-senha')
+    previa = request.GET.get('previa')
+    if previa and u.pode_publicar:
+        v = VersaoPainel.objects.filter(id=previa).first()
+        if v:
+            return _seguranca(HttpResponse(_html_do_painel(v, previa=True), content_type='text/html; charset=utf-8'))
     return _seguranca(HttpResponse(_html_do_painel(), content_type='text/html; charset=utf-8'))
+
+
+# ─── publicar nova versão da página ──────────────────────────────────────────────────
+
+MAX_HTML = 16 * 1024 * 1024
+
+
+def _hora(dt):
+    """dd/mm/aaaa hh:mm no horário de Brasília (o banco guarda em UTC)."""
+    import zoneinfo
+    return timezone.localtime(dt, zoneinfo.ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y %H:%M') if dt else ''
+
+
+def _valida_html(bruto):
+    """Devolve (html, erro). Confere que é o painel (usa o runtime do Claude ou traz os
+    dados embutidos) — pega o caso de subir o arquivo errado."""
+    if len(bruto) > MAX_HTML:
+        return None, 'Arquivo grande demais (máximo 16 MB).'
+    try:
+        html = bruto.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        return None, 'O arquivo não é um HTML em UTF-8.'
+    baixo = html[:5000].lower()
+    if '<html' not in baixo and '<!doctype html' not in baixo:
+        return None, 'O arquivo não parece ser uma página HTML.'
+    if 'claude.use' not in html and 'dashboard-data' not in html:
+        return None, ('Não reconheci o painel neste arquivo (não achei o uso do runtime do Claude '
+                      'nem os dados embutidos). Confira se é o HTML baixado do artifact.')
+    return html, None
+
+
+def _tela_publicar(u, msg='', erro='', status=200):
+    versoes = list(VersaoPainel.objects.all()[:30])
+    ativa = next((v for v in versoes if v.ativa), None)
+    linhas = []
+    for v in versoes:
+        acoes = (f'<a href="./?previa={v.id}" target="_blank">Prévia</a>'
+                 + ('' if v.ativa else
+                    f' · <form method="post" style="display:inline"><input type="hidden" name="acao" value="ativar">'
+                    f'<input type="hidden" name="id" value="{v.id}"><button class="lnk" type="submit">Publicar esta</button></form>'))
+        linhas.append(
+            f'<tr{" class=on" if v.ativa else ""}><td>{_hora(v.enviado_em)}</td><td>{escape(v.enviado_por)}</td>'
+            f'<td>{escape(v.nome_arquivo)}<div class="mut">{escape(v.observacao)}</div></td>'
+            f'<td>{v.tamanho // 1024} KB</td><td>{"<b>no ar</b>" if v.ativa else ""}{acoes}</td></tr>')
+    tabela = ('<table><tr><th>Enviada em</th><th>Por</th><th>Arquivo</th><th>Tamanho</th><th></th></tr>'
+              + ''.join(linhas) + '</table>') if linhas else '<p>Nenhuma versão enviada ainda — está no ar o arquivo original do servidor.</p>'
+    original = ('' if not ativa else
+                '<form method="post"><input type="hidden" name="acao" value="original">'
+                '<button class="sec" type="submit">Voltar ao arquivo original do servidor</button></form>')
+    html = (_ESTILO.replace('max-width:360px', 'max-width:860px') +
+            '<style>table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}'
+            'th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--bd);vertical-align:top}'
+            'tr.on td{background:rgba(31,95,191,.08)}.mut{color:var(--mut);font-size:12px}'
+            '.ok{color:#15803d;margin:10px 0}.lnk{all:unset;color:var(--pri);cursor:pointer;text-decoration:underline}'
+            '.sec{background:transparent;color:var(--tx);border:1px solid var(--bd);width:auto;padding:8px 14px}'
+            'input[type=file]{padding:8px}.box{width:100%;max-width:860px}.box>form{margin-top:14px}'
+            'td form{all:unset;display:inline}td a{white-space:nowrap}</style>'
+            '<div class="box"><form method="post" enctype="multipart/form-data">'
+            '<h1>Publicar nova versão do painel</h1>'
+            '<p>No Claude, abra o artifact do Cockpit, baixe o HTML e envie aqui. A versão entra como '
+            '<b>prévia</b>: confira e depois clique em <b>Publicar esta</b>. Planilha e anexos não são afetados.</p>'
+            + (f'<div class="ok">{escape(msg)}</div>' if msg else '')
+            + (f'<div class="err">{escape(erro)}</div>' if erro else '') +
+            '<input type="hidden" name="acao" value="enviar">'
+            '<label for="f">Arquivo HTML</label><input id="f" name="arquivo" type="file" accept=".html,text/html" required>'
+            '<label for="o">O que mudou (opcional)</label><input id="o" name="observacao" maxlength="250">'
+            '<button type="submit">Enviar como prévia</button>'
+            '<div class="mini"><a href="./">Voltar ao painel</a></div></form>'
+            '<div style="margin-top:14px;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:20px 28px">'
+            '<h1 style="font-size:17px">Versões</h1>' + tabela + '</div>'
+            + original + '</div></body></html>')
+    return _seguranca(HttpResponse(html, status=status))
+
+
+@csrf_exempt
+def publicar(request):
+    u = _usuario(request)
+    if not u:
+        return redirect('./')
+    if u.trocar_senha:
+        return redirect('./trocar-senha')
+    if not u.pode_publicar:
+        return _seguranca(HttpResponse('Sem permissão para publicar.', status=403))
+    if request.method != 'POST':
+        return _tela_publicar(u)
+
+    acao = request.POST.get('acao')
+    if acao == 'enviar':
+        arquivo = request.FILES.get('arquivo')
+        if not arquivo:
+            return _tela_publicar(u, erro='Escolha o arquivo HTML.', status=400)
+        html, erro = _valida_html(arquivo.read())
+        if erro:
+            return _tela_publicar(u, erro=erro, status=400)
+        sha = hashlib.sha256(html.encode('utf-8')).hexdigest()
+        existente = VersaoPainel.objects.filter(sha256=sha).first()
+        if existente:
+            return _tela_publicar(u, msg=f'Esse arquivo já foi enviado em {_hora(existente.enviado_em)}.')
+        # Primeira versão enviada: guarda antes o arquivo que está no ar, para poder voltar.
+        if not VersaoPainel.objects.exists():
+            orig = _html_original()
+            VersaoPainel.objects.create(
+                html=orig, nome_arquivo='cockpit.html (original do servidor)', tamanho=len(orig.encode('utf-8')),
+                sha256=hashlib.sha256(orig.encode('utf-8')).hexdigest(), enviado_por='(servidor)',
+                observacao='Versão que estava no ar antes da primeira publicação pela tela.')
+        v = VersaoPainel.objects.create(
+            html=html, nome_arquivo=os.path.basename(arquivo.name)[:255], tamanho=len(html.encode('utf-8')),
+            sha256=sha, enviado_por=u.nome, observacao=(request.POST.get('observacao') or '').strip()[:250])
+        return _tela_publicar(u, msg=f'Versão enviada como prévia. Abra a prévia e, se estiver certa, clique em "Publicar esta".')
+
+    if acao == 'ativar':
+        v = VersaoPainel.objects.filter(id=request.POST.get('id')).first()
+        if not v:
+            return _tela_publicar(u, erro='Versão não encontrada.', status=404)
+        VersaoPainel.objects.filter(ativa=True).update(ativa=False)
+        v.ativa = True
+        v.ativada_em = timezone.now()
+        v.ativada_por = u.nome
+        v.save(update_fields=['ativa', 'ativada_em', 'ativada_por'])
+        return _tela_publicar(u, msg=f'Publicada a versão de {_hora(v.enviado_em)}. Quem estiver com o painel aberto vê ao recarregar.')
+
+    if acao == 'original':
+        VersaoPainel.objects.filter(ativa=True).update(ativa=False)
+        return _tela_publicar(u, msg='No ar: arquivo original do servidor.')
+
+    return _tela_publicar(u, erro='Ação inválida.', status=400)
 
 
 @csrf_exempt
@@ -248,7 +392,8 @@ def _nomes_validos(*nomes):
 @_api
 def api_eu(request):
     u = request.cockpit_user
-    return JsonResponse({'id': u.nome, 'name': u.nome, 'login': u.login, 'pode_editar': u.pode_editar})
+    return JsonResponse({'id': u.nome, 'name': u.nome, 'login': u.login,
+                         'pode_editar': u.pode_editar, 'pode_publicar': u.pode_publicar})
 
 
 @_api

@@ -120,9 +120,10 @@
     + 'html.cockpit-leitura [id^="doc-"][id$="-btn"], html.cockpit-leitura [id^="doc-"][id$="-file"],'
     + 'html.cockpit-leitura [id^="doc-"][id$="-delete"] { display: none !important; }';
   document.documentElement.appendChild(css);
-  req('GET', 'api/eu').then(function (j) {
+  var perfil = req('GET', 'api/eu').then(function (j) {
     if (!j.pode_editar) document.documentElement.classList.add('cockpit-leitura');
-  }).catch(function () {});
+    return j;
+  }).catch(function () { return {}; });
 
   // "Trocar senha" e "Sair" discretos no canto (a sessão dura 12 h).
   document.addEventListener('DOMContentLoaded', function () {
@@ -135,5 +136,12 @@
     f.innerHTML = '<a href="' + BASE + 'trocar-senha" style="' + estilo + '">Trocar senha</a>'
       + '<button type="submit" style="' + estilo + '">Sair</button>';
     document.body.appendChild(f);
+    // Quem pode publicar ganha o atalho para subir uma versão nova da página.
+    perfil.then(function (j) {
+      if (!j.pode_publicar) return;
+      var a = document.createElement('a');
+      a.href = BASE + 'publicar'; a.textContent = 'Publicar versão'; a.style.cssText = estilo;
+      f.insertBefore(a, f.firstChild);
+    });
   });
 })();

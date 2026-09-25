@@ -32,6 +32,9 @@ class UsuarioCockpit(models.Model):
     nome = models.CharField(max_length=120)
     senha_hash = models.CharField(max_length=255)
     perfil = models.CharField(max_length=10, choices=PERFIS, default=PERFIL_LEITURA)
+    # Pode subir uma versão nova da página (HTML baixado do artifact). O HTML roda com o
+    # acesso de todo mundo que abre o painel — só para quem é de confiança.
+    pode_publicar = models.BooleanField(default=False)
     ativo = models.BooleanField(default=True)
     trocar_senha = models.BooleanField(default=True)
     versao = models.PositiveIntegerField(default=1)
@@ -89,3 +92,26 @@ class AnexoCockpit(models.Model):
     tamanho = models.PositiveIntegerField(default=0)
     enviado_por = models.CharField(max_length=120, blank=True, default='')
     enviado_em = models.DateTimeField(auto_now_add=True)
+
+
+class VersaoPainel(models.Model):
+    """Versões do HTML do painel, publicadas pela tela /financeiro/publicar.
+
+    A página servida é a versão `ativa`; sem nenhuma, vale o arquivo pagina/cockpit.html.
+    Guardado no banco (TextField = LONGTEXT no MySQL) para não depender de acesso ao disco
+    do servidor e para poder voltar a qualquer versão anterior."""
+    html = models.TextField()
+    nome_arquivo = models.CharField(max_length=255, blank=True, default='')
+    tamanho = models.PositiveIntegerField(default=0)
+    sha256 = models.CharField(max_length=64, db_index=True)
+    observacao = models.CharField(max_length=255, blank=True, default='')
+    enviado_por = models.CharField(max_length=120, blank=True, default='')
+    enviado_em = models.DateTimeField(auto_now_add=True)
+    ativa = models.BooleanField(default=False)
+    ativada_em = models.DateTimeField(null=True, blank=True)
+    ativada_por = models.CharField(max_length=120, blank=True, default='')
+
+    class Meta:
+        ordering = ['-enviado_em']
+        verbose_name = 'Versão do painel'
+        verbose_name_plural = 'Versões do painel'

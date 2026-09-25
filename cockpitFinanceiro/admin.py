@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AnexoCockpit, DocumentoCockpit, UsuarioCockpit
+from .models import AnexoCockpit, DocumentoCockpit, UsuarioCockpit, VersaoPainel
 
 
 @admin.register(DocumentoCockpit)
@@ -18,7 +18,7 @@ class AnexoCockpitAdmin(admin.ModelAdmin):
 @admin.register(UsuarioCockpit)
 class UsuarioCockpitAdmin(admin.ModelAdmin):
     """Senha não se edita aqui: use `python manage.py cockpit_usuario resetar <login>`."""
-    list_display = ('nome', 'login', 'perfil', 'ativo', 'trocar_senha', 'ultimo_acesso')
+    list_display = ('nome', 'login', 'perfil', 'pode_publicar', 'ativo', 'trocar_senha', 'ultimo_acesso')
     list_filter = ('perfil', 'ativo')
     search_fields = ('nome', 'login')
     exclude = ('senha_hash',)
@@ -29,3 +29,10 @@ class UsuarioCockpitAdmin(admin.ModelAdmin):
         if change:
             obj.versao += 1
         super().save_model(request, obj, form, change)
+
+
+@admin.register(VersaoPainel)
+class VersaoPainelAdmin(admin.ModelAdmin):
+    list_display = ('enviado_em', 'enviado_por', 'nome_arquivo', 'tamanho', 'ativa', 'ativada_por')
+    exclude = ('html',)
+    readonly_fields = ('nome_arquivo', 'tamanho', 'sha256', 'enviado_por', 'enviado_em', 'ativada_em', 'ativada_por')
