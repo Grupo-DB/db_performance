@@ -21,6 +21,7 @@
     return fetch(BASE + caminho, opts).then(function (r) {
       if (r.status === 401) { location.reload(); throw erro('unauthenticated'); }
       return r.json().catch(function () { return {}; }).then(function (j) {
+        if (r.status === 403 && j.erro === 'somente_leitura') throw erro('permission_denied', 'Seu acesso é só de leitura.');
         if (!r.ok) throw erro(r.status === 400 ? 'invalid_argument' : 'unavailable', j.erro);
         return j;
       });
@@ -112,14 +113,27 @@
     use: function (nome) { return Promise.resolve(recursos[nome] || null); },
   };
 
-  // Botão "Sair" discreto no canto (a sessão dura 12 h).
+  // Perfil só leitura: esconde carregar planilha e enviar/excluir anexos. O servidor também
+  // recusa (403) — esconder é só para não oferecer o que não vai funcionar.
+  var css = document.createElement('style');
+  css.textContent = 'html.cockpit-leitura #syncbar-btn, html.cockpit-leitura #syncbar-file,'
+    + 'html.cockpit-leitura [id^="doc-"][id$="-btn"], html.cockpit-leitura [id^="doc-"][id$="-file"],'
+    + 'html.cockpit-leitura [id^="doc-"][id$="-delete"] { display: none !important; }';
+  document.documentElement.appendChild(css);
+  req('GET', 'api/eu').then(function (j) {
+    if (!j.pode_editar) document.documentElement.classList.add('cockpit-leitura');
+  }).catch(function () {});
+
+  // "Trocar senha" e "Sair" discretos no canto (a sessão dura 12 h).
   document.addEventListener('DOMContentLoaded', function () {
+    var estilo = 'font:12px system-ui,sans-serif;padding:6px 10px;border-radius:6px;'
+      + 'border:1px solid rgba(127,127,127,.4);background:rgba(127,127,127,.12);color:inherit;'
+      + 'cursor:pointer;text-decoration:none;display:inline-block';
     var f = document.createElement('form');
     f.method = 'post'; f.action = BASE + 'sair';
-    f.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:99999;margin:0';
-    f.innerHTML = '<button type="submit" style="font:12px system-ui,sans-serif;padding:6px 10px;'
-      + 'border-radius:6px;border:1px solid rgba(127,127,127,.4);background:rgba(127,127,127,.12);'
-      + 'color:inherit;cursor:pointer">Sair</button>';
+    f.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:99999;margin:0;display:flex;gap:6px';
+    f.innerHTML = '<a href="' + BASE + 'trocar-senha" style="' + estilo + '">Trocar senha</a>'
+      + '<button type="submit" style="' + estilo + '">Sair</button>';
     document.body.appendChild(f);
   });
 })();

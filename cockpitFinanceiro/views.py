@@ -1,9 +1,11 @@
 """
 Cockpit Financeiro — página + API que substitui o runtime do Claude.
 
-Acesso: senha única compartilhada (decisão do usuário, 24/09/2026) + nome de quem entra, que
-vira o "atualizado por" do painel. A sessão é um cookie assinado (HttpOnly, Secure,
-SameSite=Strict) que carrega o nome e a versão da senha — trocar a senha invalida todos.
+Acesso: usuário e senha individuais (UsuarioCockpit, desde 25/09/2026 — antes era senha única).
+O usuário nasce com senha provisória e é obrigado a trocá-la no primeiro acesso. Perfil
+"leitura" vê o painel e baixa anexos; "edição" também carrega planilha e envia/exclui anexos.
+A sessão é um cookie assinado (HttpOnly, Secure, SameSite=Strict) com o id e a versão do
+usuário — trocar/resetar a senha ou bloquear o usuário derruba as sessões dele.
 
 Não usa DRF de propósito: o DEFAULT_PERMISSION_CLASSES do projeto está aberto (ver pendência
 da API sem login) e aqui a checagem de acesso tem de ser explícita em toda view.
@@ -14,15 +16,16 @@ import os
 import re
 import uuid
 
-from django.contrib.auth.hashers import check_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.core import signing
 from django.core.cache import cache
 from django.http import (FileResponse, HttpResponse, HttpResponseNotAllowed, JsonResponse)
 from django.shortcuts import redirect
+from django.utils import timezone
 from django.utils.html import escape
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import AnexoCockpit, ConfiguracaoCockpit, DocumentoCockpit
+from .models import AnexoCockpit, DocumentoCockpit, UsuarioCockpit
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PAGINA = os.path.join(APP_DIR, 'pagina', 'cockpit.html')
@@ -33,6 +36,7 @@ SALT = 'cockpitFinanceiro.sessao'
 DURACAO_SESSAO = 60 * 60 * 12          # 12 h
 MAX_TENTATIVAS = 8                      # por IP, a cada 15 min
 JANELA_TENTATIVAS = 60 * 15
+SENHA_MIN = 8
 
 NOME_VALIDO = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 TIPOS_ANEXO = {'application/pdf', 'image/png', 'image/jpeg'}
@@ -47,15 +51,16 @@ XLSX_NOVO = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
 # ─── sessão ──────────────────────────────────────────────────────────────────────────
 
 def _usuario(request):
-    """Nome de quem está logado, ou None."""
+    """UsuarioCockpit logado (ativo e com a versão do cookie), ou None."""
     try:
         valor = request.get_signed_cookie(COOKIE, salt=SALT, max_age=DURACAO_SESSAO)
         dados = json.loads(valor)
     except (KeyError, signing.BadSignature, ValueError):
         return None
-    if dados.get('v') != ConfiguracaoCockpit.atual().versao_senha:
+    u = UsuarioCockpit.objects.filter(id=dados.get('u'), ativo=True).first()
+    if not u or dados.get('v') != u.versao:
         return None
-    return dados.get('n') or None
+    return u
 
 
 def _ip(request):
@@ -76,46 +81,77 @@ def _seguranca(resp):
     return resp
 
 
+def _grava_sessao(request, resp, u):
+    resp.set_signed_cookie(
+        COOKIE, json.dumps({'u': u.id, 'v': u.versao}), salt=SALT,
+        max_age=DURACAO_SESSAO, httponly=True, samesite='Strict',
+        # Pelo host, não pelo DEBUG: a produção roda com DEBUG=True (ver pendência), e o
+        # cookie tem de ser "Secure" lá. Só o teste em http://localhost fica sem.
+        secure=not _local(request),
+    )
+    return resp
+
+
 def _api(view):
-    """Exige login e, em escrita, o cabeçalho X-Cockpit (força preflight de CORS, que só
-    libera managerdb.com.br — junto com o SameSite=Strict, faz o papel do CSRF)."""
+    """Exige login (com a senha já trocada) e, em escrita, perfil de edição e o cabeçalho
+    X-Cockpit (força preflight de CORS, que só libera managerdb.com.br — junto com o
+    SameSite=Strict, faz o papel do CSRF)."""
     @csrf_exempt
     def wrapper(request, *args, **kwargs):
-        nome = _usuario(request)
-        if not nome:
+        u = _usuario(request)
+        if not u or u.trocar_senha:
             return _seguranca(JsonResponse({'erro': 'nao_autenticado'}, status=401))
-        if request.method not in ('GET', 'HEAD') and request.headers.get('X-Cockpit') != '1':
-            return _seguranca(JsonResponse({'erro': 'cabecalho_ausente'}, status=403))
-        request.cockpit_usuario = nome
+        if request.method not in ('GET', 'HEAD'):
+            if request.headers.get('X-Cockpit') != '1':
+                return _seguranca(JsonResponse({'erro': 'cabecalho_ausente'}, status=403))
+            if not u.pode_editar:
+                return _seguranca(JsonResponse({'erro': 'somente_leitura'}, status=403))
+        request.cockpit_user = u
+        request.cockpit_usuario = u.nome
         return _seguranca(view(request, *args, **kwargs))
     return wrapper
 
 
-# ─── página ──────────────────────────────────────────────────────────────────────────
+# ─── páginas de acesso ───────────────────────────────────────────────────────────────
 
-_LOGIN_HTML = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+_ESTILO = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
 <title>Cockpit Financeiro</title><style>
-:root{{--bg:#f4f5f7;--card:#fff;--tx:#1b1f24;--mut:#5b6573;--bd:#d8dce2;--pri:#1f5fbf;--err:#b42318}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#111418;--card:#1a1f25;--tx:#e8ebef;--mut:#9aa4b1;--bd:#2c333c;--pri:#5b9bff;--err:#ff7a6b}}}}
-*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);
-color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px}}
-form{{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:28px;width:100%;max-width:360px}}
-h1{{font-size:20px;margin:0 0 4px}}p{{color:var(--mut);margin:0 0 20px}}label{{display:block;font-weight:600;margin:14px 0 6px}}
-input{{width:100%;padding:10px 12px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:var(--tx);font:inherit}}
-button{{width:100%;margin-top:22px;padding:11px;border:0;border-radius:8px;background:var(--pri);color:#fff;font:inherit;font-weight:600;cursor:pointer}}
-.err{{color:var(--err);margin-top:14px}}</style></head><body>
-<form method="post" action="entrar"><h1>Cockpit Financeiro</h1><p>Acesso restrito.</p>
-<label for="n">Seu nome</label><input id="n" name="nome" maxlength="60" required autocomplete="name" value="{nome}">
-<label for="s">Senha</label><input id="s" name="senha" type="password" required autocomplete="current-password">
-<button type="submit">Entrar</button>{erro}</form></body></html>"""
+:root{--bg:#f4f5f7;--card:#fff;--tx:#1b1f24;--mut:#5b6573;--bd:#d8dce2;--pri:#1f5fbf;--err:#b42318}
+@media (prefers-color-scheme:dark){:root{--bg:#111418;--card:#1a1f25;--tx:#e8ebef;--mut:#9aa4b1;--bd:#2c333c;--pri:#5b9bff;--err:#ff7a6b}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);
+color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px}
+form{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:28px;width:100%;max-width:360px}
+h1{font-size:20px;margin:0 0 4px}p{color:var(--mut);margin:0 0 20px}label{display:block;font-weight:600;margin:14px 0 6px}
+input{width:100%;padding:10px 12px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:var(--tx);font:inherit}
+button{width:100%;margin-top:22px;padding:11px;border:0;border-radius:8px;background:var(--pri);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.err{color:var(--err);margin-top:14px}a{color:var(--pri)}.mini{font-size:13px;margin-top:14px;text-align:center}</style></head><body>"""
 
 
-def _login(erro='', nome='', status=200):
-    html = _LOGIN_HTML.format(
-        erro=f'<div class="err">{escape(erro)}</div>' if erro else '',
-        nome=escape(nome),
-    )
+def _login(erro='', login='', status=200):
+    html = (_ESTILO +
+            '<form method="post" action="entrar"><h1>Cockpit Financeiro</h1><p>Acesso restrito.</p>'
+            f'<label for="u">Usuário</label><input id="u" name="login" maxlength="60" required autocomplete="username" autocapitalize="none" value="{escape(login)}">'
+            '<label for="s">Senha</label><input id="s" name="senha" type="password" required autocomplete="current-password">'
+            '<button type="submit">Entrar</button>'
+            + (f'<div class="err">{escape(erro)}</div>' if erro else '') +
+            '<div class="mini">Esqueceu a senha? Peça ao responsável para gerar uma nova.</div></form></body></html>')
+    return _seguranca(HttpResponse(html, status=status))
+
+
+def _tela_troca(u, erro='', obrigatoria=False, status=200):
+    texto = ('Primeiro acesso: crie a sua senha para continuar.' if obrigatoria
+             else 'Troque a sua senha.')
+    html = (_ESTILO +
+            f'<form method="post" action="trocar-senha"><h1>Olá, {escape(u.nome)}</h1><p>{texto}</p>'
+            + ('' if obrigatoria else '<label for="a">Senha atual</label><input id="a" name="atual" type="password" required autocomplete="current-password">') +
+            f'<label for="n">Nova senha</label><input id="n" name="nova" type="password" required minlength="{SENHA_MIN}" autocomplete="new-password">'
+            '<label for="c">Repita a nova senha</label><input id="c" name="confirma" type="password" required autocomplete="new-password">'
+            f'<p style="margin:10px 0 0;font-size:13px">Mínimo de {SENHA_MIN} caracteres.</p>'
+            '<button type="submit">Salvar senha</button>'
+            + (f'<div class="err">{escape(erro)}</div>' if erro else '') +
+            ('' if obrigatoria else '<div class="mini"><a href="./">Voltar ao painel</a></div>') +
+            '</form></body></html>')
     return _seguranca(HttpResponse(html, status=status))
 
 
@@ -134,8 +170,11 @@ def _html_do_painel():
 def painel(request):
     if request.method != 'GET':
         return HttpResponseNotAllowed(['GET'])
-    if not _usuario(request):
+    u = _usuario(request)
+    if not u:
         return _login()
+    if u.trocar_senha:
+        return redirect('./trocar-senha')
     return _seguranca(HttpResponse(_html_do_painel(), content_type='text/html; charset=utf-8'))
 
 
@@ -145,26 +184,48 @@ def entrar(request):
         return redirect('./')
     chave = f'cockpitfin:tentativas:{_ip(request)}'
     tentativas = cache.get(chave, 0)
-    nome = (request.POST.get('nome') or '').strip()[:60]
+    login = (request.POST.get('login') or '').strip().lower()[:60]
     if tentativas >= MAX_TENTATIVAS:
-        return _login('Muitas tentativas. Aguarde 15 minutos.', nome, status=429)
+        return _login('Muitas tentativas. Aguarde 15 minutos.', login, status=429)
 
-    config = ConfiguracaoCockpit.atual()
+    u = UsuarioCockpit.objects.filter(login=login, ativo=True).first()
     senha = request.POST.get('senha') or ''
-    if not config.senha_hash or not nome or not check_password(senha, config.senha_hash):
+    if not u or not check_password(senha, u.senha_hash):
         cache.set(chave, tentativas + 1, JANELA_TENTATIVAS)
-        return _login('Nome ou senha inválidos.', nome, status=401)
+        return _login('Usuário ou senha inválidos.', login, status=401)
 
     cache.delete(chave)
-    resp = redirect('./')
-    resp.set_signed_cookie(
-        COOKIE, json.dumps({'n': nome, 'v': config.versao_senha}), salt=SALT,
-        max_age=DURACAO_SESSAO, httponly=True, samesite='Strict',
-        # Pelo host, não pelo DEBUG: a produção roda com DEBUG=True (ver pendência), e o
-        # cookie tem de ser "Secure" lá. Só o teste em http://localhost fica sem.
-        secure=not _local(request),
-    )
-    return resp
+    u.ultimo_acesso = timezone.now()
+    u.save(update_fields=['ultimo_acesso'])
+    return _grava_sessao(request, redirect('./trocar-senha' if u.trocar_senha else './'), u)
+
+
+@csrf_exempt
+def trocar_senha(request):
+    u = _usuario(request)
+    if not u:
+        return redirect('./')
+    obrigatoria = u.trocar_senha
+    if request.method != 'POST':
+        return _tela_troca(u, obrigatoria=obrigatoria)
+    # Mesmo cuidado do login: formulário só vale vindo daqui (SameSite=Strict já barra
+    # POST de outro site com o cookie).
+    atual = request.POST.get('atual') or ''
+    nova = request.POST.get('nova') or ''
+    confirma = request.POST.get('confirma') or ''
+    if not obrigatoria and not check_password(atual, u.senha_hash):
+        return _tela_troca(u, 'Senha atual incorreta.', obrigatoria, status=400)
+    if len(nova) < SENHA_MIN:
+        return _tela_troca(u, f'A nova senha precisa ter pelo menos {SENHA_MIN} caracteres.', obrigatoria, status=400)
+    if nova != confirma:
+        return _tela_troca(u, 'As duas senhas não conferem.', obrigatoria, status=400)
+    if check_password(nova, u.senha_hash):
+        return _tela_troca(u, 'A nova senha precisa ser diferente da atual.', obrigatoria, status=400)
+    u.senha_hash = make_password(nova)
+    u.trocar_senha = False
+    u.versao += 1
+    u.save(update_fields=['senha_hash', 'trocar_senha', 'versao'])
+    return _grava_sessao(request, redirect('./'), u)
 
 
 @csrf_exempt
@@ -186,7 +247,8 @@ def _nomes_validos(*nomes):
 
 @_api
 def api_eu(request):
-    return JsonResponse({'id': request.cockpit_usuario, 'name': request.cockpit_usuario})
+    u = request.cockpit_user
+    return JsonResponse({'id': u.nome, 'name': u.nome, 'login': u.login, 'pode_editar': u.pode_editar})
 
 
 @_api

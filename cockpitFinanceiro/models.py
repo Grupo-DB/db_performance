@@ -18,8 +18,42 @@ armazenamento_privado = FileSystemStorage(
 )
 
 
+class UsuarioCockpit(models.Model):
+    """Acesso individual ao Cockpit (substituiu a senha única em 25/09/2026).
+
+    Criado por `python manage.py cockpit_usuario criar ...` com senha provisória; no primeiro
+    acesso a pessoa é obrigada a trocar. `versao` sobe a cada troca/reset e invalida as sessões
+    abertas daquele usuário (o cookie carrega a versão)."""
+    PERFIL_LEITURA = 'leitura'
+    PERFIL_EDICAO = 'edicao'
+    PERFIS = [(PERFIL_LEITURA, 'Só leitura'), (PERFIL_EDICAO, 'Edição (planilha e anexos)')]
+
+    login = models.CharField(max_length=60, unique=True, help_text='minúsculas, sem espaço')
+    nome = models.CharField(max_length=120)
+    senha_hash = models.CharField(max_length=255)
+    perfil = models.CharField(max_length=10, choices=PERFIS, default=PERFIL_LEITURA)
+    ativo = models.BooleanField(default=True)
+    trocar_senha = models.BooleanField(default=True)
+    versao = models.PositiveIntegerField(default=1)
+    ultimo_acesso = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Usuário do Cockpit Financeiro'
+        verbose_name_plural = 'Usuários do Cockpit Financeiro'
+        ordering = ['nome']
+
+    def __str__(self):
+        return f'{self.nome} ({self.login})'
+
+    @property
+    def pode_editar(self):
+        return self.perfil == self.PERFIL_EDICAO
+
+
 class ConfiguracaoCockpit(models.Model):
-    """Linha única. Trocar a senha incrementa `versao_senha` e derruba quem estava logado."""
+    """Da época da senha única (até 25/09/2026). Não é mais lida no login; fica para não
+    quebrar a migration 0001 já aplicada."""
     senha_hash = models.CharField(max_length=255, blank=True, default='')
     versao_senha = models.PositiveIntegerField(default=1)
     atualizado_em = models.DateTimeField(auto_now=True)
