@@ -902,6 +902,16 @@ def calculos_comissoes(request):
     if darcilei_externo:
         VINCULO_INT_MATRIZ['DARCILEI DOS SANTOS'] = 'ALEXANDRA PERUSSI'
         REPS_SEM_BONUS_GLOBAL.add('DARCILEI DOS SANTOS')
+
+    # Nota faturada no PR (filial ATM) por vendedor externo do RS, a partir de 09/2026
+    # (decisão do usuário, 25/09/2026): os 0,25% de interno vão para a Mariane e o interno
+    # do RS não recebe sobre essa nota. A meta continua sendo do vendedor inteiro — o
+    # potencializador do interno olha a venda total; só a base da taxa exclui a ATM.
+    # O Darcilei é do PR (a Alexandra recebe sobre tudo dele) e fica de fora.
+    ATM_PR_PARA_MARIANE_DESDE = datetime.date(2026, 9, 1)
+    atm_pr_para_mariane = data_inicio_dt >= ATM_PR_PARA_MARIANE_DESDE
+    REPS_DO_PR = {'DARCILEI DOS SANTOS'}
+    venda_atm_reps_rs = {}   # rep -> venda faturada pela ATM (vai para a Mariane na seção 6)
     if marina_interna:
         VINCULO_INT_MATRIZ.pop('RICHARD GONCALVES MACHADO')
         VINCULO_INT_MATRIZ['RICHARD GONCALVES MACHADO - 111'] = _interna_mpa
@@ -1063,11 +1073,19 @@ def calculos_comissoes(request):
                 'tipo': 'Vendedor Externo CC'
             }
 
+        # Base do interno: sem a nota faturada no PR (filial ATM), que é da Mariane.
+        vendas_base_int = vendas
+        if atm_pr_para_mariane and rep_chave not in REPS_DO_PR:
+            _mask_atm_rep = df_rep['EMPRESAFILIAL'].str.contains('ATM', na=False)
+            if _mask_atm_rep.any():
+                venda_atm_reps_rs[rep_chave] = float(df_rep[_mask_atm_rep]['VALOR_PRODUTO'].sum())
+                vendas_base_int = vendas_por_grupo(df_rep[~_mask_atm_rep])
+
         # Acumula para interno Matriz com detalhamento por grupo
         if vinc_int in vendedores_internos_acum:
-            comissao_int = comissao_int_com_bonus(vendas, chave_meta)
-            # Calcula comissão por grupo (considerando potencializador se aplicável)
+            # Potencializador pela venda TOTAL do externo (a meta é dele); taxa sobre a base.
             comissao_por_grupo = {}
+            comissao_int = 0.0
             for grupo, taxa in taxas_interno.items():
                 venda_g = vendas.get(grupo, 0)
                 taxa_final = taxa
@@ -1075,7 +1093,9 @@ def calculos_comissoes(request):
                     meta_g = metas_efetivas[chave_meta].get(grupo, 0)
                     if meta_g > 0 and venda_g >= meta_g:
                         taxa_final += bonus_interno
-                comissao_por_grupo[grupo] = round(venda_g * taxa_final, 2)
+                valor_g = vendas_base_int.get(grupo, 0) * taxa_final
+                comissao_int += valor_g
+                comissao_por_grupo[grupo] = round(valor_g, 2)
             vendedores_internos_acum[vinc_int]['total'] += comissao_int
             vendedores_internos_acum[vinc_int]['detalhamento'].append({
                 'representante_externo': rep_chave,
@@ -1393,14 +1413,27 @@ def calculos_comissoes(request):
     # 0,25% sobre reps externos vinculados
     # AGNER e RODRIGO PLANALTO: apenas vendas expedidas pela ATM (*)
     REP_ATM_SOMENTE_ATM = {'AGNER LORETO WALMRATH', 'RODRIGO CHAVES CRUZ (PLANALTO)'}
+    # Cal Sucro é só da Mariane, 0,125% em qualquer cidade (confirmado 25/09/2026): a partir
+    # de 09/2026 sai da base dos 0,25% dos representantes ATM — senão, se um representante
+    # da Alexandra vendesse Cal Sucro, ela receberia sobre ele também.
+    CAL_SUCRO_SO_MARIANE_DESDE = datetime.date(2026, 9, 1)
+    _sem_cal_sucro_reps = data_inicio_dt >= CAL_SUCRO_SO_MARIANE_DESDE
     for rep_ext, int_atm in REP_ATM.items():
         if rep_ext in REP_ATM_SOMENTE_ATM:
             df_rep_atm = df_atm_fil[df_atm_fil['REPRESENTANTE'].str.contains(rep_ext, na=False, regex=False)]
         else:
             df_rep_atm = df_cc[df_cc['REPRESENTANTE'].str.contains(rep_ext, na=False, regex=False)]
+        if _sem_cal_sucro_reps:
+            df_rep_atm = df_rep_atm[~_mask_cal_sucro.reindex(df_rep_atm.index, fill_value=False)]
         atm_internos[int_atm] = atm_internos.get(int_atm, 0) + df_rep_atm['VALOR_PRODUTO'].sum() * p('ATM_INTERNO_REPS', 0.0025)
 
-    # Cal Sucro: taxa configurável → 100% Mariane (todas as filiais)
+    # Nota faturada no PR (ATM) dos externos do RS → Mariane (09/2026). Quem já está no
+    # REP_ATM (Rodrigo Planalto, e o Agner, que nem está no loop) já teve a parte ATM
+    # paga acima — não entra de novo.
+    _mariane_atm_rs = {r: v for r, v in venda_atm_reps_rs.items() if r not in REP_ATM}
+    atm_internos['MARIANE DO ROCIO MOREIRA'] += sum(_mariane_atm_rs.values()) * p('ATM_INTERNO_REPS', 0.0025)
+
+    # Cal Sucro: taxa configurável → 100% Mariane (todas as filiais, qualquer cidade, qualquer vendedor)
     df_cal_sucro = df_cc[_mask_cal_sucro]
     atm_internos['MARIANE DO ROCIO MOREIRA'] += df_cal_sucro['VALOR_PRODUTO'].sum() * p('ATM_CAL_SUCRO', 0.00125)
 
@@ -1457,7 +1490,29 @@ def calculos_comissoes(request):
             return 'MARIANE'    # Exterior → Mariane
         return 'ALEXANDRA'      # Outros estados → Alexandra
 
-    df_dolomita_atm['REGIAO_ATM'] = df_dolomita_atm['CIDADE_FATURAMENTO'].apply(classifica_regiao_atm)
+    # A partir de 09/2026 (decisão do usuário, 25/09/2026): o 0,5% é só sobre a dolomita
+    # SEM representante (canal "VENDAS ATM") — quem tem representante já recebe os 0,8%
+    # do próprio externo. E só dentro da região delas:
+    #   Alexandra: RMC + Mafra (SC), Rio Negro, Piên e São Mateus do Sul (PR)
+    #   Mariane:   o resto de PR, SC, RS e Uruguai
+    #   outros estados (SP, MG, RO...): continuam com a Alexandra (confirmado 25/09/2026).
+    DOLOMITA_SEM_REP_DESDE = datetime.date(2026, 9, 1)
+    ALEXANDRA_CIDADES_EXTRA = ['MAFRA-SC', 'RIO NEGRO-PR', 'PIEN-PR', 'SAO MATEUS DO SUL-PR']
+
+    def classifica_regiao_dolomita(cidade):
+        cidade = str(cidade or '').strip().upper()
+        if cidade in RMC_CIDADES or cidade in ALEXANDRA_CIDADES_EXTRA:
+            return 'ALEXANDRA'
+        if cidade.endswith(('-PR', '-SC', '-RS', '-UY', '-EX')):
+            return 'MARIANE'
+        return 'ALEXANDRA'
+
+    if data_inicio_dt >= DOLOMITA_SEM_REP_DESDE:
+        _rep_dol = df_dolomita_atm['REPRESENTANTE'].fillna('').str.strip().str.upper()
+        df_dolomita_atm = df_dolomita_atm[(_rep_dol == '') | _rep_dol.str.startswith('VENDAS ')].copy()
+        df_dolomita_atm['REGIAO_ATM'] = df_dolomita_atm['CIDADE_FATURAMENTO'].apply(classifica_regiao_dolomita)
+    else:
+        df_dolomita_atm['REGIAO_ATM'] = df_dolomita_atm['CIDADE_FATURAMENTO'].apply(classifica_regiao_atm)
     _taxa_dolomita = p('ATM_DOLOMITA', 0.005)
     atm_internos['ALEXANDRA PERUSSI'] += df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum() * _taxa_dolomita
     atm_internos['MARIANE DO ROCIO MOREIRA'] += df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum() * _taxa_dolomita
@@ -1470,7 +1525,10 @@ def calculos_comissoes(request):
         ~df_atm_fil['REPRESENTANTE'].apply(is_ext_cc).astype(bool) &
         ~_mask_krical_cliente
     ].copy()
-    df_atm_direto['REGIAO_ATM'] = df_atm_direto['CIDADE_FATURAMENTO'].apply(classifica_regiao_atm)
+    # Mesmas regiões da dolomita a partir de 09/2026 (confirmado pelo usuário, 25/09/2026):
+    # as 4 cidades novas passam para a Alexandra; outros estados continuam com ela.
+    df_atm_direto['REGIAO_ATM'] = df_atm_direto['CIDADE_FATURAMENTO'].apply(
+        classifica_regiao_dolomita if data_inicio_dt >= DOLOMITA_SEM_REP_DESDE else classifica_regiao_atm)
     _taxa_atm_direto = p('ATM_DIRETO', 0.005)
     atm_internos['ALEXANDRA PERUSSI'] += df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum() * _taxa_atm_direto
     atm_internos['MARIANE DO ROCIO MOREIRA'] += df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum() * _taxa_atm_direto
