@@ -14,7 +14,6 @@ import os
 import re
 import uuid
 
-from django.conf import settings
 from django.contrib.auth.hashers import check_password
 from django.core import signing
 from django.core.cache import cache
@@ -62,6 +61,10 @@ def _usuario(request):
 def _ip(request):
     return (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
             or request.META.get('REMOTE_ADDR', ''))
+
+
+def _local(request):
+    return request.get_host().split(':')[0] in ('localhost', '127.0.0.1')
 
 
 def _seguranca(resp):
@@ -157,7 +160,9 @@ def entrar(request):
     resp.set_signed_cookie(
         COOKIE, json.dumps({'n': nome, 'v': config.versao_senha}), salt=SALT,
         max_age=DURACAO_SESSAO, httponly=True, samesite='Strict',
-        secure=not settings.DEBUG,
+        # Pelo host, não pelo DEBUG: a produção roda com DEBUG=True (ver pendência), e o
+        # cookie tem de ser "Secure" lá. Só o teste em http://localhost fica sem.
+        secure=not _local(request),
     )
     return resp
 

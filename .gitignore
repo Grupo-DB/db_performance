@@ -9,3 +9,5 @@ __pycache__/
 # Cockpit Financeiro: a página tem dados financeiros embutidos e os anexos são extratos
 cockpitFinanceiro/pagina/*.html
 privado/
+db_performance/settings_cockpit_local.py
+cockpit_local.sqlite3
