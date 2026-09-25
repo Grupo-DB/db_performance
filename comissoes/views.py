@@ -1065,6 +1065,7 @@ def calculos_comissoes(request):
                 'comissao': round(comissao_rep + comissao_dolomita_rep, 2),
                 'comissao_por_grupo': comissao_grupos,
                 'vendas_por_grupo': vendas,
+                'metas_por_grupo': {g: float((metas_efetivas.get(chave_meta) or {}).get(g, 0) or 0) for g in GRUPOS_CC},
                 'vendedor_interno': vinc_int,
                 'venda_dolomita': round(venda_dolomita_rep, 2),
                 'comissao_dolomita': round(comissao_dolomita_rep, 2),
@@ -1100,6 +1101,9 @@ def calculos_comissoes(request):
             vendedores_internos_acum[vinc_int]['detalhamento'].append({
                 'representante_externo': rep_chave,
                 'comissao_por_grupo': comissao_por_grupo,
+                'vendas_por_grupo': vendas,
+                'vendas_base_por_grupo': vendas_base_int,
+                'venda_atm_excluida': round(venda_atm_reps_rs.get(rep_chave, 0.0), 2) if vendas_base_int is not vendas else 0.0,
                 'comissao': round(comissao_int, 2),
             })
             base_jocelaine_vendas += sum(vendas.values())
@@ -1157,8 +1161,11 @@ def calculos_comissoes(request):
     resultado['AGNER LORETO WALMRATH'] = {
         'comissao': round(float(comissao_agner), 2),
         'comissao_base': round(float(comissao_agner_base), 2),
+        'multiplicador': p('AGNER_MULTIPLICADOR', 1.05),
+        'proporcao_matriz': round(float(proporcao_agner_matriz), 6),
         'comissao_por_grupo': comissao_grupos_agner,
         'vendas_por_grupo': vendas_agner,
+        'metas_por_grupo': {g: float((metas_efetivas.get(f"{periodo_chave}AGNER LORETO WALMRATH") or {}).get(g, 0) or 0) for g in GRUPOS_CC},
         'venda_dolomita': round(float(venda_agner_dolomita), 2),
         'comissao_dolomita': round(float(comissao_agner_dolomita), 2),
         'taxa_dolomita': taxa_agner_dolomita,
@@ -1394,6 +1401,17 @@ def calculos_comissoes(request):
     ]
 
     atm_internos = {'ALEXANDRA PERUSSI': 0.0, 'MARIANE DO ROCIO MOREIRA': 0.0, 'DARCILEI DOS SANTOS': 0.0}
+    # Memória de cálculo dos internos ATM (tela "Como é calculada"): cada parcela com base,
+    # taxa e valor. Só descreve — o total continua sendo o de atm_internos.
+    atm_componentes = {k: [] for k in atm_internos}
+
+    def _atm_add(nome, descricao, base, taxa):
+        base = float(base or 0.0)
+        valor = base * taxa
+        atm_internos[nome] = atm_internos.get(nome, 0.0) + valor
+        atm_componentes.setdefault(nome, []).append({
+            'descricao': descricao, 'base': round(base, 2), 'taxa': taxa, 'valor': round(valor, 2),
+        })
 
     # Filtra somente vendas faturadas pela filial ATM
     df_atm_fil = df_cc[df_cc['EMPRESAFILIAL'].str.contains('ATM', na=False)]
@@ -1425,21 +1443,23 @@ def calculos_comissoes(request):
             df_rep_atm = df_cc[df_cc['REPRESENTANTE'].str.contains(rep_ext, na=False, regex=False)]
         if _sem_cal_sucro_reps:
             df_rep_atm = df_rep_atm[~_mask_cal_sucro.reindex(df_rep_atm.index, fill_value=False)]
-        atm_internos[int_atm] = atm_internos.get(int_atm, 0) + df_rep_atm['VALOR_PRODUTO'].sum() * p('ATM_INTERNO_REPS', 0.0025)
+        _atm_add(int_atm, f"Representante ATM {rep_ext}" + (' (só notas pela ATM)' if rep_ext in REP_ATM_SOMENTE_ATM else ''),
+                 df_rep_atm['VALOR_PRODUTO'].sum(), p('ATM_INTERNO_REPS', 0.0025))
 
     # Nota faturada no PR (ATM) dos externos do RS → Mariane (09/2026). Quem já está no
     # REP_ATM (Rodrigo Planalto, e o Agner, que nem está no loop) já teve a parte ATM
     # paga acima — não entra de novo.
     _mariane_atm_rs = {r: v for r, v in venda_atm_reps_rs.items() if r not in REP_ATM}
-    atm_internos['MARIANE DO ROCIO MOREIRA'] += sum(_mariane_atm_rs.values()) * p('ATM_INTERNO_REPS', 0.0025)
+    for _rep_rs, _venda_rs in sorted(_mariane_atm_rs.items()):
+        _atm_add('MARIANE DO ROCIO MOREIRA', f'Nota faturada no PR (ATM) de {_rep_rs}', _venda_rs, p('ATM_INTERNO_REPS', 0.0025))
 
     # Cal Sucro: taxa configurável → 100% Mariane (todas as filiais, qualquer cidade, qualquer vendedor)
     df_cal_sucro = df_cc[_mask_cal_sucro]
-    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_cal_sucro['VALOR_PRODUTO'].sum() * p('ATM_CAL_SUCRO', 0.00125)
+    _atm_add('MARIANE DO ROCIO MOREIRA', 'Cal Sucro (qualquer cidade)', df_cal_sucro['VALOR_PRODUTO'].sum(), p('ATM_CAL_SUCRO', 0.00125))
 
     # KRICAL: cliente tratado como rep ATM de Mariane — filtra por CLIENTE_NOME
     df_krical = df_cc[df_cc['CLIENTE_NOME'].str.contains('KRICAL', na=False)]
-    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_krical['VALOR_PRODUTO'].sum() * p('ATM_KRICAL', 0.0025)
+    _atm_add('MARIANE DO ROCIO MOREIRA', 'Cliente KRICAL', df_krical['VALOR_PRODUTO'].sum(), p('ATM_KRICAL', 0.0025))
 
     # Termos de externos CC da Matriz (VINCULO_INT_MATRIZ + Adriano Born) — usados para excluir da dolomita
     def is_ext_cc_matriz(r):
@@ -1514,8 +1534,10 @@ def calculos_comissoes(request):
     else:
         df_dolomita_atm['REGIAO_ATM'] = df_dolomita_atm['CIDADE_FATURAMENTO'].apply(classifica_regiao_atm)
     _taxa_dolomita = p('ATM_DOLOMITA', 0.005)
-    atm_internos['ALEXANDRA PERUSSI'] += df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum() * _taxa_dolomita
-    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum() * _taxa_dolomita
+    _atm_add('ALEXANDRA PERUSSI', 'Dolomita sem representante — região Alexandra',
+             df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum(), _taxa_dolomita)
+    _atm_add('MARIANE DO ROCIO MOREIRA', 'Dolomita sem representante — região Mariane',
+             df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum(), _taxa_dolomita)
 
     # ATM Direto: taxa configurável (somente filial ATM, excluindo dolomita, cal sucro, externos CC e KRICAL por CLIENTE_NOME)
     _mask_krical_cliente = df_atm_fil['CLIENTE_NOME'].str.contains('KRICAL', na=False)
@@ -1530,15 +1552,17 @@ def calculos_comissoes(request):
     df_atm_direto['REGIAO_ATM'] = df_atm_direto['CIDADE_FATURAMENTO'].apply(
         classifica_regiao_dolomita if data_inicio_dt >= DOLOMITA_SEM_REP_DESDE else classifica_regiao_atm)
     _taxa_atm_direto = p('ATM_DIRETO', 0.005)
-    atm_internos['ALEXANDRA PERUSSI'] += df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum() * _taxa_atm_direto
-    atm_internos['MARIANE DO ROCIO MOREIRA'] += df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum() * _taxa_atm_direto
+    _atm_add('ALEXANDRA PERUSSI', 'ATM Direto — região Alexandra',
+             df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum(), _taxa_atm_direto)
+    _atm_add('MARIANE DO ROCIO MOREIRA', 'ATM Direto — região Mariane',
+             df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum(), _taxa_atm_direto)
 
     # Darcilei: 0,04% sobre total ATM filial CC excluindo apenas COFCO
     # (equivalente à fórmula =SUMIFS(V:V,B:B,"F08 - UP ATM",S:S,"CC") - SUMIFS(...,F:F,"*cofco*") da planilha)
     _mask_cofco = df_atm_fil['CLIENTE_NOME'].str.contains('COFCO', case=False, na=False)
     venda_up_atm = df_atm_fil[~_mask_cofco]['VALOR_PRODUTO'].sum()
     if not darcilei_externo:
-        atm_internos['DARCILEI DOS SANTOS'] += venda_up_atm * p('DARCILEI_ATM', 0.0004)
+        _atm_add('DARCILEI DOS SANTOS', 'Total da filial ATM sem COFCO', venda_up_atm, p('DARCILEI_ATM', 0.0004))
 
     # DEBUG: breakdown por componente
     _atm_debug = {}
@@ -1618,7 +1642,9 @@ def calculos_comissoes(request):
             elif val:
                 resultado[nome] = {'comissao': round(val, 2), 'tipo': 'Vendedor Interno ATM'}
             continue
-        resultado[nome] = {'comissao': round(val, 2), 'tipo': 'Vendedor Interno ATM'}
+        resultado[nome] = {'comissao': round(val, 2), 'tipo': 'Vendedor Interno ATM',
+                           'componentes': atm_componentes.get(nome, []),
+                           'licenca_maternidade': bool(licenca_maternidade_alexandra)}
 
     # Alexandra: interna ATM + interna do Darcilei (externo desde 09/2026). A parte do
     # Darcilei entra depois da licença maternidade — não faz sentido ela ir para ele.
