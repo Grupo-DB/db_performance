@@ -325,7 +325,7 @@ def calculos_comissoes(request):
                 WHERE CIDCOD = CLICIDADE)
         END CIDADE_FATURAMENTO, SEGCNOME SEGMENTO_CLIENTE,
         R.REPNOME REPRESENTANTE, R.REPCOD REPRESENTANTE_CODIGO, 
-        M.REPNOME REPRESENTANTE_MASTER, M.REPNOME REPRESENTANTE_MASTER_CODIGO,
+        M.REPNOME REPRESENTANTE_MASTER, M.REPCOD REPRESENTANTE_MASTER_CODIGO,
 
         ESTQNOME ESTOQUE, ESTQCOD ESTOQUE_CODIGO, 
         CASE
@@ -550,7 +550,7 @@ def calculos_comissoes(request):
             WHERE CIDCOD = CLICIDADE)
     END CIDADE_FATURAMENTO, SEGCNOME SEGMENTO_CLIENTE,
     R.REPNOME REPRESENTANTE, R.REPCOD REPRESENTANTE_CODIGO, 
-    M.REPNOME REPRESENTANTE_MASTER, M.REPNOME REPRESENTANTE_MASTER_CODIGO,
+    M.REPNOME REPRESENTANTE_MASTER, M.REPCOD REPRESENTANTE_MASTER_CODIGO,
     ESTQNOME ESTOQUE, ESTQCOD ESTOQUE_CODIGO, 
     CASE
         WHEN ESTQGRP = 0 THEN GALMNOME
@@ -675,6 +675,25 @@ def calculos_comissoes(request):
     df.columns = [c.strip() for c in df.columns]
     df['REPRESENTANTE'] = df['REPRESENTANTE'].fillna('').str.strip().str.upper()
     df['REPRESENTANTE_MASTER'] = df['REPRESENTANTE_MASTER'].fillna('').str.strip().str.upper()
+
+    # Nome do representante pelo CÓDIGO, não pelo REPNOME do ERP. O cálculo casa vendedor
+    # por substring do nome, e o ERP devolve o nome ATUAL até nas notas antigas: o REPCOD 54
+    # já foi "JAKLAINY DUARTE LEMOS", "RICHARD GONCALVES MACHADO" e voltou a "JAKLAINY LEMOS"
+    # — a cada troca a região POA sumia do cálculo (sem comissão, fora da meta global).
+    # No ERP o 54 continua como Jaklainy, mas para as comissões ele é o Richard (decisão do
+    # usuário, 29/09/2026). O sufixo " - NN" separa os dois códigos do Richard, que têm
+    # regras diferentes a partir de 09/2026; antes disso a chave sem sufixo pega o 54.
+    NOME_POR_REPCOD = {
+        54:  'RICHARD GONCALVES MACHADO - 54',
+        111: 'RICHARD GONCALVES MACHADO - 111',
+    }
+    for _col_nome, _col_cod in (('REPRESENTANTE', 'REPRESENTANTE_CODIGO'),
+                                ('REPRESENTANTE_MASTER', 'REPRESENTANTE_MASTER_CODIGO')):
+        if _col_cod in df.columns:
+            _cod = pd.to_numeric(df[_col_cod], errors='coerce')
+            for _repcod, _nome in NOME_POR_REPCOD.items():
+                df.loc[_cod == _repcod, _col_nome] = _nome
+
     df['GRUPO_COMERCIAL'] = df['GRUPO_COMERCIAL'].fillna('').str.strip().str.upper()
     df['GRUPO_COMERCIAL_LINHA_PRODUTOS'] = df['GRUPO_COMERCIAL_LINHA_PRODUTOS'].fillna('').str.strip().str.upper()
     df['SEGMENTO_PRODUTO'] = df['SEGMENTO_PRODUTO'].fillna('').str.strip().str.upper()
