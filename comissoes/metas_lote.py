@@ -13,8 +13,9 @@ from rest_framework.response import Response
 
 from .models import Meta, Representante
 
-# Quem pode gravar metas (mesmos grupos de gestão das comissões).
+# Quem pode gravar metas: gestão grava qualquer segmento; os grupos de segmento só o seu.
 GRUPOS_GESTAO = {'Admin', 'Master', 'vendasGestao'}
+GRUPO_POR_SEGMENTO = {'CONSTRUCAO CIVIL': 'vendasConstCivil', 'AGRONEGOCIO': 'vendasAgro'}
 GRUPOS_VALIDOS = {'CB/CAL CREM', 'PRIMOR', 'PRIMEX', 'FINALIZA', 'AGRONEGOCIO', 'CONSTRUCAO CIVIL'}
 
 
@@ -22,11 +23,14 @@ class _DryRun(Exception):
     pass
 
 
-def _pode_gravar(request) -> bool:
+def _pode_gravar(request, segmento: str) -> bool:
     user = getattr(request, 'user', None)
     if not user or not user.is_authenticated:
         return False
-    return user.is_superuser or user.groups.filter(name__in=GRUPOS_GESTAO).exists()
+    if user.is_superuser or user.groups.filter(name__in=GRUPOS_GESTAO).exists():
+        return True
+    grupo_seg = GRUPO_POR_SEGMENTO.get(segmento)
+    return bool(grupo_seg) and user.groups.filter(name=grupo_seg).exists()
 
 
 @csrf_exempt
@@ -43,15 +47,15 @@ def metas_lote(request):
     Cada item é a célula (representante, grupo, mês): valor > 0 cria/atualiza; vazio ou 0
     apaga a meta que existir. Células que não vêm no lote não são tocadas.
     """
-    if not _pode_gravar(request):
-        return Response({'erro': 'Sem permissão para gravar metas.'}, status=403)
-
     d = request.data
+    segmento = (d.get('segmento') or 'CONSTRUCAO CIVIL').strip().upper()
+    if not _pode_gravar(request, segmento):
+        return Response({'erro': 'Sem permissão para gravar metas deste segmento.'}, status=403)
+
     try:
         data_meta = dt.datetime.strptime(str(d.get('data_meta'))[:10], '%Y-%m-%d').date().replace(day=1)
     except (TypeError, ValueError):
         return Response({'erro': 'data_meta inválida (AAAA-MM-DD).'}, status=400)
-    segmento = (d.get('segmento') or 'CONSTRUCAO CIVIL').strip().upper()
     itens = d.get('itens') or []
     if not isinstance(itens, list) or not itens:
         return Response({'erro': 'Nenhum item enviado.'}, status=400)
