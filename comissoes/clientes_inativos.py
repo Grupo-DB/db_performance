@@ -39,6 +39,20 @@ def _consulta_ultima_compra(janela_inicio: str) -> pd.DataFrame:
             MAX(CLICNPJCPF)                       CLIENTE_CNPJCPF,
             MAX(CAST(NFDATA AS DATE))             ULTIMA_COMPRA,
             COUNT(DISTINCT NF.NFCOD)              QTD_NOTAS,
+            -- Quanto o cliente comprou na janela (valor do produto e toneladas), por segmento
+            -- do produto — mesma regra de SEGMENTO_PRODUTO e VALOR_PRODUTO do cálculo.
+            -- Última compra e notas POR SEGMENTO: com o filtro de segmento, a inatividade é
+            -- a do segmento (quem parou de comprar CC mas segue no calcário conta em CC).
+            MAX(CASE WHEN ESTQGALM IN (1974, 1587, 1828) THEN NULL ELSE CAST(NFDATA AS DATE) END) ULTIMA_CC,
+            MAX(CASE WHEN ESTQGALM IN (1974, 1587, 1828) THEN CAST(NFDATA AS DATE) END) ULTIMA_AGRO,
+            COUNT(DISTINCT CASE WHEN ESTQGALM IN (1974, 1587, 1828) THEN NULL ELSE NF.NFCOD END) QTD_NOTAS_CC,
+            COUNT(DISTINCT CASE WHEN ESTQGALM IN (1974, 1587, 1828) THEN NF.NFCOD END) QTD_NOTAS_AGRO,
+            SUM(CASE WHEN ESTQGALM IN (1974, 1587, 1828) THEN 0 ELSE INFTOTAL END) VALOR_CC,
+            SUM(CASE WHEN ESTQGALM IN (1974, 1587, 1828) THEN INFTOTAL ELSE 0 END) VALOR_AGRO,
+            SUM(CASE WHEN ESTQGALM IN (1974, 1587, 1828) THEN 0
+                     ELSE INFQUANT * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END / 1000.0 END) TN_CC,
+            SUM(CASE WHEN ESTQGALM IN (1974, 1587, 1828)
+                     THEN INFQUANT * CASE WHEN ESTQPESO > 0 THEN ESTQPESO ELSE 1 END / 1000.0 ELSE 0 END) TN_AGRO,
             (SELECT CIDNOME + '-' + ESTUF FROM CIDADE
                 JOIN ESTADO ON ESTCOD = CIDEST WHERE CIDCOD = MAX(CLICIDADE)) CIDADE,
             MAX(COALESCE(NULLIF(LTRIM(RTRIM(CLITELEFONE)), ''),
@@ -47,7 +61,20 @@ def _consulta_ultima_compra(janela_inicio: str) -> pd.DataFrame:
             (SELECT TOP 1 REPNOME FROM NOTAFISCAL X
                 JOIN REPRESENTANTE ON REPCOD = X.NFREP
                 WHERE X.NFCLI = NF.NFCLI AND X.NFSIT = 1
-                ORDER BY X.NFDATA DESC)           REPRESENTANTE
+                ORDER BY X.NFDATA DESC)           REPRESENTANTE,
+            -- Representante da última nota de cada segmento (a do Agro não serve para CC).
+            (SELECT TOP 1 REPNOME FROM NOTAFISCAL X
+                JOIN REPRESENTANTE ON REPCOD = X.NFREP
+                JOIN ITEMNOTAFISCAL XI ON XI.INFNFCOD = X.NFCOD
+                JOIN ESTOQUE XE ON XE.ESTQCOD = XI.INFESTQ
+                WHERE X.NFCLI = NF.NFCLI AND X.NFSIT = 1 AND XE.ESTQGALM NOT IN (1974, 1587, 1828)
+                ORDER BY X.NFDATA DESC)           REPRESENTANTE_CC,
+            (SELECT TOP 1 REPNOME FROM NOTAFISCAL X
+                JOIN REPRESENTANTE ON REPCOD = X.NFREP
+                JOIN ITEMNOTAFISCAL XI ON XI.INFNFCOD = X.NFCOD
+                JOIN ESTOQUE XE ON XE.ESTQCOD = XI.INFESTQ
+                WHERE X.NFCLI = NF.NFCLI AND X.NFSIT = 1 AND XE.ESTQGALM IN (1974, 1587, 1828)
+                ORDER BY X.NFDATA DESC)           REPRESENTANTE_AGRO
         FROM NOTAFISCAL NF
             JOIN CLIENTE ON CLICOD = NFCLI
             JOIN ITEMNOTAFISCAL INF ON INFNFCOD = NFCOD
@@ -65,6 +92,44 @@ def _consulta_ultima_compra(janela_inicio: str) -> pd.DataFrame:
     return df
 
 
+def _agrupar_por_cnpj(clientes):
+    """Junta as unidades do mesmo CNPJ raiz num item só. Última compra = a mais recente
+    das unidades; valor e notas somam; nome, cidade, telefone e representante vêm da
+    unidade que mais comprou. Resolvido/ignorado só quando TODAS as unidades estão."""
+    grupos = {}
+    for c in clientes:
+        grupos.setdefault(c['grupo_cnpj'] or c['cliente_codigo'], []).append(c)
+    saida = []
+    for unidades in grupos.values():
+        if len(unidades) == 1:
+            saida.append(unidades[0])
+            continue
+        unidades.sort(key=lambda u: u['valor_janela'], reverse=True)
+        base = dict(unidades[0])
+        mais_recente = max(unidades, key=lambda u: u['ultima_compra'])
+        cidades = []
+        for u in unidades:
+            if u['cidade'] and u['cidade'] not in cidades:
+                cidades.append(u['cidade'])
+        base.update({
+            'codigos': [u['cliente_codigo'] for u in unidades],
+            'unidades': len(unidades),
+            'cidade': cidades[0] if cidades else base['cidade'],
+            'outras_cidades': cidades[1:],
+            'ultima_compra': mais_recente['ultima_compra'],
+            'dias_sem_comprar': mais_recente['dias_sem_comprar'],
+            'qtd_notas_periodo': sum(u['qtd_notas_periodo'] for u in unidades),
+            'valor_janela': round(sum(u['valor_janela'] for u in unidades), 2),
+            'tn_janela': round(sum(u['tn_janela'] for u in unidades), 3),
+            'telefone': next((u['telefone'] for u in unidades if u['telefone']), ''),
+            'resolvido': all(u['resolvido'] for u in unidades),
+            'ignorar': all(u['ignorar'] for u in unidades),
+            'observacao': next((u['observacao'] for u in unidades if u['observacao']), ''),
+        })
+        saida.append(base)
+    return saida
+
+
 @csrf_exempt
 @api_view(['GET', 'POST'])
 def clientes_inativos(request):
@@ -76,6 +141,13 @@ def clientes_inativos(request):
       - representante (str, opcional): filtra a carteira. Obrigatório p/ não-admin.
       - incluir_resolvidos (bool, default false): inclui os já marcados como resolvidos.
       - incluir_ignorados (bool, default false): inclui os marcados como 'não alertar mais'.
+      - segmento (str, opcional: 'CC' | 'AGRO'): inatividade DO SEGMENTO — última compra,
+        notas, representante, valor e toneladas só desse segmento. Quem parou de comprar CC
+        mas segue comprando calcário aparece em CC.
+      - ordenar (str, default 'dias'): 'dias' (mais tempo sem comprar primeiro) ou 'valor'
+        (quem mais comprava na janela primeiro).
+      - agrupar_cnpj (bool, default false): junta as unidades pela raiz do CNPJ (8 dígitos).
+        O grupo só é inativo se TODAS as unidades estão inativas; devolve `codigos`.
       - pagina (int, default 1): página da listagem (1-based).
       - por_pagina (int, default 24, máx 200): itens por página; 0 = sem paginar.
     """
@@ -95,6 +167,10 @@ def clientes_inativos(request):
     representante = (dados.get('representante') or '').strip()
     incluir_resolvidos = _bool('incluir_resolvidos')
     incluir_ignorados = _bool('incluir_ignorados')
+    segmento = (dados.get('segmento') or '').strip().upper()
+    segmento = segmento if segmento in ('CC', 'AGRO') else ''
+    ordenar = (dados.get('ordenar') or 'dias').strip().lower()
+    agrupar_cnpj = _bool('agrupar_cnpj')
     pagina = max(1, _int('pagina', 1))
     # por_pagina = 0 devolve tudo (usado por exportações); acima disso, teto de 200.
     por_pagina = _int('por_pagina', 24)
@@ -123,6 +199,14 @@ def clientes_inativos(request):
         return Response(dict(_vazio(), parametros={
             'dias_inatividade': dias_inatividade, 'janela_dias': janela_dias}))
 
+    if segmento:
+        # Tudo do segmento: última compra, notas e representante. Quem nunca comprou do
+        # segmento na janela sai (ULTIMA_<seg> nulo).
+        df = df[df[f'ULTIMA_{segmento}'].notna()].copy()
+        df['ULTIMA_COMPRA'] = df[f'ULTIMA_{segmento}']
+        df['QTD_NOTAS'] = df[f'QTD_NOTAS_{segmento}']
+        df['REPRESENTANTE'] = df[f'REPRESENTANTE_{segmento}'].where(
+            df[f'REPRESENTANTE_{segmento}'].notna(), df['REPRESENTANTE'])
     df['ULTIMA_COMPRA'] = pd.to_datetime(df['ULTIMA_COMPRA']).dt.date
     df['REPRESENTANTE'] = df['REPRESENTANTE'].fillna('').astype(str).str.strip()
 
@@ -131,8 +215,22 @@ def clientes_inativos(request):
         alvo = representante.upper()
         df = df[df['REPRESENTANTE'].str.upper().str.contains(alvo, na=False)]
 
-    # Só os inativos (última compra <= hoje - dias_inatividade).
-    df = df[df['ULTIMA_COMPRA'] <= limite_inativo]
+    for _c in ('VALOR_CC', 'VALOR_AGRO', 'TN_CC', 'TN_AGRO'):
+        df[_c] = pd.to_numeric(df[_c], errors='coerce').fillna(0.0)
+    df['VALOR_JANELA'] = df[f'VALOR_{segmento}'] if segmento else df['VALOR_CC'] + df['VALOR_AGRO']
+    df['TN_JANELA'] = df[f'TN_{segmento}'] if segmento else df['TN_CC'] + df['TN_AGRO']
+
+    # Raiz do CNPJ (8 dígitos) para agrupar as unidades; CPF/sem documento fica pelo código.
+    _doc = df['CLIENTE_CNPJCPF'].fillna('').astype(str).str.replace(r'\D', '', regex=True)
+    df['GRUPO_CNPJ'] = 'cnpj:' + _doc.str[:8]
+    df.loc[_doc.str.len() != 14, 'GRUPO_CNPJ'] = 'cli:' + df['CLIENTE_CODIGO'].astype(str)
+    if agrupar_cnpj:
+        # Grupo ativo se QUALQUER unidade comprou depois do limite: some da lista inteiro.
+        ultima_grupo = df.groupby('GRUPO_CNPJ')['ULTIMA_COMPRA'].transform('max')
+        df = df[ultima_grupo <= limite_inativo]
+    else:
+        # Só os inativos (última compra <= hoje - dias_inatividade).
+        df = df[df['ULTIMA_COMPRA'] <= limite_inativo]
 
     # Estado persistido por cliente.
     estados = {a.cliente_codigo: a for a in AlertaClienteInativo.objects.all()}
@@ -182,6 +280,9 @@ def clientes_inativos(request):
             'ultima_compra': ultima.strftime('%Y-%m-%d'),
             'dias_sem_comprar': (hoje - ultima).days,
             'qtd_notas_periodo': int(row.get('QTD_NOTAS') or 0),
+            'valor_janela': round(float(row.get('VALOR_JANELA') or 0), 2),
+            'tn_janela': round(float(row.get('TN_JANELA') or 0), 3),
+            'grupo_cnpj': row.get('GRUPO_CNPJ') or '',
             'resolvido': resolvido,
             'ignorar': ignorar,
             'observacao': observacao,
@@ -189,7 +290,17 @@ def clientes_inativos(request):
             'data_resolucao': data_resolucao.isoformat() if data_resolucao else None,
         })
 
-    clientes.sort(key=lambda c: c['dias_sem_comprar'], reverse=True)
+    if agrupar_cnpj:
+        clientes = _agrupar_por_cnpj(clientes)
+    for c in clientes:
+        c.setdefault('codigos', [c['cliente_codigo']])
+        c.setdefault('unidades', 1)
+        c.setdefault('outras_cidades', [])
+
+    if ordenar == 'valor':
+        clientes.sort(key=lambda c: (c['valor_janela'], c['dias_sem_comprar']), reverse=True)
+    else:
+        clientes.sort(key=lambda c: c['dias_sem_comprar'], reverse=True)
 
     total = len(clientes)
     # Pendentes = o que ainda exige ação, contado sobre o conjunto inteiro (não só a página).
