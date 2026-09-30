@@ -27,6 +27,21 @@ def _is_admin(request) -> bool:
     return user.groups.filter(name__in=GRUPOS_ADMIN).exists()
 
 
+# Gestores de um segmento: veem todas as carteiras, mas só do próprio segmento — é o que a
+# tela de acompanhamento já libera para eles (decisão do usuário, 30/09/2026). Antes caíam
+# no "carteira não informada" e a lista vinha sempre vazia.
+GRUPOS_SEGMENTO = {'vendasConstCivil': 'CC', 'vendasAgro': 'AGRO'}
+
+
+def _segmentos_gestor(request) -> set:
+    """Segmentos que o usuário gere pelos grupos vendasConstCivil / vendasAgro."""
+    user = getattr(request, 'user', None)
+    if not user or not user.is_authenticated:
+        return set()
+    nomes = user.groups.filter(name__in=GRUPOS_SEGMENTO.keys()).values_list('name', flat=True)
+    return {GRUPOS_SEGMENTO[n] for n in nomes}
+
+
 def _consulta_ultima_compra(janela_inicio: str) -> pd.DataFrame:
     """Última compra válida por cliente, considerando notas a partir de `janela_inicio`.
 
@@ -188,7 +203,14 @@ def clientes_inativos(request):
     admin = _is_admin(request)
     if not admin and not representante:
         # Não-admin sem carteira informada: não expõe a base inteira.
-        return Response(_vazio('Carteira (representante) não informada.'))
+        segs = _segmentos_gestor(request)
+        if not segs:
+            return Response(_vazio('Carteira (representante) não informada.'))
+        # Gestor de segmento: base inteira, presa ao(s) segmento(s) dele.
+        if segmento and segmento not in segs:
+            return Response(_vazio('Segmento fora do seu acesso.'))
+        if not segmento and len(segs) == 1:
+            segmento = next(iter(segs))
 
     hoje = timezone.localdate()
     janela_inicio = (hoje - dt.timedelta(days=janela_dias)).strftime('%Y-%m-%d')
