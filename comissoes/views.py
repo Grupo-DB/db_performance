@@ -993,6 +993,9 @@ def calculos_comissoes(request):
         'DATA_EMISSAO': 'data',
         'NOTA_FISCAL': 'nota_fiscal',
         'REPRESENTANTE': 'representante',
+        # Código do ERP (REPCOD): o PDF "Acompanhamento de Vendas por Representante" imprime
+        # "NOME - COD" como o relatório do ERP.
+        'REPRESENTANTE_CODIGO': 'representante_codigo',
         'REPRESENTANTE_MASTER': 'representante_master',
         'CLIENTE_NOME': 'cliente',
         'CIDADE_FATURAMENTO': 'cidade',
