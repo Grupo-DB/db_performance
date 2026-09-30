@@ -303,6 +303,9 @@ def clientes_inativos(request):
         clientes.sort(key=lambda c: c['dias_sem_comprar'], reverse=True)
 
     total = len(clientes)
+    # Escala das barras do front: o maior da lista inteira, para a página 2 não parecer a 1.
+    maior_valor = max((c['valor_janela'] for c in clientes), default=0)
+    maior_dias = max((c['dias_sem_comprar'] for c in clientes), default=0)
     # Pendentes = o que ainda exige ação, contado sobre o conjunto inteiro (não só a página).
     total_pendentes = sum(1 for c in clientes if not c['resolvido'] and not c['ignorar'])
 
@@ -322,6 +325,8 @@ def clientes_inativos(request):
         'pagina': pagina,
         'por_pagina': por_pagina,
         'total_paginas': total_paginas,
+        'maior_valor': maior_valor,
+        'maior_dias': maior_dias,
         'parametros': {
             'dias_inatividade': dias_inatividade,
             'janela_dias': janela_dias,
