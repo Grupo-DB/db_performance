@@ -918,7 +918,10 @@ def calculos_comissoes(request):
     DARCILEI_EXTERNO_DESDE = datetime.date(2026, 9, 1)
     darcilei_externo = data_inicio_dt >= DARCILEI_EXTERNO_DESDE
     REPS_SEM_BONUS_GLOBAL = set()
+    # Externos que aparecem na tela mesmo sem nota no mês (card zerado).
+    REPS_LISTAR_SEM_VENDA = {'RICHARD GONCALVES MACHADO - 111'}
     if darcilei_externo:
+        REPS_LISTAR_SEM_VENDA.add('DARCILEI DOS SANTOS')
         VINCULO_INT_MATRIZ['DARCILEI DOS SANTOS'] = 'ALEXANDRA PERUSSI'
         REPS_SEM_BONUS_GLOBAL.add('DARCILEI DOS SANTOS')
 
@@ -1041,6 +1044,21 @@ def calculos_comissoes(request):
         mask_master = df_cc['REPRESENTANTE_MASTER'].str.contains(rep_chave, na=False, regex=False)
         df_rep = df_cc[mask_rep | mask_master]
         if df_rep.empty:
+            # Externos novos que ainda não têm nota no código deles (Richard 111, Darcilei
+            # 108): sem isso o card sumia da tela. Sai zerado, sem entrar em base de vendas,
+            # meta global, dolomita nem na conta da interna.
+            if rep_chave in REPS_LISTAR_SEM_VENDA:
+                resultado[rep_chave] = {
+                    'comissao': 0.0,
+                    'comissao_por_grupo': {g: 0.0 for g in GRUPOS_CC},
+                    'vendas_por_grupo': {g: 0.0 for g in GRUPOS_CC},
+                    'metas_por_grupo': metas_efetivas.get(f"{periodo_chave}{rep_chave}", {}),
+                    'vendedor_interno': vinc_int,
+                    'sem_notas': True,
+                    'observacao': 'Sem notas no período no código deste vendedor',
+                    'lancamentos': [],
+                    'tipo': 'Vendedor Externo CC'
+                }
             continue
         vendas = vendas_por_grupo(df_rep)
         chave_meta = f"{periodo_chave}{rep_chave}"
