@@ -28,6 +28,8 @@ class AnaliseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Analise
         fields = '__all__'
+        # Calculada no Analise.save() a partir da moldagem; o front só lê.
+        read_only_fields = ['data_cura']
 
     # ------------------------------------------------------------------ caches
     # Estes dois métodos rodam por análise; na listagem (abertas/fechadas) isso
