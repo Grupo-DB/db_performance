@@ -119,7 +119,7 @@ class ItemPedidoWriteSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if not attrs.get('item') and not attrs.get('cod_erp'):
-            raise serializers.ValidationError("Informe 'item' (local) ou 'cod_erp' (ERP).")
+            raise serializers.ValidationError("Informe 'item' (local) ou 'cod_erp' (Minerion/SGA).")
         return attrs
 
     def validate_quantidade(self, value):

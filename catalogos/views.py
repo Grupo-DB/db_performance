@@ -132,7 +132,7 @@ def consultar_produtos(request):
         engine = _get_erp_engine()
         df = pd.read_sql(_CONSULTA_PRODUTOS_SQL, engine)
     except Exception as exc:
-        return Response({'erro': f'Falha na consulta ERP: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({'erro': f'Falha na consulta ao Minerion/SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
 
     busca = (request.GET.get('busca') or request.data.get('busca', '')).strip()
     if busca:
@@ -186,7 +186,7 @@ def consultar_imagem_produto(request):
         engine = _get_erp_engine()
         df = pd.read_sql(_CONSULTA_IMAGEM_SQL, engine, params={'cod_produto': cod_produto})
     except Exception as exc:
-        return Response({'erro': f'Falha na consulta ERP: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({'erro': f'Falha na consulta ao Minerion/SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
 
     if df.empty or df['ESTQFFOTO'].iloc[0] is None:
         return Response({'imagem': None})

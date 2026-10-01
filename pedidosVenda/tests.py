@@ -271,3 +271,82 @@ class FotoProdutoTest(TestCase):
 
         call_command('importar_fotos_produtos', str(pasta), '--substituir', stdout=open('/dev/null', 'w'))
         self.assertEqual(sorted(FotoProduto.objects.values_list('descricao', flat=True)), ['A', 'B'])
+
+
+def _nota(cod, etapa_sit=0, carga=None, placa='', tara=0.0, peso=10.0):
+    return {
+        'cod': cod, 'num': -cod if etapa_sit == 0 else cod, 'sit': etapa_sit, 'filial': 0, 'pedido': 1,
+        'emitida_em': None, 'criado_em': '2026-10-01', 'cliente_cod': cod, 'cliente': f'CLI {cod}',
+        'fantasia': '', 'cidade': 'X-RS', 'repcod': 41, 'vendedor': 'V', 'placa': placa,
+        'motorista': 'M' if placa else None, 'motorista_celular': None, 'transportador': None,
+        'peso': peso, 'tara': tara, 'bruto': peso + tara, 'limite_peso': 0, 'total': 100.0,
+        'carga_cod': carga, 'carga_desc': f'CARGA {carga}' if carga else None, 'carga_data': '2026-10-02' if carga else None,
+        'carga_tipo': 1 if carga else None, 'produto': 'P', 'qtd_itens': 1,
+    }
+
+
+class PainelCargasTest(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.ext_user = User.objects.create_user('externo')
+        self.int_user = User.objects.create_user('interno')
+        self.tv = User.objects.create_user('tv')
+        self.tv.groups.add(Group.objects.create(name='cargasPainel'))
+        self.nada = User.objects.create_user('nada')
+        VendedorPerfil.objects.create(user=self.int_user, tipo='INTERNO')
+        VendedorPerfil.objects.create(user=self.ext_user, tipo='EXTERNO', repcods=[41, 53])
+        self.api = APIClient()
+
+    def _get(self, user, url='/pedidosVenda/cargas/'):
+        self.api.force_authenticate(user)
+        return self.api.get(url)
+
+    def test_etapas_e_agrupamento_da_carga_composta(self):
+        from . import cargas
+        # Notas cruas passam pela mesma conversão do SQL.
+        with mock.patch('pedidosVenda.erp._rows', return_value=[
+            _nota(1, carga=7), _nota(2, carga=7, placa='ABC-1234', tara=15), _nota(3), _nota(4, etapa_sit=1, carga=8, placa='X'),
+        ]):
+            notas = cargas._notas('')
+        por_cod = {n['cod']: n for n in notas}
+        self.assertEqual(por_cod[1]['etapa'], 'PROGRAMADO')
+        self.assertEqual(por_cod[1]['carregamento'], 1)
+        self.assertEqual(por_cod[2]['etapa'], 'NO_PATIO')
+        self.assertEqual(por_cod[2]['liquido'], 10.0)
+        self.assertEqual(por_cod[4]['etapa'], 'FATURADO')
+        self.assertEqual(por_cod[4]['nota'], 4)
+
+        grupos = {c['chave']: c for c in cargas.agrupar_cargas(notas)}
+        self.assertEqual(set(grupos), {'c7', 'n3', 'c8'})
+        self.assertEqual(grupos['c7']['etapa'], 'NO_PATIO')  # um carregamento com caminhão leva a carga junto
+        self.assertEqual(grupos['c7']['peso'], 20.0)
+        self.assertEqual(grupos['c7']['placa'], 'ABC-1234')
+        self.assertEqual(grupos['c8']['etapa'], 'FATURADO')
+        self.assertFalse(grupos['n3']['composta'])
+
+    @mock.patch('pedidosVenda.cargas.painel', return_value={'cargas': [], 'aguardando': []})
+    def test_escopo_por_perfil(self, painel):
+        self.assertEqual(self._get(self.nada).status_code, 403)
+
+        r = self._get(self.ext_user)
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()['ve_todas'])
+        self.assertEqual(painel.call_args.args[3], [41, 53])
+
+        for user in (self.int_user, self.tv):
+            r = self._get(user)
+            self.assertTrue(r.json()['ve_todas'])
+            self.assertIsNone(painel.call_args.args[3])
+
+        r = self._get(self.int_user, '/pedidosVenda/cargas/?escopo=meus&filial=3')
+        self.assertFalse(r.json()['ve_todas'])
+        self.assertEqual(painel.call_args.args[2], 3)
+
+    @mock.patch('pedidosVenda.cargas.painel', return_value={'cargas': [], 'aguardando': []})
+    def test_pre_pedidos_do_app_e_periodo(self, painel):
+        PedidoVenda.objects.create(vendedor=self.ext_user, status='ENVIADO', cliente_nome='OBRA', total=Decimal('10'))
+        PedidoVenda.objects.create(vendedor=self.ext_user, status='LANCADO', cliente_nome='JÁ NO SGA')
+        r = self._get(self.tv)
+        self.assertEqual([p['cliente'] for p in r.json()['pre_pedidos']], ['OBRA'])
+        self.assertEqual(self._get(self.tv, '/pedidosVenda/cargas/?inicio=2026-01-01&fim=2026-06-01').status_code, 400)

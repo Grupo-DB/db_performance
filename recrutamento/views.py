@@ -616,7 +616,7 @@ class TurnoverViewSet(viewsets.ViewSet):
             # O ERP fica noutra máquina: fora do ar, a tela precisa de um recado
             # em vez de um 500 sem explicação.
             return Response(
-                {'detail': f'Não foi possível consultar o ERP: {erro}'},
+                {'detail': f'Não foi possível consultar o Minerion/SGA: {erro}'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 

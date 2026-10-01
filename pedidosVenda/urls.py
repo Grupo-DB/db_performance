@@ -1,7 +1,7 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from .views import ErpViewSet, EuView, FotoProdutoViewSet, NotificacaoViewSet, PedidoVendaViewSet, VendedorPerfilViewSet
+from .views import ErpViewSet, EuView, FotoProdutoViewSet, NotificacaoViewSet, PainelCargasView, PedidoVendaViewSet, VendedorPerfilViewSet
 
 router = DefaultRouter()
 router.register(r'pedidos', PedidoVendaViewSet, basename='pedido-venda')
@@ -12,4 +12,5 @@ router.register(r'notificacoes', NotificacaoViewSet, basename='pedido-venda-noti
 
 urlpatterns = [
     path('eu/', EuView.as_view(), name='pedido-venda-eu'),
+    path('cargas/', PainelCargasView.as_view(), name='pedido-venda-cargas'),
 ] + router.urls

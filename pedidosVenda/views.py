@@ -1,7 +1,8 @@
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
@@ -12,7 +13,7 @@ from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import erp, fluxo
+from . import cargas, erp, fluxo
 from .models import FILIAL_CHOICES, FotoProduto, PedidoVenda, PedidoVendaEvento, PedidoVendaNotificacao, VendedorPerfil
 from .serializers import (
     FotoProdutoSerializer,
@@ -419,3 +420,92 @@ class NotificacaoViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             filtro = filtro.filter(id__in=ids)
         filtro.update(lido=True)
         return Response({'status': 'ok'})
+
+
+# ── Painel de cargas (só leitura do SGA) ────────────────────────────────────
+
+# Expedição/portaria e a TV do pátio: veem o painel inteiro sem perfil de vendedor.
+GRUPOS_PAINEL_CARGAS = ('cargasPainel',)
+CACHE_PAINEL_SEG = 20
+
+
+def _ve_todas_as_cargas(user) -> bool:
+    if fluxo.eh_gestor(user) or user.groups.filter(name__in=GRUPOS_PAINEL_CARGAS).exists():
+        return True
+    perfil = fluxo.perfil_de(user)
+    return bool(perfil and perfil.tipo == 'INTERNO')
+
+
+class TemAcessoCargas(BasePermission):
+    message = 'Seu usuário não tem acesso ao painel de cargas.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        return _ve_todas_as_cargas(user) or VendedorPerfil.objects.filter(user=user, ativo=True).exists()
+
+
+def _data_param(valor, padrao):
+    try:
+        return date.fromisoformat(valor) if valor else padrao
+    except ValueError:
+        return padrao
+
+
+class PainelCargasView(APIView):
+    """
+    Carregamentos e cargas compostas do SGA + pedidos aguardando carga.
+
+    `?inicio=&fim=` é o período das notas faturadas (padrão: hoje); pendentes e
+    aguardando não dependem dele. `?filial=` filtra a unidade. Vendedor externo
+    vê só os seus (REPCOD do perfil); `?escopo=meus` força isso para quem vê tudo.
+    """
+    permission_classes = [TemAcessoCargas]
+
+    def get(self, request):
+        p = request.query_params
+        hoje = date.today()
+        inicio = _data_param(p.get('inicio'), hoje)
+        fim = max(_data_param(p.get('fim'), inicio), inicio)
+        if (fim - inicio).days > 62:
+            return Response({'detail': 'Período máximo de 62 dias.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            filial = int(p['filial']) if p.get('filial') not in (None, '') else None
+        except ValueError:
+            return Response({'detail': 'Unidade inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        todas = _ve_todas_as_cargas(request.user) and p.get('escopo') != 'meus'
+        repcods = None if todas else sorted(_repcods(request.user))
+        com_aguardando = p.get('aguardando', '1') != '0'
+
+        # A TV e vários navegadores fazem polling: a mesma consulta serve a todos por 20 s.
+        reps = '-'.join(map(str, repcods)) if repcods is not None else 'todos'
+        chave = f'pedidosVenda:cargas:{inicio}:{fim}:{filial}:{reps}:{int(com_aguardando)}'
+        dados = cache.get(chave)
+        if dados is None:
+            try:
+                dados = cargas.painel(inicio, fim, filial, repcods, com_aguardando)
+            except Exception as exc:
+                return _erro_erp(exc)
+            dados['pre_pedidos'] = self._pre_pedidos(request.user, todas, filial) if com_aguardando else []
+            dados['atualizado_em'] = timezone.localtime().isoformat()
+            cache.set(chave, dados, CACHE_PAINEL_SEG)
+        return Response({**dados, 've_todas': todas})
+
+    @staticmethod
+    def _pre_pedidos(user, todas, filial):
+        """Pedidos do app que ainda não viraram pedido no SGA — chegam antes ao painel."""
+        qs = PedidoVenda.objects.select_related('vendedor').filter(
+            status__in=['AGUARDANDO_APROVACAO', 'ENVIADO', 'EM_LANCAMENTO'])
+        if not todas:
+            qs = qs.filter(vendedor=user)
+        if filial is not None:
+            qs = qs.filter(filial=filial)
+        return [{
+            'id': pv.id, 'status': pv.status, 'status_display': pv.get_status_display(),
+            'cliente': pv.cliente_nome, 'cidade': pv.cliente_cidade, 'filial': pv.filial,
+            'vendedor': pv.vendedor.get_full_name() or pv.vendedor.username,
+            'total': float(pv.total), 'data_entrega': pv.data_entrega.isoformat() if pv.data_entrega else None,
+            'enviado_em': pv.enviado_em.isoformat() if pv.enviado_em else None,
+        } for pv in qs.order_by('enviado_em')[:200]]
