@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import ItemPedidoVenda, PedidoVenda, PedidoVendaEvento, PedidoVendaNotificacao, VendedorPerfil
+from .models import FotoProduto, ItemPedidoVenda, PedidoVenda, PedidoVendaEvento, PedidoVendaNotificacao, VendedorPerfil
 
 
 @admin.register(VendedorPerfil)
@@ -30,3 +30,8 @@ class PedidoVendaAdmin(admin.ModelAdmin):
 
 
 admin.site.register(PedidoVendaNotificacao)
+
+
+@admin.register(FotoProduto)
+class FotoProdutoAdmin(admin.ModelAdmin):
+    list_display = ('descricao', 'codigos', 'enviado_por', 'atualizado_em')

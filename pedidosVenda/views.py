@@ -6,13 +6,15 @@ from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import erp, fluxo
-from .models import FILIAL_CHOICES, PedidoVenda, PedidoVendaEvento, PedidoVendaNotificacao, VendedorPerfil
+from .models import FILIAL_CHOICES, FotoProduto, PedidoVenda, PedidoVendaEvento, PedidoVendaNotificacao, VendedorPerfil
 from .serializers import (
+    FotoProdutoSerializer,
     PedidoVendaListSerializer,
     PedidoVendaNotificacaoSerializer,
     PedidoVendaSerializer,
@@ -138,7 +140,21 @@ class ErpViewSet(viewsets.ViewSet):
         except ValueError:
             return Response({'detail': 'Parâmetros inválidos.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            return Response(erp.catalogo(filial, cliente))
+            produtos = erp.catalogo(filial, cliente)
+        except Exception as exc:
+            return _erro_erp(exc)
+        mapa = mapa_fotos(request)
+        for p in produtos:
+            foto = mapa.get(p['cod'])
+            p['foto'] = foto['imagem'] if foto else None
+            p['miniatura'] = foto['miniatura'] if foto else None
+        return Response(produtos)
+
+    @action(detail=False, methods=['get'])
+    def vendaveis(self, request):
+        """Produtos com preço em qualquer unidade, para o cadastro de fotos."""
+        try:
+            return Response(erp.vendaveis([v for v, _ in FILIAL_CHOICES]))
         except Exception as exc:
             return _erro_erp(exc)
 
@@ -148,6 +164,48 @@ class ErpViewSet(viewsets.ViewSet):
             return Response(erp.prazos_usuais())
         except Exception as exc:
             return _erro_erp(exc)
+
+
+def mapa_fotos(request) -> dict[int, dict]:
+    """Código do produto → urls da foto (uma foto serve vários códigos)."""
+    mapa = {}
+    for f in FotoProduto.objects.all():
+        urls = {
+            'id': f.pk,
+            'imagem': request.build_absolute_uri(f.imagem.url),
+            'miniatura': request.build_absolute_uri(f.miniatura.url),
+        }
+        for cod in f.codigos:
+            mapa[int(cod)] = urls
+    return mapa
+
+
+class FotoProdutoViewSet(viewsets.ModelViewSet):
+    """Fotos dos produtos: todos do módulo veem, só o gestor envia e troca."""
+
+    serializer_class = FotoProdutoSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    queryset = FotoProduto.objects.select_related('enviado_por').all()
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve', 'mapa'):
+            return [TemAcessoVendas()]
+        return [EhGestorVendas()]
+
+    def perform_create(self, serializer):
+        serializer.save(enviado_por=self.request.user)
+
+    def perform_update(self, serializer):
+        serializer.save(enviado_por=self.request.user)
+
+    def perform_destroy(self, instance):
+        instance.imagem.delete(save=False)
+        instance.miniatura.delete(save=False)
+        instance.delete()
+
+    @action(detail=False, methods=['get'])
+    def mapa(self, request):
+        return Response({str(k): v for k, v in mapa_fotos(request).items()})
 
 
 class PedidoVendaViewSet(viewsets.ModelViewSet):

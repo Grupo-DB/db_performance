@@ -186,3 +186,79 @@ class FluxoPedidoTest(TestCase):
         self.assertEqual(r.json()['repcods'], [38, 42])
         self.assertTrue(novo.groups.filter(name='vendasPedidos').exists())
         self.assertEqual(self._como(self.ext_user).get('/pedidosVenda/vendedores/').status_code, 403)
+
+
+class FotoProdutoTest(TestCase):
+    def setUp(self):
+        import tempfile
+        from django.test import override_settings
+        self._media = override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+        self._media.enable()
+        self.gestor = User.objects.create_user('gestor')
+        self.gestor.groups.add(Group.objects.create(name='vendasGestao'))
+        self.vendedor = User.objects.create_user('vend')
+        VendedorPerfil.objects.create(user=self.vendedor, tipo='EXTERNO')
+        self.api = APIClient()
+
+    def tearDown(self):
+        self._media.disable()
+
+    def _png(self, w=2000, h=1000):
+        from io import BytesIO
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        buf = BytesIO()
+        Image.new('RGBA', (w, h), (200, 30, 30, 128)).save(buf, format='PNG')
+        return SimpleUploadedFile('foto.png', buf.getvalue(), content_type='image/png')
+
+    def test_gestor_envia_redimensiona_e_mapa_vale_para_todos_os_codigos(self):
+        from PIL import Image
+        self.api.force_authenticate(self.gestor)
+        r = self.api.post('/pedidosVenda/fotos/', {'arquivo': self._png(), 'codigos': '[2743, 11598]', 'descricao': 'CAL'}, format='multipart')
+        self.assertEqual(r.status_code, 201, r.content)
+        from .models import FotoProduto
+        f = FotoProduto.objects.get()
+        self.assertEqual(f.codigos, [2743, 11598])
+        self.assertEqual(max(Image.open(f.imagem.path).size), 1200)
+        self.assertEqual(max(Image.open(f.miniatura.path).size), 240)
+
+        self.api.force_authenticate(self.vendedor)
+        mapa = self.api.get('/pedidosVenda/fotos/mapa/').json()
+        self.assertEqual(set(mapa), {'2743', '11598'})
+        r = self.api.post('/pedidosVenda/fotos/', {'arquivo': self._png(), 'codigos': '1'}, format='multipart')
+        self.assertEqual(r.status_code, 403)
+
+    def test_codigo_nao_pode_ter_duas_fotos(self):
+        self.api.force_authenticate(self.gestor)
+        self.api.post('/pedidosVenda/fotos/', {'arquivo': self._png(), 'codigos': '2743'}, format='multipart')
+        r = self.api.post('/pedidosVenda/fotos/', {'arquivo': self._png(), 'codigos': '2743,1'}, format='multipart')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('2743', str(r.json()))
+
+    def test_arquivo_que_nao_e_imagem(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.api.force_authenticate(self.gestor)
+        r = self.api.post('/pedidosVenda/fotos/', {'arquivo': SimpleUploadedFile('x.png', b'nada'), 'codigos': '1'}, format='multipart')
+        self.assertEqual(r.status_code, 400)
+
+    def test_importacao_em_lote_respeita_foto_existente(self):
+        import json, tempfile
+        from pathlib import Path
+        from django.core.management import call_command
+        from PIL import Image
+        from .models import FotoProduto
+        pasta = Path(tempfile.mkdtemp())
+        Image.new('RGB', (800, 1200), 'red').save(pasta / 'a.jpg')
+        Image.new('RGB', (800, 1200), 'blue').save(pasta / 'b.jpg')
+        (pasta / 'mapeamento.json').write_text(json.dumps([
+            {'arquivo': 'a.jpg', 'descricao': 'A', 'codigos': [1, 2]},
+            {'arquivo': 'b.jpg', 'descricao': 'B', 'codigos': [3]},
+        ]))
+        self.api.force_authenticate(self.gestor)
+        self.api.post('/pedidosVenda/fotos/', {'arquivo': self._png(), 'codigos': '3', 'descricao': 'manual'}, format='multipart')
+
+        call_command('importar_fotos_produtos', str(pasta), stdout=open('/dev/null', 'w'))
+        self.assertEqual(sorted(FotoProduto.objects.values_list('descricao', flat=True)), ['A', 'manual'])
+
+        call_command('importar_fotos_produtos', str(pasta), '--substituir', stdout=open('/dev/null', 'w'))
+        self.assertEqual(sorted(FotoProduto.objects.values_list('descricao', flat=True)), ['A', 'B'])

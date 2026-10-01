@@ -4,9 +4,10 @@ from django.contrib.auth.models import Group
 from django.db import transaction
 from rest_framework import serializers
 
-from . import fluxo
+from . import fluxo, fotos
 from .models import (
     FILIAL_CHOICES,
+    FotoProduto,
     ItemPedidoVenda,
     PedidoVenda,
     PedidoVendaEvento,
@@ -252,3 +253,88 @@ class PedidoVendaNotificacaoSerializer(serializers.ModelSerializer):
     class Meta:
         model = PedidoVendaNotificacao
         fields = ['id', 'pedido', 'pedido_numero', 'cliente_nome', 'pedido_status', 'tipo', 'mensagem', 'lido', 'criado_em']
+
+
+def _url(request, arquivo):
+    if not arquivo:
+        return None
+    return request.build_absolute_uri(arquivo.url) if request else arquivo.url
+
+
+class FotoProdutoSerializer(serializers.ModelSerializer):
+    imagem_url = serializers.SerializerMethodField()
+    miniatura_url = serializers.SerializerMethodField()
+    enviado_por_nome = serializers.SerializerMethodField()
+    arquivo = serializers.FileField(write_only=True, required=False)
+
+    class Meta:
+        model = FotoProduto
+        fields = [
+            'id', 'codigos', 'descricao', 'arquivo', 'imagem_url', 'miniatura_url',
+            'enviado_por', 'enviado_por_nome', 'atualizado_em',
+        ]
+        read_only_fields = ['enviado_por', 'atualizado_em']
+
+    def get_imagem_url(self, obj):
+        return _url(self.context.get('request'), obj.imagem)
+
+    def get_miniatura_url(self, obj):
+        return _url(self.context.get('request'), obj.miniatura)
+
+    def get_enviado_por_nome(self, obj):
+        return _nome(obj.enviado_por)
+
+    def to_internal_value(self, data):
+        # Multipart manda tudo como texto: "codigos" chega "[2743, 11598]" ou "2743,11598".
+        if hasattr(data, 'getlist'):
+            data = {k: data.get(k) for k in data.keys()}
+        codigos = data.get('codigos')
+        if isinstance(codigos, str):
+            data = {**data, 'codigos': [c.strip() for c in codigos.strip().strip('[]').split(',') if c.strip()]}
+        return super().to_internal_value(data)
+
+    def validate_codigos(self, valor):
+        try:
+            codigos = sorted({int(c) for c in (valor or [])})
+        except (TypeError, ValueError):
+            raise serializers.ValidationError('Códigos de produto precisam ser números.')
+        if not codigos:
+            raise serializers.ValidationError('Escolha ao menos um produto para a foto.')
+        outras = FotoProduto.objects.exclude(pk=getattr(self.instance, 'pk', None))
+        em_uso = {c for f in outras for c in f.codigos} & set(codigos)
+        if em_uso:
+            raise serializers.ValidationError(
+                f'Já têm foto: {", ".join(str(c) for c in sorted(em_uso))}. Troque a foto deles em vez de criar outra.'
+            )
+        return codigos
+
+    def validate(self, attrs):
+        if not self.instance and not attrs.get('arquivo'):
+            raise serializers.ValidationError({'arquivo': 'Envie a foto.'})
+        return attrs
+
+    def _aplicar_arquivo(self, attrs):
+        arquivo = attrs.pop('arquivo', None)
+        if arquivo is None:
+            return None
+        try:
+            imagem, miniatura = fotos.processar(arquivo)
+        except fotos.FotoInvalida as exc:
+            raise serializers.ValidationError({'arquivo': str(exc)})
+        return imagem, miniatura
+
+    def create(self, validated_data):
+        imagem, miniatura = self._aplicar_arquivo(validated_data)
+        return FotoProduto.objects.create(imagem=imagem, miniatura=miniatura, **validated_data)
+
+    def update(self, instance, validated_data):
+        novos = self._aplicar_arquivo(validated_data)
+        if novos:
+            antigos = (instance.imagem, instance.miniatura)
+            instance.imagem, instance.miniatura = novos
+            for arq in antigos:
+                arq.delete(save=False)
+        for campo, valor in validated_data.items():
+            setattr(instance, campo, valor)
+        instance.save()
+        return instance

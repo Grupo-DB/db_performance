@@ -236,3 +236,33 @@ class PedidoVendaNotificacao(models.Model):
 
     class Meta:
         ordering = ['-criado_em']
+
+
+def _caminho_foto(instance, filename):
+    return f'pedidosVenda/produtos/{filename}'
+
+
+class FotoProduto(models.Model):
+    """
+    Foto de produto para o catálogo do pedido. O ERP não tem foto dos produtos
+    vendáveis (ESTOQUEFOTO vazia para eles em 01/10/2026), então elas moram aqui.
+
+    Uma foto vale para vários códigos: a ATM tem códigos próprios para o mesmo
+    produto (cal hidráulica 2743 na matriz, 11598 na ATM).
+    """
+
+    codigos = models.JSONField(default=list, help_text='ESTQCOD dos produtos que usam esta foto')
+    descricao = models.CharField(max_length=150, blank=True, default='')
+    imagem = models.FileField(upload_to=_caminho_foto)
+    miniatura = models.FileField(upload_to=_caminho_foto)
+    enviado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Foto de produto'
+        verbose_name_plural = 'Fotos de produtos'
+        ordering = ['descricao']
+
+    def __str__(self):
+        return self.descricao or f'Foto {self.pk}'

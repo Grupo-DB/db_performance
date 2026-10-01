@@ -225,6 +225,19 @@ def catalogo(filial: int, cliente: int | None = None) -> list[dict]:
     return itens
 
 
+def vendaveis(filiais: list[int]) -> list[dict]:
+    """Todo produto com preço geral em alguma unidade — a lista do cadastro de fotos."""
+    por_cod: dict[int, dict] = {}
+    for fil in filiais:
+        for p in catalogo(fil):
+            atual = por_cod.setdefault(p['cod'], {
+                'cod': p['cod'], 'descricao': p['descricao'], 'unidade': p['unidade'],
+                'grupo': p['grupo'], 'filiais': [],
+            })
+            atual['filiais'].append(fil)
+    return sorted(por_cod.values(), key=lambda p: (p['grupo'] or '', p['descricao'] or ''))
+
+
 def precos_vigentes(filial: int, cliente: int | None, produtos: list[int]) -> dict[int, float]:
     """Preço de tabela de cada produto como o `catalogo`, para conferir o pedido no envio."""
     clientes = [0] + ([int(cliente)] if cliente else [])
