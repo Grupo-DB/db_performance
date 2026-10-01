@@ -255,12 +255,6 @@ class PedidoVendaNotificacaoSerializer(serializers.ModelSerializer):
         fields = ['id', 'pedido', 'pedido_numero', 'cliente_nome', 'pedido_status', 'tipo', 'mensagem', 'lido', 'criado_em']
 
 
-def _url(request, arquivo):
-    if not arquivo:
-        return None
-    return request.build_absolute_uri(arquivo.url) if request else arquivo.url
-
-
 class FotoProdutoSerializer(serializers.ModelSerializer):
     imagem_url = serializers.SerializerMethodField()
     miniatura_url = serializers.SerializerMethodField()
@@ -276,10 +270,10 @@ class FotoProdutoSerializer(serializers.ModelSerializer):
         read_only_fields = ['enviado_por', 'atualizado_em']
 
     def get_imagem_url(self, obj):
-        return _url(self.context.get('request'), obj.imagem)
+        return obj.caminho()
 
     def get_miniatura_url(self, obj):
-        return _url(self.context.get('request'), obj.miniatura)
+        return obj.caminho(miniatura=True)
 
     def get_enviado_por_nome(self, obj):
         return _nome(obj.enviado_por)

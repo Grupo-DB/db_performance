@@ -266,3 +266,14 @@ class FotoProduto(models.Model):
 
     def __str__(self):
         return self.descricao or f'Foto {self.pk}'
+
+    def caminho(self, miniatura: bool = False) -> str:
+        """
+        Endereço da foto RELATIVO à raiz da API de pedidos (o front prefixa).
+
+        Não usa /media: atrás do nginx o Django monta /media/... sem o /api, e esse
+        caminho cai no SPA. O `v` muda quando a foto é trocada, para o navegador e
+        o cache do celular buscarem a nova.
+        """
+        versao = int(self.atualizado_em.timestamp()) if self.atualizado_em else 0
+        return f"fotos/{self.pk}/arquivo/?t={'mini' if miniatura else 'grande'}&v={versao}"

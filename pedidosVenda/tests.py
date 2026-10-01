@@ -225,6 +225,15 @@ class FotoProdutoTest(TestCase):
         self.api.force_authenticate(self.vendedor)
         mapa = self.api.get('/pedidosVenda/fotos/mapa/').json()
         self.assertEqual(set(mapa), {'2743', '11598'})
+        # O arquivo sai pela API, sem token (é um <img>), e não por /media.
+        caminho = mapa['2743']['miniatura']
+        self.assertTrue(caminho.startswith(f'fotos/{f.pk}/arquivo/?t=mini'))
+        anonimo = APIClient()
+        r = anonimo.get('/pedidosVenda/' + caminho)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'image/jpeg')
+        self.assertEqual(max(Image.open(__import__('io').BytesIO(b''.join(r.streaming_content))).size), 240)
+        self.assertEqual(anonimo.get(f'/pedidosVenda/fotos/{f.pk + 99}/arquivo/').status_code, 404)
         r = self.api.post('/pedidosVenda/fotos/', {'arquivo': self._png(), 'codigos': '1'}, format='multipart')
         self.assertEqual(r.status_code, 403)
 

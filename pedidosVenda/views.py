@@ -7,7 +7,8 @@ from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import BasePermission
+from django.http import FileResponse, Http404
+from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -172,8 +173,8 @@ def mapa_fotos(request) -> dict[int, dict]:
     for f in FotoProduto.objects.all():
         urls = {
             'id': f.pk,
-            'imagem': request.build_absolute_uri(f.imagem.url),
-            'miniatura': request.build_absolute_uri(f.miniatura.url),
+            'imagem': f.caminho(),
+            'miniatura': f.caminho(miniatura=True),
         }
         for cod in f.codigos:
             mapa[int(cod)] = urls
@@ -188,6 +189,9 @@ class FotoProdutoViewSet(viewsets.ModelViewSet):
     queryset = FotoProduto.objects.select_related('enviado_por').all()
 
     def get_permissions(self):
+        # <img> não manda o token: o arquivo é público (são as embalagens de marketing).
+        if self.action == 'arquivo':
+            return [AllowAny()]
         if self.action in ('list', 'retrieve', 'mapa'):
             return [TemAcessoVendas()]
         return [EhGestorVendas()]
@@ -202,6 +206,20 @@ class FotoProdutoViewSet(viewsets.ModelViewSet):
         instance.imagem.delete(save=False)
         instance.miniatura.delete(save=False)
         instance.delete()
+
+    @action(detail=True, methods=['get'], authentication_classes=[])
+    def arquivo(self, request, pk=None):
+        foto = FotoProduto.objects.filter(pk=pk).first()
+        arquivo = foto and (foto.miniatura if request.query_params.get('t') == 'mini' else foto.imagem)
+        if not arquivo:
+            raise Http404
+        try:
+            resposta = FileResponse(arquivo.open('rb'), content_type='image/jpeg')
+        except FileNotFoundError:
+            raise Http404
+        # A URL leva a versão (?v=), então pode ficar em cache por muito tempo.
+        resposta['Cache-Control'] = 'public, max-age=2592000, immutable'
+        return resposta
 
     @action(detail=False, methods=['get'])
     def mapa(self, request):
