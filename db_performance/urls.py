@@ -52,6 +52,7 @@ urlpatterns = [
     path('emprestimos/', include('emprestimos.urls')),
     path('recrutamento/', include('recrutamento.urls')),
     path('pesquisas/', include('pesquisas.urls')),
+    path('pedidosVenda/', include('pedidosVenda.urls')),
     # Dashboard financeiro (artifact do Claude) hospedado com senha única — ver cockpitFinanceiro/views.py
     path('financeiro/', include('cockpitFinanceiro.urls')),
 ]

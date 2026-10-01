@@ -118,6 +118,7 @@ INSTALLED_APPS = [
     'recrutamento',
     'pesquisas',
     'cockpitFinanceiro',
+    'pedidosVenda',
 ]
 
 MIDDLEWARE = [
