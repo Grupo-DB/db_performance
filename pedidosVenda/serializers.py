@@ -52,7 +52,7 @@ class VendedorPerfilSerializer(serializers.ModelSerializer):
         try:
             return sorted({int(v) for v in (valor or [])})
         except (TypeError, ValueError):
-            raise serializers.ValidationError('Códigos de vendedor do ERP precisam ser números.')
+            raise serializers.ValidationError('Códigos de vendedor do Minerion/SGA precisam ser números.')
 
     def validate_desconto_maximo(self, valor):
         if valor < 0 or valor > 100:

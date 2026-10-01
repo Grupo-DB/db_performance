@@ -51,7 +51,7 @@ class EhGestorVendas(BasePermission):
 
 def _erro_erp(exc):
     logger.exception('Falha ao consultar o ERP: %s', exc)
-    return Response({'detail': 'Não consegui consultar o ERP agora. Tente de novo em instantes.'},
+    return Response({'detail': 'Não consegui consultar o Minerion/SGA agora. Tente de novo em instantes.'},
                     status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
@@ -118,7 +118,8 @@ class ErpViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def clientes(self, request):
         try:
-            return Response(erp.buscar_clientes(request.query_params.get('busca', ''), _repcods(request.user)))
+            p = request.query_params
+            return Response(erp.buscar_clientes(p.get('busca', ''), _repcods(request.user), campo=p.get('campo', '')))
         except Exception as exc:
             return _erro_erp(exc)
 
@@ -129,7 +130,7 @@ class ErpViewSet(viewsets.ViewSet):
         except Exception as exc:
             return _erro_erp(exc)
         if cli is None:
-            return Response({'detail': 'Cliente não encontrado no ERP.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'detail': 'Cliente não encontrado no Minerion/SGA.'}, status=status.HTTP_404_NOT_FOUND)
         return Response(cli)
 
     @action(detail=False, methods=['get'])

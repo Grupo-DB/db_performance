@@ -80,19 +80,40 @@ _CIDADE_UF = "(SELECT CI.CIDNOME + '-' + ES.ESTUF FROM CIDADE CI JOIN ESTADO ES 
 _DOC_SEM_PONTUACAO = "REPLACE(REPLACE(REPLACE(C.CLICNPJCPF, '.', ''), '/', ''), '-', '')"
 
 
-def buscar_clientes(busca: str, repcods: list[int], limite: int = 30) -> list[dict]:
+def buscar_clientes(busca: str, repcods: list[int], limite: int = 30, campo: str = '') -> list[dict]:
+    """
+    `campo` diz onde procurar: 'nome' (razão social e fantasia), 'documento'
+    (CNPJ/CPF pelo começo dos dígitos) ou 'codigo' (CLICOD exato). Sem campo,
+    procura em tudo — mas aí "105" casa com o código 105 E com todo CNPJ que
+    começa com 105, que é o que confundia o vendedor.
+    """
     busca = (busca or '').strip()
-    if len(busca) < 2:
-        return []
     digitos = re.sub(r'\D', '', busca)
-    condicoes = ['C.CLINOME LIKE :nome', 'C.CLINOMEFANT LIKE :nome']
-    params = {'nome': f'%{busca}%', 'limite': max(1, min(int(limite), 50))}
-    if len(digitos) >= 3:
-        condicoes.append(f'{_DOC_SEM_PONTUACAO} LIKE :doc')
-        params['doc'] = f'{digitos}%'
-    if digitos and digitos == busca and len(digitos) <= 7:
+    params = {'limite': max(1, min(int(limite), 50))}
+    condicoes = []
+
+    if campo == 'codigo':
+        if not digitos or len(digitos) > 9:
+            return []
         condicoes.append('C.CLICOD = :cod')
         params['cod'] = int(digitos)
+    elif campo == 'documento':
+        if len(digitos) < 3:
+            return []
+        condicoes.append(f'{_DOC_SEM_PONTUACAO} LIKE :doc')
+        params['doc'] = f'{digitos}%'
+    else:
+        if len(busca) < 2:
+            return []
+        condicoes += ['C.CLINOME LIKE :nome', 'C.CLINOMEFANT LIKE :nome']
+        params['nome'] = f'%{busca}%'
+        if campo != 'nome':
+            if len(digitos) >= 3:
+                condicoes.append(f'{_DOC_SEM_PONTUACAO} LIKE :doc')
+                params['doc'] = f'{digitos}%'
+            if digitos and digitos == busca and len(digitos) <= 7:
+                condicoes.append('C.CLICOD = :cod')
+                params['cod'] = int(digitos)
 
     reps = _inteiros(repcods)
     carteira = f"CASE WHEN C.CLIREP IN ({','.join(str(r) for r in reps)}) THEN 1 ELSE 0 END" if reps else '0'

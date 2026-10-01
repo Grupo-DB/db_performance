@@ -148,7 +148,7 @@ def _conferir_precos(pedido):
         vigentes = erp.precos_vigentes(pedido.filial, pedido.cliente_cod, [i.produto_cod for i in itens])
     except Exception:
         logger.exception('ERP indisponível ao conferir preços do %s', pedido.numero)
-        return 'Preços não conferidos com o ERP (indisponível no envio).'
+        return 'Preços não conferidos com o Minerion/SGA (indisponível no envio).'
 
     for item in itens:
         tabela = vigentes.get(item.produto_cod)
@@ -295,20 +295,20 @@ def lancar(pedido: PedidoVenda, user, numero_erp) -> tuple[PedidoVenda, str]:
     try:
         numero_erp = int(str(numero_erp).strip())
     except (TypeError, ValueError):
-        raise FluxoErro('Informe o número do pedido no ERP.')
+        raise FluxoErro('Informe o número do pedido no Minerion/SGA.')
 
     aviso = ''
     try:
         no_erp = erp.pedido_erp(numero_erp)
     except Exception:
         logger.exception('ERP indisponível ao conferir o pedido %s', numero_erp)
-        no_erp, aviso = None, 'Número não conferido no ERP (indisponível).'
+        no_erp, aviso = None, 'Número não conferido no Minerion/SGA (indisponível).'
     else:
         if no_erp is None:
-            raise FluxoErro(f'O pedido {numero_erp} não existe no ERP. Confira o número.')
+            raise FluxoErro(f'O pedido {numero_erp} não existe no Minerion/SGA. Confira o número.')
         if pedido.cliente_cod and no_erp['cliente'] != pedido.cliente_cod:
             raise FluxoErro(
-                f'O pedido {numero_erp} do ERP é de outro cliente (código {no_erp["cliente"]}). Confira o número.'
+                f'O pedido {numero_erp} do Minerion/SGA é de outro cliente (código {no_erp["cliente"]}). Confira o número.'
             )
 
     pedido.status = 'LANCADO'
@@ -316,9 +316,9 @@ def lancar(pedido: PedidoVenda, user, numero_erp) -> tuple[PedidoVenda, str]:
     pedido.interno = pedido.interno or user
     pedido.lancado_em = timezone.now()
     pedido.save()
-    _evento(pedido, user, 'LANCADO', f'Pedido {numero_erp} no ERP. {aviso}'.strip())
+    _evento(pedido, user, 'LANCADO', f'Pedido {numero_erp} no Minerion/SGA. {aviso}'.strip())
     _notificar(pedido, [pedido.vendedor], 'LANCADO',
-               f'Pedido de {pedido.cliente_nome} lançado no ERP com o nº {numero_erp}.')
+               f'Pedido de {pedido.cliente_nome} lançado no Minerion/SGA com o nº {numero_erp}.')
     return pedido, aviso
 
 
@@ -344,7 +344,7 @@ def cancelar(pedido: PedidoVenda, user, motivo: str = '') -> PedidoVenda:
     if pedido.vendedor_id != user.pk and not eh_gestor(user):
         raise FluxoErro('Só o vendedor do pedido pode cancelá-lo.')
     if pedido.status in ('LANCADO', 'CANCELADO'):
-        raise FluxoErro('Pedido lançado no ERP é cancelado lá, não aqui.' if pedido.status == 'LANCADO'
+        raise FluxoErro('Pedido lançado no Minerion/SGA é cancelado lá, não aqui.' if pedido.status == 'LANCADO'
                         else 'O pedido já está cancelado.')
     estava_na_fila = pedido.status in ('ENVIADO', 'EM_LANCAMENTO')
     pedido.status = 'CANCELADO'

@@ -85,7 +85,7 @@ class PedidoVenda(models.Model):
         ('AGUARDANDO_APROVACAO', 'Aguardando aprovação'),
         ('ENVIADO', 'Enviado'),
         ('EM_LANCAMENTO', 'Em lançamento'),
-        ('LANCADO', 'Lançado no ERP'),
+        ('LANCADO', 'Lançado no Minerion/SGA'),
         ('DEVOLVIDO', 'Devolvido'),
         ('CANCELADO', 'Cancelado'),
     ]
@@ -198,7 +198,7 @@ class PedidoVendaEvento(models.Model):
         ('APROVADO', 'Desconto aprovado'),
         ('REPROVADO', 'Desconto reprovado'),
         ('ASSUMIDO', 'Lançamento iniciado'),
-        ('LANCADO', 'Lançado no ERP'),
+        ('LANCADO', 'Lançado no Minerion/SGA'),
         ('DEVOLVIDO', 'Devolvido ao vendedor'),
         ('CANCELADO', 'Cancelado'),
         ('COMENTARIO', 'Comentário'),
@@ -222,7 +222,7 @@ class PedidoVendaNotificacao(models.Model):
         ('APROVACAO_SOLICITADA', 'Desconto aguardando aprovação'),
         ('APROVADO', 'Desconto aprovado'),
         ('REPROVADO', 'Desconto reprovado'),
-        ('LANCADO', 'Pedido lançado no ERP'),
+        ('LANCADO', 'Pedido lançado no Minerion/SGA'),
         ('DEVOLVIDO', 'Pedido devolvido'),
         ('CANCELADO', 'Pedido cancelado'),
     ]
