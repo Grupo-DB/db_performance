@@ -13,7 +13,7 @@ from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import cargas, erp, fluxo
+from . import cargas, carteira, erp, fluxo, offline
 from .models import FILIAL_CHOICES, FolhaCarga, FotoProduto, ItemFolhaCarga, PedidoVenda, PedidoVendaEvento, PedidoVendaNotificacao, VendedorPerfil
 from .serializers import (
     FolhaCargaSerializer,
@@ -133,7 +133,25 @@ class ErpViewSet(viewsets.ViewSet):
             return _erro_erp(exc)
         if cli is None:
             return Response({'detail': 'Cliente não encontrado no Minerion/SGA.'}, status=status.HTTP_404_NOT_FOUND)
+        cli['financeiro'] = self._financeiro(cli['cod'])
         return Response(cli)
+
+    @staticmethod
+    def _financeiro(cod):
+        """Títulos em aberto + se o envio vai precisar do gestor. ERP lento aqui não derruba a ficha."""
+        try:
+            fin = erp.situacao_financeira(cod)
+        except Exception:
+            logger.exception('Financeiro do cliente %s indisponível', cod)
+            return None
+        return {**fin, 'pendencia': fluxo.pendencia_financeira(cod), 'tolerancia_dias': fluxo.TOLERANCIA_ATRASO_DIAS}
+
+    @action(detail=False, methods=['get'], url_path=r'clientes/(?P<cod>\d+)/financeiro')
+    def financeiro(self, request, cod=None):
+        dados = self._financeiro(int(cod))
+        if dados is None:
+            return Response({'detail': 'Financeiro indisponível no Minerion/SGA.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(dados)
 
     @action(detail=False, methods=['get'])
     def produtos(self, request):
@@ -148,10 +166,17 @@ class ErpViewSet(viewsets.ViewSet):
         except Exception as exc:
             return _erro_erp(exc)
         mapa = mapa_fotos(request)
+        try:
+            saldos = erp.estoque(filial)
+        except Exception:
+            logger.exception('Estoque da unidade %s indisponível', filial)
+            saldos = None
         for p in produtos:
             foto = mapa.get(p['cod'])
             p['foto'] = foto['imagem'] if foto else None
             p['miniatura'] = foto['miniatura'] if foto else None
+            # null = não deu para consultar; produto sem linha no estoque = zerado.
+            p['estoque'] = None if saldos is None else saldos.get(p['cod'], {'fisico': 0.0, 'comprometido': 0.0, 'disponivel': 0.0, 'origem': 'REVENDA'})
         return Response(produtos)
 
     @action(detail=False, methods=['get'])
@@ -273,6 +298,17 @@ class PedidoVendaViewSet(viewsets.ModelViewSet):
             except ValueError:
                 pass
         return qs.order_by('-atualizado_em')
+
+    def create(self, request, *args, **kwargs):
+        # Sincronização do app: o mesmo id_offline duas vezes é o mesmo pedido.
+        id_off = (request.data.get('id_offline') or '').strip() if isinstance(request.data, dict) else ''
+        if id_off:
+            existente = PedidoVenda.objects.filter(id_offline=id_off).first()
+            if existente:
+                if existente.vendedor_id != request.user.pk:
+                    return Response({'detail': 'Identificador offline já usado por outro vendedor.'}, status=status.HTTP_409_CONFLICT)
+                return Response(self.get_serializer(existente).data, status=status.HTTP_200_OK)
+        return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         perfil = fluxo.perfil_de(self.request.user)
@@ -622,3 +658,61 @@ class FolhaCargaViewSet(viewsets.ModelViewSet):
         folha.status, folha.fechada_em, folha.carga_sga = 'MONTANDO', None, None
         folha.save(update_fields=['status', 'fechada_em', 'carga_sga', 'atualizado_em'])
         return Response(self.get_serializer(folha).data)
+
+
+# ── Carteira: positivação, ciclo de recompra e mix ─────────────────────────
+
+class CarteiraView(APIView):
+    """
+    Carteira do vendedor calculada das notas do SGA (ver `carteira.py`).
+
+    Vendedor externo vê só os seus REPCOD. Interno e gestão veem a empresa
+    inteira ou escolhem a pessoa por `?vendedor=<id do usuário>`.
+    """
+    permission_classes = [TemAcessoVendas]
+
+    def get(self, request):
+        user = request.user
+        perfil = fluxo.perfil_de(user)
+        ve_todos = fluxo.eh_gestor(user) or bool(perfil and perfil.tipo == 'INTERNO')
+        vendedores = []
+        if ve_todos:
+            vendedores = [{
+                'id': p.user_id, 'nome': p.user.get_full_name() or p.user.username, 'repcods': p.repcods,
+            } for p in VendedorPerfil.objects.select_related('user').filter(ativo=True, tipo='EXTERNO') if p.repcods]
+            vendedores.sort(key=lambda v: v['nome'])
+        escolhido = request.query_params.get('vendedor')
+        if not ve_todos:
+            repcods = sorted(_repcods(user))
+        elif escolhido:
+            alvo = next((v for v in vendedores if str(v['id']) == escolhido), None)
+            if alvo is None:
+                return Response({'detail': 'Vendedor não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+            repcods = sorted(alvo['repcods'])
+        else:
+            repcods = None
+        try:
+            dados = carteira.carteira(repcods)
+        except Exception as exc:
+            return _erro_erp(exc)
+        return Response({**dados, 've_todos': ve_todos, 'vendedores': vendedores, 'vendedor': escolhido})
+
+
+class PacoteOfflineView(APIView):
+    """Tudo o que o app precisa para montar pedido sem internet (ver `offline.py`)."""
+    permission_classes = [TemAcessoVendas]
+
+    def get(self, request):
+        repcods = sorted(_repcods(request.user))
+        if not repcods:
+            return Response({'detail': 'Seu perfil não tem código de vendedor: o pacote offline é da carteira.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        chave = f"pedidosVenda:offline:{'-'.join(map(str, repcods))}"
+        dados = cache.get(chave)
+        if dados is None:
+            try:
+                dados = offline.pacote(repcods)
+            except Exception as exc:
+                return _erro_erp(exc)
+            cache.set(chave, dados, 300)
+        return Response(dados)

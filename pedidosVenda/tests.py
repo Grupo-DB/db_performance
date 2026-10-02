@@ -14,6 +14,11 @@ from .models import PedidoVenda, PedidoVendaNotificacao, VendedorPerfil
 
 TABELA = {1: 95.0, 2743: 12.03}
 
+FIN_LIMPO = {
+    'bloqueado': False, 'aberto': 0.0, 'vencido': 0.0, 'a_vencer': 0.0, 'qtd_aberto': 0, 'qtd_vencido': 0,
+    'maior_atraso': 0, 'negativado': False, 'protestado': False, 'titulos_vencidos': [], 'proximos': [],
+}
+
 
 def _precos(filial, cliente, produtos):
     return {p: TABELA[p] for p in produtos if p in TABELA}
@@ -35,6 +40,11 @@ class FluxoPedidoTest(TestCase):
         )
         VendedorPerfil.objects.create(user=self.outro, tipo='EXTERNO')
         self.api = APIClient()
+        # O financeiro do cliente vem do ERP; aqui, cliente em dia salvo onde o teste diz o contrário.
+        self.fin = dict(FIN_LIMPO)
+        patcher = mock.patch('pedidosVenda.erp.situacao_financeira', side_effect=lambda cod: self.fin)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _como(self, user):
         self.api.force_authenticate(user)
@@ -67,6 +77,54 @@ class FluxoPedidoTest(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(r.json()['status'], 'ENVIADO')
         self.assertTrue(PedidoVendaNotificacao.objects.filter(usuario_notificado=self.int_user, tipo='NOVO_PEDIDO').exists())
+
+    def test_atraso_dentro_da_tolerancia_segue_direto(self, _):
+        self.fin.update(vencido=500.0, qtd_vencido=1, maior_atraso=3)
+        p = self._criar()
+        r = self._como(self.ext_user).post(f'/pedidosVenda/pedidos/{p["id"]}/enviar/', {}, format='json')
+        self.assertEqual(r.json()['status'], 'ENVIADO')
+        self.assertEqual(r.json()['pendencia_financeira'], '')
+
+    def test_titulo_vencido_vai_para_o_gestor_com_justificativa(self, _):
+        self.fin.update(vencido=4600.0, qtd_vencido=2, maior_atraso=58, protestado=True)
+        p = self._criar()
+        api = self._como(self.ext_user)
+        r = api.post(f'/pedidosVenda/pedidos/{p["id"]}/enviar/', {}, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('58 dias', r.json()['detail'])
+        r = api.post(f'/pedidosVenda/pedidos/{p["id"]}/enviar/', {'justificativa': 'Cliente pagou ontem, comprovante no WhatsApp'}, format='json')
+        self.assertEqual(r.json()['status'], 'AGUARDANDO_APROVACAO')
+        self.assertIn('protestado', r.json()['pendencia_financeira'])
+        self.assertTrue(PedidoVendaNotificacao.objects.filter(usuario_notificado=self.gestor, tipo='APROVACAO_SOLICITADA').exists())
+        r = self._como(self.gestor).post(f'/pedidosVenda/pedidos/{p["id"]}/aprovar/', {}, format='json')
+        self.assertEqual(r.json()['status'], 'ENVIADO')
+
+    def test_cliente_bloqueado_no_erp_tambem(self, _):
+        self.fin['bloqueado'] = True
+        p = self._criar()
+        r = self._como(self.ext_user).post(f'/pedidosVenda/pedidos/{p["id"]}/enviar/', {'justificativa': 'liberado pelo financeiro'}, format='json')
+        self.assertEqual(r.json()['status'], 'AGUARDANDO_APROVACAO')
+        self.assertIn('bloqueado', r.json()['pendencia_financeira'])
+
+    def test_erp_fora_do_ar_nao_trava_o_envio(self, _):
+        with mock.patch('pedidosVenda.erp.situacao_financeira', side_effect=OSError('sem ERP')):
+            p = self._criar()
+            r = self._como(self.ext_user).post(f'/pedidosVenda/pedidos/{p["id"]}/enviar/', {}, format='json')
+        self.assertEqual(r.json()['status'], 'ENVIADO')
+
+    def test_sincronizacao_offline_nao_duplica(self, _):
+        corpo = {'id_offline': 'off-7f3a', 'cliente_cod': 105, 'cliente_nome': 'OBRA', 'prazo_pagamento': '30',
+                 'itens': [{'produto_cod': 1, 'descricao': 'CALCARIO', 'unidade': 'TN', 'quantidade': '10',
+                            'preco_tabela': '95', 'preco_unitario': '92'}]}
+        api = self._como(self.ext_user)
+        r1 = api.post('/pedidosVenda/pedidos/', corpo, format='json')
+        r2 = api.post('/pedidosVenda/pedidos/', corpo, format='json')  # a resposta do 1º "se perdeu"
+        self.assertEqual(r1.status_code, 201)
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r1.json()['id'], r2.json()['id'])
+        self.assertEqual(PedidoVenda.objects.filter(id_offline='off-7f3a').count(), 1)
+        r3 = self._como(self.outro).post('/pedidosVenda/pedidos/', corpo, format='json')
+        self.assertEqual(r3.status_code, 409)
 
     def test_desconto_acima_do_teto_exige_justificativa_e_aprovacao(self, _):
         p = self._criar(preco=Decimal('80'))  # 15,8% abaixo da tabela, teto 5%
@@ -428,3 +486,52 @@ class FolhaCargaTest(TestCase):
         self.assertEqual(self._folha(descricao='NOVA').status_code, 201)  # pedidos liberados
         r = self.api.post(f'/pedidosVenda/folhas-carga/{folha}/reabrir/')
         self.assertEqual(r.status_code, 400)
+
+
+class EstoqueErpTest(TestCase):
+    def test_fabricado_nao_tem_disponivel_e_revenda_desconta_os_pedidos(self):
+        from django.core.cache import cache
+        from . import erp
+        cache.clear()
+        fisico = [{'cod': 2743, 'saldo': -364.0, 'fabricado': 1}, {'cod': 26, 'saldo': 1571.0, 'fabricado': 0}]
+        pedidos = [{'cod': 2743, 'saldo': 17085.0}, {'cod': 26, 'saldo': 333.0}]
+        with mock.patch('pedidosVenda.erp._rows', side_effect=[fisico, pedidos]):
+            e = erp.estoque(0)
+        self.assertEqual(e[2743]['origem'], 'FABRICADO')
+        self.assertEqual(e[26], {'fisico': 1571.0, 'comprometido': 333.0, 'disponivel': 1238.0, 'origem': 'REVENDA'})
+
+
+class CarteiraTest(TestCase):
+    def _linha(self, cli, data, linha=1827, nome='CAL', valor=1000):
+        return {'cliente': cli, 'data': data, 'repcod': 41, 'linha_cod': linha, 'linha': nome, 'valor': valor, 'tn': 1}
+
+    def test_ciclo_positivacao_e_linha_perdida(self):
+        from datetime import date
+        from .carteira import calcular
+        hoje = date(2026, 10, 15)
+        linhas = [
+            # 1: compra a cada ~30 dias e já comprou em outubro.
+            self._linha(1, '2026-07-10'), self._linha(1, '2026-08-10'), self._linha(1, '2026-09-10'), self._linha(1, '2026-10-05'),
+            # 2: ciclo de 20 dias, última há 45 ⇒ atrasado; argamassa parou em maio ⇒ linha perdida.
+            self._linha(2, '2026-05-01', 1824, 'ARGAMASSA'), self._linha(2, '2026-08-01'), self._linha(2, '2026-08-11'), self._linha(2, '2026-08-31'),
+            # 3: uma compra só ⇒ sem ciclo.
+            self._linha(3, '2026-09-20'),
+            # 4: sem comprar há mais de 180 dias ⇒ inativo.
+            self._linha(4, '2026-01-10'), self._linha(4, '2026-02-10'),
+        ]
+        d = calcular(linhas, hoje, {1: {'nome': 'UM'}})
+        por = {c['cod']: c for c in d['clientes']}
+        self.assertEqual(por[1]['situacao'], 'COMPROU')
+        self.assertEqual(por[2]['situacao'], 'ATRASADO')
+        self.assertEqual(por[2]['ciclo_dias'], 20)
+        self.assertEqual(por[2]['atraso_dias'], 25)
+        self.assertEqual(por[2]['linhas_perdidas'], ['ARGAMASSA'])
+        self.assertEqual(por[3]['situacao'], 'SEM_CICLO')
+        self.assertEqual(por[4]['situacao'], 'INATIVO')
+        self.assertEqual(d['resumo']['carteira'], 4)
+        self.assertEqual(d['resumo']['positivados'], 1)
+        self.assertEqual(d['resumo']['positivacao'], 25.0)
+        # Setembro até o dia 15: só o cliente 1 (dia 10); o 3 comprou dia 20 e não entra.
+        self.assertEqual(d['resumo']['positivados_mes_anterior'], 1)
+        cal = next(m for m in d['mix'] if m['nome'] == 'CAL')
+        self.assertEqual(cal['clientes'], 3)  # o inativo não entra no mix

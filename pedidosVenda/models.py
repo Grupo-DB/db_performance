@@ -128,7 +128,11 @@ class PedidoVenda(models.Model):
     total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0'))
     # Maior desconto (%) entre os itens, positivo = abaixo da tabela.
     maior_desconto = models.DecimalField(max_digits=8, decimal_places=3, default=Decimal('0'))
+    # Vale para tudo que pede aprovação do gestor: desconto acima do teto e pendência financeira.
     justificativa_desconto = models.TextField(blank=True, default='')
+    pendencia_financeira = models.TextField(
+        blank=True, default='', help_text='Retrato do financeiro do cliente no envio, quando levou à aprovação',
+    )
 
     numero_erp = models.IntegerField(null=True, blank=True, help_text='PEDNUM do pedido lançado')
     motivo_devolucao = models.TextField(blank=True, default='')
@@ -136,6 +140,10 @@ class PedidoVenda(models.Model):
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name='pedidos_venda_aprovados',
     )
     aprovado_em = models.DateTimeField(null=True, blank=True)
+
+    # Pedido montado sem internet: o app gera o id e a sincronização reenvia com
+    # ele — se a resposta se perdeu no meio, o segundo POST devolve o mesmo pedido.
+    id_offline = models.CharField(max_length=40, null=True, blank=True, unique=True)
 
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)

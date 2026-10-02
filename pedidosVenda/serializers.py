@@ -140,7 +140,7 @@ class PedidoVendaListSerializer(serializers.ModelSerializer):
             'id', 'numero', 'status', 'status_label', 'cliente_cod', 'cliente_nome', 'cliente_fantasia',
             'cliente_cidade', 'cliente_pre_cadastro', 'filial', 'filial_nome', 'total', 'maior_desconto',
             'qtd_itens', 'vendedor', 'vendedor_nome', 'interno', 'interno_nome', 'numero_erp',
-            'motivo_devolucao', 'criado_em', 'atualizado_em', 'enviado_em', 'lancado_em',
+            'motivo_devolucao', 'pendencia_financeira', 'criado_em', 'atualizado_em', 'enviado_em', 'lancado_em',
         ]
 
     def get_filial_nome(self, obj):
@@ -168,11 +168,11 @@ class PedidoVendaSerializer(PedidoVendaListSerializer):
             'repcod', 'cliente_documento', 'cliente_novo', 'endereco_entrega_cod', 'endereco_entrega',
             'prazo_pagamento', 'forma_cobranca', 'frete', 'data_entrega', 'paletizado', 'frete_valor_ton', 'observacoes',
             'justificativa_desconto', 'aprovado_por', 'aprovado_por_nome', 'aprovado_em',
-            'itens', 'eventos', 'acoes', 'teto_desconto',
+            'itens', 'eventos', 'acoes', 'teto_desconto', 'id_offline',
         ]
         read_only_fields = [
             'vendedor', 'interno', 'status', 'total', 'maior_desconto', 'numero_erp', 'motivo_devolucao',
-            'aprovado_por', 'aprovado_em', 'enviado_em', 'lancado_em',
+            'pendencia_financeira', 'aprovado_por', 'aprovado_em', 'enviado_em', 'lancado_em',
         ]
 
     def get_aprovado_por_nome(self, obj):

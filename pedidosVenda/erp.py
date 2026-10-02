@@ -14,7 +14,7 @@ Onde mora cada coisa (levantado em 01/10/2026):
 """
 import os
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from django.core.cache import cache
 from sqlalchemy import create_engine, text
@@ -155,6 +155,10 @@ def detalhar_cliente(cod: int, repcods: list[int]) -> dict | None:
     if not dados:
         return None
     cli = dados[0]
+    # CLICELULAR costuma vir com bytes nulos (13 × \x00): parece preenchido e sai em branco.
+    for campo in ('celular', 'telefone'):
+        valor = str(cli.get(campo) or '').replace('\x00', '').strip()
+        cli[campo] = valor if sum(ch.isdigit() for ch in valor) >= 8 else ''
     cli['bloqueado'] = cli.pop('bloqueado_venda') == 'S' or cli.pop('bloqueado_total') == 'S'
     cli['da_carteira'] = cli['repcod'] in _inteiros(repcods)
 
@@ -182,6 +186,106 @@ def detalhar_cliente(cod: int, repcods: list[int]) -> dict | None:
         ORDER BY P.PEDDATA DESC, P.PEDNUM DESC
     """, cod=int(cod)))
     return cli
+
+
+# ── Financeiro do cliente ──────────────────────────────────────────────────
+# Títulos a receber em aberto (CONTARECEBER, levantado 02/10/2026): CRTIPO 0 =
+# cliente, CRCODREF = CLICOD, aberto = CRTOTAL − CRTOTALREC. O limite de crédito
+# do ERP (CLILIMCRED) e o CLISALDO estão zerados em todos os clientes — não usar.
+CACHE_FINANCEIRO_SEG = 300
+
+
+def situacao_financeira(cod: int) -> dict:
+    chave = f'pedidosVenda:financeiro:{int(cod)}'
+    dados = cache.get(chave)
+    if dados is not None:
+        return dados
+    titulos = _limpar(_rows("""
+        SELECT CR.CRNUM titulo, CR.CRNUMREF documento, CR.CRPARNUM parcela, CR.CRPARTOT parcelas,
+               CR.CRDATA emissao, CR.CRVENC vencimento, CR.CRTOTAL - CR.CRTOTALREC aberto,
+               CR.CRNEGATIVADO negativado, CR.CRPROTDATA protesto
+        FROM CONTARECEBER CR
+        WHERE CR.CRTIPO = 0 AND CR.CRCODREF = :cod AND CR.CRTOTAL - CR.CRTOTALREC > 0.01
+        ORDER BY CR.CRVENC
+    """, cod=int(cod)))
+    hoje = date.today()
+    aberto = vencido = 0.0
+    maior_atraso = 0
+    for t in titulos:
+        t['aberto'] = round(float(t['aberto'] or 0), 2)
+        venc = date.fromisoformat(t['vencimento']) if t['vencimento'] else None
+        t['dias_atraso'] = max((hoje - venc).days, 0) if venc else 0
+        t['negativado'] = t['negativado'] == 'S'
+        t['protestado'] = bool(t.pop('protesto'))
+        aberto += t['aberto']
+        if t['dias_atraso'] > 0:
+            vencido += t['aberto']
+            maior_atraso = max(maior_atraso, t['dias_atraso'])
+    vencidos = [t for t in titulos if t['dias_atraso'] > 0]
+    bloq = _rows("SELECT CLIBLOQVENDA v, CLIBLOQTOTAL t FROM CLIENTE WHERE CLICOD = :cod", cod=int(cod))
+    dados = {
+        'bloqueado': bool(bloq) and ('S' in (bloq[0]['v'], bloq[0]['t'])),
+        'aberto': round(aberto, 2),
+        'vencido': round(vencido, 2),
+        'a_vencer': round(aberto - vencido, 2),
+        'qtd_aberto': len(titulos),
+        'qtd_vencido': len(vencidos),
+        'maior_atraso': maior_atraso,
+        'negativado': any(t['negativado'] for t in titulos),
+        'protestado': any(t['protestado'] for t in titulos),
+        # Os vencidos mais antigos primeiro; o resto só conta.
+        'titulos_vencidos': vencidos[:15],
+        'proximos': [t for t in titulos if t['dias_atraso'] == 0][:5],
+    }
+    cache.set(chave, dados, CACHE_FINANCEIRO_SEG)
+    return dados
+
+
+# ── Estoque ─────────────────────────────────────────────────────────────────
+# QUANTESTOQUE (levantado 02/10/2026): saldo físico por produto e unidade na
+# linha QESTQREF = 0 — produto fabricado fica no QESTQTIPO 1, revenda no 0, nunca
+# nos dois. A produção não é apontada em dia: vários fabricados ficam NEGATIVOS
+# (argamassa multiuso −2.599 sc vendendo 35 mil/mês), então o número é só
+# informação para o vendedor, nunca trava a venda.
+CACHE_ESTOQUE_SEG = 120
+
+
+def estoque(filial: int) -> dict[int, dict]:
+    chave = f'pedidosVenda:estoque:{int(filial)}'
+    dados = cache.get(chave)
+    if dados is not None:
+        return dados
+    linhas = _rows("""
+        SELECT Q.QESTQESTQ cod, SUM(Q.QESTQESTOQUE) saldo,
+               SUM(CASE WHEN Q.QESTQTIPO = 1 AND Q.QESTQESTOQUE <> 0 THEN 1 ELSE 0 END)
+                 + MAX(CASE WHEN E.ESTQMARCA = 'DB' THEN 1 ELSE 0 END) fabricado
+        FROM QUANTESTOQUE Q
+        JOIN ESTOQUE E ON E.ESTQCOD = Q.QESTQESTQ
+        WHERE Q.QESTQEMP = :emp AND Q.QESTQFIL = :fil AND Q.QESTQTIPO IN (0, 1) AND Q.QESTQREF = 0
+        GROUP BY Q.QESTQESTQ
+    """, emp=EMPRESA, fil=int(filial))
+    fisico = {r['cod']: float(r['saldo'] or 0) for r in linhas}
+    # Fabricado (marca DB, ou saldo no tipo 1): a fábrica produz contra pedido — o
+    # "disponível" dele não quer dizer nada. Só revenda tem disponível de verdade.
+    fabricados = {r['cod'] for r in linhas if r['fabricado']}
+    # Comprometido: saldo dos pedidos ativos da unidade (o que ainda vai sair).
+    comprometido = {r['cod']: float(r['saldo'] or 0) for r in _rows("""
+        SELECT I.IPEDESTQ cod, SUM(I.IPEDQUANT - I.IPEDQUANTDESP - ISNULL(I.IPEDQUANTCANC, 0)) saldo
+        FROM ITEMPEDIDO I
+        JOIN PEDIDO P ON P.PEDNUM = I.IPEDPED
+        WHERE P.PEDSIT = 0 AND P.PEDEMP = :emp AND P.PEDFIL = :fil AND P.PEDDATA >= :desde
+          AND I.IPEDQUANT - I.IPEDQUANTDESP - ISNULL(I.IPEDQUANTCANC, 0) > 0.001
+        GROUP BY I.IPEDESTQ
+    """, emp=EMPRESA, fil=int(filial), desde=date.today() - timedelta(days=120))}
+    dados = {}
+    for cod in set(fisico) | set(comprometido):
+        f, c = round(fisico.get(cod, 0.0), 3), round(comprometido.get(cod, 0.0), 3)
+        dados[cod] = {
+            'fisico': f, 'comprometido': c, 'disponivel': round(f - c, 3),
+            'origem': 'FABRICADO' if cod in fabricados else 'REVENDA',
+        }
+    cache.set(chave, dados, CACHE_ESTOQUE_SEG)
+    return dados
 
 
 # ── Produtos e preços ───────────────────────────────────────────────────────

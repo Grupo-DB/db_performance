@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 GRUPOS_GESTAO = ('Admin', 'Master', 'vendasGestao')
 # Diferença de arredondamento aceita entre o preço que o vendedor viu e o do ERP.
 TOLERANCIA_PRECO = Decimal('0.005')
+# Dias de atraso tolerados antes de o pedido precisar do gestor: boleto pago na
+# véspera leva uns dias para baixar no ERP.
+TOLERANCIA_ATRASO_DIAS = getattr(settings, 'PEDIDO_VENDA_TOLERANCIA_ATRASO_DIAS', 5)
 
 
 class FluxoErro(Exception):
@@ -161,6 +164,42 @@ def _conferir_precos(pedido):
     return ''
 
 
+def pendencia_financeira(cliente_cod) -> str:
+    """
+    O que, no financeiro do cliente, pede o gestor: bloqueio no ERP ou título
+    vencido além da tolerância. Vazio = nada. ERP fora do ar não trava a venda
+    (o interno ainda vê no SGA), mas o envio registra que não conferiu.
+    """
+    from . import erp
+
+    if not cliente_cod:
+        return ''
+    try:
+        fin = erp.situacao_financeira(cliente_cod)
+    except Exception:
+        logger.exception('ERP indisponível ao conferir o financeiro do cliente %s', cliente_cod)
+        return ''
+    return texto_pendencia(fin)
+
+
+def texto_pendencia(fin: dict) -> str:
+    """A regra da pendência sobre o resumo do financeiro (também usada no pacote offline)."""
+    partes = []
+    if fin['bloqueado']:
+        partes.append('cliente bloqueado no Minerion/SGA')
+    if fin['maior_atraso'] > TOLERANCIA_ATRASO_DIAS:
+        partes.append(
+            f"{fin['qtd_vencido']} título(s) vencido(s) somando {_brl(fin['vencido'])}, "
+            f"o mais antigo com {fin['maior_atraso']} dias de atraso")
+    if fin['protestado'] or fin['negativado']:
+        partes.append('com título ' + ' e '.join(
+            n for n, v in (('protestado', fin['protestado']), ('negativado', fin['negativado'])) if v))
+    if not partes:
+        return ''
+    texto = '; '.join(partes)
+    return texto[0].upper() + texto[1:] + '.'
+
+
 def _validar_para_envio(pedido):
     if not pedido.itens.exists():
         raise FluxoErro('O pedido não tem itens.')
@@ -202,20 +241,30 @@ def enviar(pedido: PedidoVenda, user, justificativa: str = '') -> PedidoVenda:
     pedido.enviado_em = timezone.now()
 
     acima_do_teto = pedido.maior_desconto > teto + Decimal('0.001')
+    pedido.pendencia_financeira = pendencia_financeira(pedido.cliente_cod)
+    motivos = []
     if acima_do_teto:
+        motivos.append(f'desconto de {_pct(pedido.maior_desconto)} (teto {_pct(teto)})')
+    if pedido.pendencia_financeira:
+        motivos.append(f'financeiro do cliente: {pedido.pendencia_financeira}')
+    if motivos:
         if not pedido.justificativa_desconto.strip():
+            if acima_do_teto and not pedido.pendencia_financeira:
+                raise FluxoErro(
+                    f'O desconto de {_pct(pedido.maior_desconto)} passa do seu teto de {_pct(teto)}. '
+                    'Escreva a justificativa para o gestor aprovar.'
+                )
             raise FluxoErro(
-                f'O desconto de {_pct(pedido.maior_desconto)} passa do seu teto de {_pct(teto)}. '
-                'Escreva a justificativa para o gestor aprovar.'
+                'Este pedido precisa do gestor — ' + '; '.join(motivos) + ' Escreva a justificativa.'
             )
         pedido.status = 'AGUARDANDO_APROVACAO'
         pedido.aprovado_por = None
         pedido.aprovado_em = None
         pedido.save()
-        _evento(pedido, user, 'APROVACAO_SOLICITADA',
-                f'Desconto de {_pct(pedido.maior_desconto)} (teto {_pct(teto)}). {pedido.justificativa_desconto} {aviso_preco}'.strip())
+        resumo = '; '.join(motivos)
+        _evento(pedido, user, 'APROVACAO_SOLICITADA', f'{resumo[0].upper()}{resumo[1:]}. {pedido.justificativa_desconto} {aviso_preco}'.strip())
         _notificar(pedido, _gestores(), 'APROVACAO_SOLICITADA',
-                   f'{_nome(user)} pede {_pct(pedido.maior_desconto)} de desconto para {pedido.cliente_nome} ({_brl(pedido.total)}).')
+                   f'{_nome(user)} pede aprovação do pedido de {pedido.cliente_nome} ({_brl(pedido.total)}): {resumo}.')
         return pedido
 
     pedido.status = 'ENVIADO'
@@ -233,7 +282,7 @@ def _avisar_internos(pedido, vendedor):
 @transaction.atomic
 def aprovar(pedido: PedidoVenda, user, texto: str = '') -> PedidoVenda:
     if not eh_gestor(user):
-        raise FluxoErro('Só o gestor de vendas aprova desconto.')
+        raise FluxoErro('Só o gestor de vendas aprova o pedido.')
     if pedido.status != 'AGUARDANDO_APROVACAO':
         raise FluxoErro('O pedido não está aguardando aprovação.')
     pedido.status = 'ENVIADO'
@@ -242,7 +291,7 @@ def aprovar(pedido: PedidoVenda, user, texto: str = '') -> PedidoVenda:
     pedido.save()
     _evento(pedido, user, 'APROVADO', texto)
     _notificar(pedido, [pedido.vendedor], 'APROVADO',
-               f'Desconto aprovado por {_nome(user)} — pedido de {pedido.cliente_nome} seguiu para lançamento.')
+               f'Pedido de {pedido.cliente_nome} aprovado por {_nome(user)} — seguiu para lançamento.')
     _avisar_internos(pedido, pedido.vendedor)
     return pedido
 
@@ -250,7 +299,7 @@ def aprovar(pedido: PedidoVenda, user, texto: str = '') -> PedidoVenda:
 @transaction.atomic
 def reprovar(pedido: PedidoVenda, user, motivo: str) -> PedidoVenda:
     if not eh_gestor(user):
-        raise FluxoErro('Só o gestor de vendas reprova desconto.')
+        raise FluxoErro('Só o gestor de vendas reprova o pedido.')
     if pedido.status != 'AGUARDANDO_APROVACAO':
         raise FluxoErro('O pedido não está aguardando aprovação.')
     if not (motivo or '').strip():
@@ -260,7 +309,7 @@ def reprovar(pedido: PedidoVenda, user, motivo: str) -> PedidoVenda:
     pedido.save()
     _evento(pedido, user, 'REPROVADO', pedido.motivo_devolucao)
     _notificar(pedido, [pedido.vendedor], 'REPROVADO',
-               f'Desconto do pedido de {pedido.cliente_nome} reprovado: {pedido.motivo_devolucao}')
+               f'Pedido de {pedido.cliente_nome} reprovado: {pedido.motivo_devolucao}')
     return pedido
 
 
