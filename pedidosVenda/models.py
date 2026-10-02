@@ -282,3 +282,71 @@ class FotoProduto(models.Model):
         """
         versao = int(self.atualizado_em.timestamp()) if self.atualizado_em else 0
         return f"fotos/{self.pk}/arquivo/?t={'mini' if miniatura else 'grande'}&v={versao}"
+
+
+class FolhaCarga(models.Model):
+    """
+    A folha em que o vendas interno junta os pedidos de uma carga ANTES de
+    digitá-la no SGA (substitui as folhas de pedido grampeadas, 02/10/2026).
+
+    É só o rascunho: a carga de verdade continua sendo criada no SGA. Quando
+    todos os pedidos da folha aparecem num carregamento/nota do SGA, ela fecha
+    sozinha (`NO_SGA`) — ver `cargas.situacao_no_sga`.
+    """
+
+    STATUS_CHOICES = [
+        ('MONTANDO', 'Montando'),
+        ('NO_SGA', 'Já está no SGA'),
+        ('CANCELADA', 'Cancelada'),
+    ]
+    TIPO_CHOICES = [
+        ('REMETER', 'Remeter'),
+        ('RETIRA', 'Retira'),
+        ('RETORNO', 'Retorno'),
+    ]
+
+    descricao = models.CharField(max_length=120, help_text='Como vai na Descrição da carga composta do SGA')
+    filial = models.IntegerField(choices=FILIAL_CHOICES, default=0)
+    data_prevista = models.DateField(null=True, blank=True)
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, default='REMETER')
+    lotacao = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True, help_text='Toneladas que cabem no caminhão')
+    placa = models.CharField(max_length=10, blank=True, default='')
+    motorista = models.CharField(max_length=120, blank=True, default='')
+    observacao = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='MONTANDO', db_index=True)
+    carga_sga = models.IntegerField(null=True, blank=True, help_text='CARFCOD da carga composta, quando o SGA já tem')
+    criado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='folhas_carga')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    fechada_em = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Folha de carga'
+        verbose_name_plural = 'Folhas de carga'
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        return self.descricao
+
+
+class ItemFolhaCarga(models.Model):
+    """
+    Um pedido grampeado na folha. Os dados do pedido são cópia do momento em
+    que entrou (o SGA é só leitura): a folha imprime e confere sem o ERP no ar.
+    """
+
+    folha = models.ForeignKey(FolhaCarga, on_delete=models.CASCADE, related_name='itens')
+    ordem = models.PositiveIntegerField(default=0, help_text='Ordem de entrega')
+    pedido = models.IntegerField(help_text='PEDNUM do SGA')
+    cliente = models.CharField(max_length=150, blank=True, default='')
+    cidade = models.CharField(max_length=120, blank=True, default='')
+    produto = models.CharField(max_length=150, blank=True, default='')
+    itens = models.PositiveIntegerField(default=1)
+    peso = models.DecimalField(max_digits=10, decimal_places=3, default=Decimal('0'))
+    valor = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0'))
+    vendedor = models.CharField(max_length=120, blank=True, default='')
+    observacao = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        ordering = ['folha', 'ordem', 'id']
+        unique_together = [('folha', 'pedido')]

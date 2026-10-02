@@ -14,8 +14,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import cargas, erp, fluxo
-from .models import FILIAL_CHOICES, FotoProduto, PedidoVenda, PedidoVendaEvento, PedidoVendaNotificacao, VendedorPerfil
+from .models import FILIAL_CHOICES, FolhaCarga, FotoProduto, ItemFolhaCarga, PedidoVenda, PedidoVendaEvento, PedidoVendaNotificacao, VendedorPerfil
 from .serializers import (
+    FolhaCargaSerializer,
     FotoProdutoSerializer,
     PedidoVendaListSerializer,
     PedidoVendaNotificacaoSerializer,
@@ -509,3 +510,115 @@ class PainelCargasView(APIView):
             'total': float(pv.total), 'data_entrega': pv.data_entrega.isoformat() if pv.data_entrega else None,
             'enviado_em': pv.enviado_em.isoformat() if pv.enviado_em else None,
         } for pv in qs.order_by('enviado_em')[:200]]
+
+
+# ── Folhas de carga (rascunho antes do SGA) ─────────────────────────────────
+
+class PodeMontarCarga(BasePermission):
+    """Quem monta a carga é o vendas interno (e a gestão); a expedição só olha."""
+    message = 'Só o vendas interno e a gestão montam cargas.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return _ve_todas_as_cargas(user)
+        if fluxo.eh_gestor(user):
+            return True
+        perfil = fluxo.perfil_de(user)
+        return bool(perfil and perfil.tipo == 'INTERNO')
+
+
+class FolhaCargaViewSet(viewsets.ModelViewSet):
+    """
+    `?status=MONTANDO` (padrão) | `NO_SGA` | `CANCELADA` | `todas`.
+
+    Ao listar as abertas, confere no SGA quais pedidos já viraram carregamento:
+    a folha cujos pedidos estão todos lá fecha sozinha (`NO_SGA`).
+    """
+    serializer_class = FolhaCargaSerializer
+    permission_classes = [PodeMontarCarga]
+
+    def get_queryset(self):
+        qs = FolhaCarga.objects.select_related('criado_por').prefetch_related('itens')
+        if self.action != 'list':
+            return qs
+        st = self.request.query_params.get('status', 'MONTANDO')
+        if st != 'todas':
+            qs = qs.filter(status=st)
+        if st != 'MONTANDO':
+            qs = qs[:100]
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(criado_por=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        if self.get_object().status != 'MONTANDO':
+            return Response({'detail': 'Folha fechada não muda mais. Reabra antes.'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().update(request, *args, **kwargs)
+
+    def list(self, request, *args, **kwargs):
+        folhas = list(self.get_queryset())
+        sga = self._conferir_sga([f for f in folhas if f.status == 'MONTANDO'])
+        dados = self.get_serializer(folhas, many=True).data
+        for d in dados:
+            for i in d['itens']:
+                i['sga'] = sga.get(i['pedido'])
+        return Response(dados)
+
+    def retrieve(self, request, *args, **kwargs):
+        folha = self.get_object()
+        sga = self._conferir_sga([folha]) if folha.status == 'MONTANDO' else {}
+        dados = self.get_serializer(folha).data
+        for i in dados['itens']:
+            i['sga'] = sga.get(i['pedido'])
+        return Response(dados)
+
+    @staticmethod
+    def _conferir_sga(folhas) -> dict:
+        pedidos = [i.pedido for f in folhas for i in f.itens.all()]
+        if not pedidos:
+            return {}
+        desde = min(f.criado_em for f in folhas).date()
+        chave = f"pedidosVenda:folhas:{desde}:{hash(tuple(sorted(pedidos)))}"
+        sga = cache.get(chave)
+        if sga is None:
+            try:
+                sga = cargas.situacao_no_sga(pedidos, desde)
+            except Exception:
+                logger.exception('Folhas de carga: conferência no SGA falhou')
+                return {}
+            cache.set(chave, sga, CACHE_PAINEL_SEG)
+        agora = timezone.now()
+        for f in folhas:
+            itens = list(f.itens.all())
+            if itens and all(i.pedido in sga for i in itens):
+                cods = [sga[i.pedido]['carga_cod'] for i in itens if sga[i.pedido]['carga_cod']]
+                f.status = 'NO_SGA'
+                f.carga_sga = max(set(cods), key=cods.count) if cods else None
+                f.fechada_em = agora
+                FolhaCarga.objects.filter(pk=f.pk).update(status=f.status, carga_sga=f.carga_sga, fechada_em=agora)
+        return sga
+
+    @action(detail=True, methods=['post'])
+    def cancelar(self, request, pk=None):
+        folha = self.get_object()
+        folha.status, folha.fechada_em = 'CANCELADA', timezone.now()
+        folha.save(update_fields=['status', 'fechada_em', 'atualizado_em'])
+        return Response(self.get_serializer(folha).data)
+
+    @action(detail=True, methods=['post'])
+    def reabrir(self, request, pk=None):
+        folha = self.get_object()
+        if folha.status == 'MONTANDO':
+            return Response(self.get_serializer(folha).data)
+        conflito = ItemFolhaCarga.objects.filter(
+            pedido__in=folha.itens.values('pedido'), folha__status='MONTANDO').select_related('folha').first()
+        if conflito:
+            return Response({'detail': f'Pedido {conflito.pedido} já está na folha "{conflito.folha.descricao}".'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        folha.status, folha.fechada_em, folha.carga_sga = 'MONTANDO', None, None
+        folha.save(update_fields=['status', 'fechada_em', 'carga_sga', 'atualizado_em'])
+        return Response(self.get_serializer(folha).data)

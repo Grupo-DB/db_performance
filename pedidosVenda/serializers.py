@@ -7,7 +7,9 @@ from rest_framework import serializers
 from . import fluxo, fotos
 from .models import (
     FILIAL_CHOICES,
+    FolhaCarga,
     FotoProduto,
+    ItemFolhaCarga,
     ItemPedidoVenda,
     PedidoVenda,
     PedidoVendaEvento,
@@ -332,3 +334,79 @@ class FotoProdutoSerializer(serializers.ModelSerializer):
             setattr(instance, campo, valor)
         instance.save()
         return instance
+
+
+class ItemFolhaCargaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ItemFolhaCarga
+        fields = ['id', 'ordem', 'pedido', 'cliente', 'cidade', 'produto', 'itens', 'peso', 'valor', 'vendedor', 'observacao']
+        read_only_fields = ['id']
+
+
+class FolhaCargaSerializer(serializers.ModelSerializer):
+    """
+    A folha vai e volta inteira: os itens chegam na ordem de entrega e
+    substituem os anteriores (é um papel só, editado por uma pessoa de cada vez).
+    """
+    itens = ItemFolhaCargaSerializer(many=True, required=False)
+    filial_nome = serializers.SerializerMethodField()
+    criado_por_nome = serializers.SerializerMethodField()
+    peso = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FolhaCarga
+        fields = [
+            'id', 'descricao', 'filial', 'filial_nome', 'data_prevista', 'tipo', 'lotacao', 'placa', 'motorista',
+            'observacao', 'status', 'carga_sga', 'criado_por', 'criado_por_nome', 'criado_em', 'atualizado_em',
+            'fechada_em', 'peso', 'itens',
+        ]
+        read_only_fields = ['status', 'carga_sga', 'criado_por', 'criado_em', 'atualizado_em', 'fechada_em']
+
+    def get_filial_nome(self, obj):
+        return FILIAIS.get(obj.filial, '')
+
+    def get_criado_por_nome(self, obj):
+        return _nome(obj.criado_por)
+
+    def get_peso(self, obj):
+        return float(sum((i.peso for i in obj.itens.all()), Decimal('0')))
+
+    def validate_placa(self, valor):
+        return (valor or '').upper().replace(' ', '').strip()
+
+    def validate_itens(self, itens):
+        vistos = set()
+        for i in itens:
+            if i['pedido'] in vistos:
+                raise serializers.ValidationError(f"Pedido {i['pedido']} aparece duas vezes na folha.")
+            vistos.add(i['pedido'])
+        # Um pedido sai numa carga só: não pode estar grampeado em outra folha aberta.
+        outras = ItemFolhaCarga.objects.filter(pedido__in=vistos, folha__status='MONTANDO')
+        if self.instance:
+            outras = outras.exclude(folha=self.instance)
+        conflito = outras.select_related('folha').first()
+        if conflito:
+            raise serializers.ValidationError(
+                f'Pedido {conflito.pedido} já está na folha "{conflito.folha.descricao}".')
+        return itens
+
+    def _gravar_itens(self, folha, itens):
+        folha.itens.all().delete()
+        ItemFolhaCarga.objects.bulk_create([
+            ItemFolhaCarga(folha=folha, **{**i, 'ordem': n}) for n, i in enumerate(itens, start=1)
+        ])
+
+    @transaction.atomic
+    def create(self, validated_data):
+        itens = validated_data.pop('itens', [])
+        folha = FolhaCarga.objects.create(**validated_data)
+        self._gravar_itens(folha, itens)
+        return folha
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        itens = validated_data.pop('itens', None)
+        folha = super().update(instance, validated_data)
+        if itens is not None:
+            self._gravar_itens(folha, itens)
+        return folha

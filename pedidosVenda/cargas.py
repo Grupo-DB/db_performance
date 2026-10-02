@@ -188,3 +188,36 @@ def painel(inicio: date, fim: date, filial=None, repcods=None, com_aguardando=Tr
         'inicio': inicio.isoformat(),
         'fim': fim.isoformat(),
     }
+
+
+def situacao_no_sga(pedidos: list[int], desde: date) -> dict[int, dict]:
+    """
+    Onde cada pedido de uma folha de carga já está no SGA: carregamento pendente
+    ou nota emitida desde `desde` (a criação da folha), com a carga composta se
+    houver. Pedido ausente do retorno = o interno ainda não digitou.
+    """
+    peds = erp._inteiros(pedidos)
+    if not peds:
+        return {}
+    linhas = erp._limpar(erp._rows(f"""
+        SELECT N.NFPED pedido, N.NFSIT sit, N.NFNUM num, F.CARFCOD carga_cod, F.CARFDESC carga_desc
+        FROM NOTAFISCAL N
+        LEFT JOIN ITEMCARGAFRAC IC ON IC.ICARFNFCOD = N.NFCOD
+        LEFT JOIN CARGAFRAC F ON F.CARFCOD = IC.ICARFCARF
+        WHERE N.NFEMP = :emp AND N.NFPED IN ({','.join(str(p) for p in peds)})
+          AND ((N.NFSIT = 0 AND N.NFNUM < 0) OR (N.NFSIT = 1 AND N.NFDATA >= :desde))
+          AND N.NFDATACHEGADA >= :desde
+    """, emp=erp.EMPRESA, desde=desde))
+    achados: dict[int, dict] = {}
+    for l in linhas:
+        # O pedido pode ter mais de uma nota (parcial): fica a que tem carga composta.
+        atual = achados.get(l['pedido'])
+        if atual and atual['carga_cod'] and not l['carga_cod']:
+            continue
+        achados[l['pedido']] = {
+            'etapa': 'FATURADO' if l['sit'] == 1 else 'PROGRAMADO',
+            'numero': abs(l['num'] or 0),
+            'carga_cod': l['carga_cod'],
+            'carga_desc': l['carga_desc'],
+        }
+    return achados

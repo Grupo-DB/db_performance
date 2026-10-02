@@ -350,3 +350,81 @@ class PainelCargasTest(TestCase):
         r = self._get(self.tv)
         self.assertEqual([p['cliente'] for p in r.json()['pre_pedidos']], ['OBRA'])
         self.assertEqual(self._get(self.tv, '/pedidosVenda/cargas/?inicio=2026-01-01&fim=2026-06-01').status_code, 400)
+
+
+class FolhaCargaTest(TestCase):
+    def setUp(self):
+        self.interno = User.objects.create_user('interno')
+        VendedorPerfil.objects.create(user=self.interno, tipo='INTERNO')
+        self.externo = User.objects.create_user('externo')
+        VendedorPerfil.objects.create(user=self.externo, tipo='EXTERNO', repcods=[41])
+        self.expedicao = User.objects.create_user('expedicao')
+        self.expedicao.groups.add(Group.objects.create(name='cargasPainel'))
+        self.api = APIClient()
+        from django.core.cache import cache
+        cache.clear()  # a conferência no SGA fica 20 s em cache, com chave igual entre os testes
+
+    def _folha(self, **extra):
+        self.api.force_authenticate(self.interno)
+        corpo = {'descricao': 'RIO GRANDE ENTREGAR 10/10', 'filial': 0, 'placa': 'iwd 7c31', 'lotacao': '32', 'itens': [
+            {'pedido': 501, 'cliente': 'A', 'cidade': 'Rio Grande-RS', 'peso': '12.5'},
+            {'pedido': 502, 'cliente': 'B', 'cidade': 'Pelotas-RS', 'peso': '8'},
+        ], **extra}
+        return self.api.post('/pedidosVenda/folhas-carga/', corpo, format='json')
+
+    @mock.patch('pedidosVenda.cargas.situacao_no_sga', return_value={})
+    def test_interno_monta_na_ordem_de_entrega(self, _):
+        r = self._folha()
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['placa'], 'IWD7C31')
+        self.assertEqual([i['ordem'] for i in r.data['itens']], [1, 2])
+        self.assertEqual(r.data['peso'], 20.5)
+        # Reordena: o que vai primeiro é o que entra primeiro na lista.
+        folha = r.data['id']
+        r = self.api.patch(f'/pedidosVenda/folhas-carga/{folha}/', {'itens': [
+            {'pedido': 502, 'peso': '8'}, {'pedido': 501, 'peso': '12.5'}]}, format='json')
+        self.assertEqual([(i['pedido'], i['ordem']) for i in r.data['itens']], [(502, 1), (501, 2)])
+
+    @mock.patch('pedidosVenda.cargas.situacao_no_sga', return_value={})
+    def test_pedido_nao_vai_em_duas_folhas_abertas(self, _):
+        self._folha()
+        r = self._folha(descricao='OUTRA')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('já está na folha', str(r.data))
+
+    def test_fecha_sozinha_quando_todos_os_pedidos_estao_no_sga(self):
+        self._folha()
+        sga = {501: {'etapa': 'PROGRAMADO', 'numero': 1, 'carga_cod': 77, 'carga_desc': 'X'}}
+        with mock.patch('pedidosVenda.cargas.situacao_no_sga', return_value=sga):
+            r = self.api.get('/pedidosVenda/folhas-carga/')
+        self.assertEqual(r.data[0]['status'], 'MONTANDO')
+        self.assertEqual(r.data[0]['itens'][0]['sga']['carga_cod'], 77)
+        self.assertIsNone(r.data[0]['itens'][1]['sga'])
+        sga[502] = {'etapa': 'PROGRAMADO', 'numero': 2, 'carga_cod': 77, 'carga_desc': 'X'}
+        from django.core.cache import cache
+        cache.clear()
+        with mock.patch('pedidosVenda.cargas.situacao_no_sga', return_value=sga):
+            r = self.api.get('/pedidosVenda/folhas-carga/')
+        self.assertEqual(r.data[0]['status'], 'NO_SGA')
+        self.assertEqual(r.data[0]['carga_sga'], 77)
+        # Fechada sai da lista das abertas e não aceita mais edição.
+        r = self.api.get('/pedidosVenda/folhas-carga/')
+        self.assertEqual(r.data, [])
+
+    @mock.patch('pedidosVenda.cargas.situacao_no_sga', return_value={})
+    def test_expedicao_olha_e_externo_nem_isso(self, _):
+        self._folha()
+        self.api.force_authenticate(self.expedicao)
+        self.assertEqual(self.api.get('/pedidosVenda/folhas-carga/').status_code, 200)
+        self.assertEqual(self.api.post('/pedidosVenda/folhas-carga/', {'descricao': 'x'}, format='json').status_code, 403)
+        self.api.force_authenticate(self.externo)
+        self.assertEqual(self.api.get('/pedidosVenda/folhas-carga/').status_code, 403)
+
+    @mock.patch('pedidosVenda.cargas.situacao_no_sga', return_value={})
+    def test_cancelar_e_reabrir(self, _):
+        folha = self._folha().data['id']
+        r = self.api.post(f'/pedidosVenda/folhas-carga/{folha}/cancelar/')
+        self.assertEqual(r.data['status'], 'CANCELADA')
+        self.assertEqual(self._folha(descricao='NOVA').status_code, 201)  # pedidos liberados
+        r = self.api.post(f'/pedidosVenda/folhas-carga/{folha}/reabrir/')
+        self.assertEqual(r.status_code, 400)
