@@ -362,7 +362,7 @@ class PedidoVendaViewSet(viewsets.ModelViewSet):
         campos = [
             'filial', 'repcod', 'cliente_cod', 'cliente_nome', 'cliente_fantasia', 'cliente_documento',
             'cliente_cidade', 'cliente_novo', 'endereco_entrega_cod', 'endereco_entrega',
-            'prazo_pagamento', 'forma_cobranca', 'frete', 'observacoes',
+            'prazo_pagamento', 'forma_cobranca', 'frete', 'paletizado', 'frete_valor_ton', 'observacoes',
         ]
         novo = {c: dados[c] for c in campos}
         novo['itens'] = [

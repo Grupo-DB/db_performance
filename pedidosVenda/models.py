@@ -118,6 +118,11 @@ class PedidoVenda(models.Model):
     forma_cobranca = models.CharField(max_length=15, choices=COBRANCA_CHOICES, blank=True, default='BOLETO')
     frete = models.CharField(max_length=3, choices=FRETE_CHOICES, default='CIF')
     data_entrega = models.DateField(null=True, blank=True)
+    # Campos da ficha em papel F-090 (Anotação de Pedido) que o ERP não guarda no pedido.
+    paletizado = models.BooleanField(default=False, help_text='Forma da carga: normal (False) ou paletizada')
+    frete_valor_ton = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True, help_text='Valor do frete por tonelada combinado',
+    )
     observacoes = models.TextField(blank=True, default='')
 
     total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0'))

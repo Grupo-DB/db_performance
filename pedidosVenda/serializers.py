@@ -164,7 +164,7 @@ class PedidoVendaSerializer(PedidoVendaListSerializer):
     class Meta(PedidoVendaListSerializer.Meta):
         fields = PedidoVendaListSerializer.Meta.fields + [
             'repcod', 'cliente_documento', 'cliente_novo', 'endereco_entrega_cod', 'endereco_entrega',
-            'prazo_pagamento', 'forma_cobranca', 'frete', 'data_entrega', 'observacoes',
+            'prazo_pagamento', 'forma_cobranca', 'frete', 'data_entrega', 'paletizado', 'frete_valor_ton', 'observacoes',
             'justificativa_desconto', 'aprovado_por', 'aprovado_por_nome', 'aprovado_em',
             'itens', 'eventos', 'acoes', 'teto_desconto',
         ]
