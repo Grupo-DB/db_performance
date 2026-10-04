@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from django.http import JsonResponse
 import pandas as pd
 from avaliacoes.datacalc.serializers import PeriodoSerializer
+from avaliacoes.management.vinculos import avaliados_pendentes
 from avaliacoes.management.models import Colaborador,Avaliacao,Ambiente,Avaliado,Avaliador,HistoricoAlteracao
 from avaliacoes.datacalc.models import Periodo
 from datetime import datetime
@@ -762,10 +763,8 @@ def filtrar_avaliacoes_logado(request):
 
 
         # Calcular total de avaliados sem avaliação no período para o avaliador logado
-        avaliados = avaliador_logado.avaliados.all()
-        avaliados_com_avaliacao = Avaliacao.objects.filter(periodo=periodo, avaliado__in=avaliados).values_list('avaliado_id', flat=True)
-        avaliados_sem_avaliacao_logado = avaliados.exclude(id__in=avaliados_com_avaliacao)
-        total_avaliados_sem_avaliacao_logado = avaliados_sem_avaliacao_logado.count()
+        # Individual + setor (Ambiente.avaliadores), ver management/vinculos.py
+        total_avaliados_sem_avaliacao_logado = avaliados_pendentes(avaliador_logado, periodo).count()
 
         response_data = {
             'media_respostas_logado': media_respostas_logado,

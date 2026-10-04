@@ -59,6 +59,8 @@ class AvaliadoSerializer(serializers.ModelSerializer):
     tipoAvaliacao_id = serializers.IntegerField(write_only=True)
     setor = serializers.CharField(source='setor.nome', read_only=True)
     ambiente = serializers.CharField(source='ambiente.nome', read_only=True)
+    # O nome do setor se repete entre filiais ("Almoxarifado"); o id é o que casa com Ambiente.
+    ambiente_id = serializers.IntegerField(read_only=True)
     cargo = serializers.CharField(source='cargo.nome', read_only=True)
     empresa = serializers.CharField(source='empresa.nome',read_only=True)
     filial = serializers.CharField(source='filial.nome',read_only=True)
@@ -119,9 +121,16 @@ class SetorSerializer(serializers.ModelSerializer):
         model = Setor
         fields = '__all__'           
 
+class AvaliadorResumoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Avaliador
+        fields = ['id', 'nome']
+
 class AmbienteSerializer(serializers.ModelSerializer):
     filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all(), write_only=True)
     filial_detalhes = FilialSerializer(source='filial', read_only=True)
+    # `avaliadores` (ids, gravável) vem do __all__; aqui o nome para a tela.
+    avaliadores_detalhes = AvaliadorResumoSerializer(source='avaliadores', many=True, read_only=True)
     class Meta:
         model = Ambiente
         fields = '__all__'
@@ -188,7 +197,30 @@ class ColaboradorSerializer(serializers.ModelSerializer):
     setor_detalhes = SetorSerializer(source='setor', read_only=True)
     ambiente_detalhes = AmbienteSerializer(source='ambiente', read_only=True)
     cargo_detalhes = CargoSerializer(source='cargo', read_only=True)
+    # Para a edição abrir preenchida: login e papéis atuais. `username` aqui é só
+    # leitura; a gravação continua em ColaboradorViewSet.perform_update.
+    username = serializers.SerializerMethodField()
+    is_avaliador = serializers.SerializerMethodField()
+    is_avaliado = serializers.SerializerMethodField()
+    is_gestor = serializers.SerializerMethodField()
 
+    def get_username(self, obj):
+        return obj.user.username if obj.user_id else None
+
+    # A listagem chega anotada (ColaboradorViewSet.get_queryset); o objeto recém
+    # salvo do PATCH não, e aí consulta.
+    def get_is_avaliador(self, obj):
+        v = getattr(obj, '_is_avaliador', None)
+        return v if v is not None else Avaliador.objects.filter(pk=obj.pk).exists()
+
+    def get_is_avaliado(self, obj):
+        v = getattr(obj, '_is_avaliado', None)
+        return v if v is not None else Avaliado.objects.filter(pk=obj.pk).exists()
+
+    def get_is_gestor(self, obj):
+        from baseOrcamentaria.orcamento.models import Gestor
+        v = getattr(obj, '_is_gestor', None)
+        return v if v is not None else Gestor.objects.filter(pk=obj.pk).exists()
 
     class Meta:
         model = Colaborador

@@ -29,7 +29,8 @@ from.serializers import FormularioCreateSerializer,FormularioUpdateSerializer,Fo
 from .utils import send_custom_email
 from django.core.mail import send_mail
 from datetime import datetime
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
+from rest_framework.exceptions import ValidationError
 from notifications.signals import notify
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
@@ -279,17 +280,37 @@ class AvaliadoViewSet(viewsets.ModelViewSet):
      
 
 
+def _verdadeiro(valor):
+    """FormData manda 'false' como texto, e 'false' é truthy em Python."""
+    if isinstance(valor, str):
+        return valor.strip().lower() in ('true', '1', 'on', 'sim')
+    return bool(valor)
+
+
 class ColaboradorViewSet(viewsets.ModelViewSet):
     queryset = Colaborador.objects.all()
     serializer_class = ColaboradorSerializer  
     permission_classes = [DjangoModelPermissions]
 
+    def get_queryset(self):
+        # Os *_detalhes aninhados e os papéis davam ~10 consultas por colaborador.
+        return (
+            Colaborador.objects
+            .select_related('empresa', 'filial', 'area', 'setor__filial', 'ambiente__filial', 'cargo', 'user')
+            .prefetch_related('ambiente__avaliadores')
+            .annotate(
+                _is_avaliador=Exists(Avaliador.objects.filter(pk=OuterRef('pk'))),
+                _is_avaliado=Exists(Avaliado.objects.filter(pk=OuterRef('pk'))),
+                _is_gestor=Exists(Gestor.objects.filter(pk=OuterRef('pk'))),
+            )
+        )
+
     def perform_create(self, serializer):
         username = self.request.data.get('username', None)
         password = self.request.data.get('password', None)
-        tornar_avaliado = self.request.data.get('tornar_avaliado', 'false').lower() == 'true'
-        tornar_avaliador = self.request.data.get('tornar_avaliador', 'false').lower() == 'true'
-        tornar_gestor = self.request.data.get('tornar_gestor', 'false').lower() == 'true'
+        tornar_avaliado = _verdadeiro(self.request.data.get('tornar_avaliado', False))
+        tornar_avaliador = _verdadeiro(self.request.data.get('tornar_avaliador', False))
+        tornar_gestor = _verdadeiro(self.request.data.get('tornar_gestor', False))
         
         colaborador = serializer.save()
         
@@ -344,23 +365,33 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         username = self.request.data.get('username', None)
         password = self.request.data.get('password', None)
-        tornar_avaliado = self.request.data.get('tornar_avaliado', False)
-        tornar_avaliador = self.request.data.get('tornar_avaliador', False)
-        tornar_gestor = self.request.data.get('tornar_gestor', False)
+        tornar_avaliado = _verdadeiro(self.request.data.get('tornar_avaliado', False))
+        tornar_avaliador = _verdadeiro(self.request.data.get('tornar_avaliador', False))
+        tornar_gestor = _verdadeiro(self.request.data.get('tornar_gestor', False))
 
         colaborador = serializer.save()
 
-        if username and password:
-            if colaborador.user:
-                user = colaborador.user
+        # Usuário existente: troca o login e/ou a senha, cada um quando vier.
+        # Sem usuário: só cria com os dois (não existe conta sem senha).
+        if colaborador.user:
+            user = colaborador.user
+            alterou = False
+            if username and username != user.username:
+                if User.objects.filter(username=username).exclude(pk=user.pk).exists():
+                    raise ValidationError({'username': 'Este nome de usuário já está em uso.'})
                 user.username = username
-                if password:
-                    user.set_password(password)
+                alterou = True
+            if password:
+                user.set_password(password)
+                alterou = True
+            if alterou:
                 user.save()
-            else:
-                user = User.objects.create_user(username=username, password=password)
-                colaborador.user = user
-                colaborador.save()
+        elif username and password:
+            if User.objects.filter(username=username).exists():
+                raise ValidationError({'username': 'Este nome de usuário já está em uso.'})
+            user = User.objects.create_user(username=username, password=password)
+            colaborador.user = user
+            colaborador.save()
         
         if tornar_avaliado and not Avaliado.objects.filter(colaborador_ptr=colaborador).exists():
             Avaliado.objects.create(
