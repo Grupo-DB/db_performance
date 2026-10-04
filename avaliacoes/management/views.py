@@ -2,6 +2,7 @@ from amqp import NotFound
 from django.shortcuts import render,HttpResponse
 from baseOrcamentaria.orcamento.models import Gestor
 from baseOrcamentaria.orcamento.serializers import GestorSerializer
+from .vinculos import avaliados_do_avaliador, avaliados_pendentes, avaliadores_com_pendencias
 def management(request):
     return HttpResponse(request,'ok')
 #import logging
@@ -271,7 +272,7 @@ class AvaliadoViewSet(viewsets.ModelViewSet):
             avaliador = Avaliador.objects.get(id=avaliador_id)  # Busque o objeto Avaliador
         except Avaliador.DoesNotExist:
             raise NotFound('Avaliador não encontrado')  # type: ignore # Levante um erro se o Avaliador não existir
-        avaliados = avaliador.avaliados.all()
+        avaliados = avaliados_do_avaliador(avaliador)
         serializer = AvaliadoSerializer(avaliados, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -437,7 +438,7 @@ class AvaliadorViewSet(viewsets.ModelViewSet):
         try:
             user = request.user
             avaliador = Avaliador.objects.get(user=user)
-            avaliados = avaliador.avaliados.all()
+            avaliados = avaliados_do_avaliador(avaliador)
             serializer = AvaliadoSerializer(avaliados, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Avaliador.DoesNotExist:
@@ -563,7 +564,7 @@ class SetorViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
     
 class AmbienteViewSet(viewsets.ModelViewSet):
-    queryset = Ambiente.objects.all()
+    queryset = Ambiente.objects.prefetch_related('avaliadores')
     serializer_class = AmbienteSerializer
     permission_classes = [DjangoModelPermissions]        
     def partial_update(self, request, *args, **kwargs):
@@ -682,10 +683,7 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
                 return Response({'status': 'error', 'message': 'Período não fornecido'}, status=status.HTTP_400_BAD_REQUEST)
 
             avaliador = Avaliador.objects.get(user=user)
-            avaliados = avaliador.avaliados.all()
-            # Filtrar avaliados que não têm avaliação pelo avaliador atual no período especificado
-            avaliados_com_avaliacao_pelo_avaliador = Avaliacao.objects.filter(periodo=periodo, avaliador=avaliador).values_list('avaliado_id', flat=True)
-            avaliados_sem_avaliacao = avaliados.exclude(id__in=avaliados_com_avaliacao_pelo_avaliador)
+            avaliados_sem_avaliacao = avaliados_pendentes(avaliador, periodo)
 
             serializer = AvaliadoSerializer(avaliados_sem_avaliacao, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -703,7 +701,7 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
             avaliador = Avaliador.objects.get(id=avaliador_id)  
         except Avaliador.DoesNotExist:
             raise NotFound('Avaliador não encontrado') 
-        avaliados = avaliador.avaliados.all()
+        avaliados = avaliados_do_avaliador(avaliador)
         serializer = AvaliadoSerializer(avaliados, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -867,18 +865,8 @@ def send_email_view2(request):
     now = timezone.now()
     trimestre_atual = obterTrimestre(now)
 
-    # Encontrar todos os avaliados sem avaliação no trimestre atual
-    avaliados_sem_avaliacao = Avaliado.objects.filter(
-        ~Q(avaliacoes_avaliado__periodo=trimestre_atual)
-    ).distinct()
-
-    # Encontrar os avaliadores desses avaliados
-    avaliadores_sem_avaliacao = Avaliador.objects.filter(
-        avaliados__in=avaliados_sem_avaliacao
-    ).distinct()
-
-    # Construir a lista de destinatários
-    recipient_list = [avaliador.email for avaliador in avaliadores_sem_avaliacao]
+    # Avaliadores com algo pendente no trimestre (individual + setor, ver vinculos.py)
+    recipient_list = [avaliador.email for avaliador, _ in avaliadores_com_pendencias(trimestre_atual) if avaliador.email]
 
     if not recipient_list:
         return Response({"error": "No evaluators found without evaluations"}, status=status.HTTP_404_NOT_FOUND)

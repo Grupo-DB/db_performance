@@ -60,6 +60,13 @@ class Setor(models.Model):
         verbose_name = "Setor"
         verbose_name_plural = "Setores"
 
+MODO_AVALIACAO_QUALQUER = 'qualquer'
+MODO_AVALIACAO_TODOS = 'todos'
+MODOS_AVALIACAO = [
+    (MODO_AVALIACAO_QUALQUER, 'Basta um avaliador do setor'),
+    (MODO_AVALIACAO_TODOS, 'Todos os avaliadores do setor'),
+]
+
 class Ambiente(models.Model):
     id = models.AutoField(primary_key=True,)
     empresa = models.ForeignKey(Empresa,on_delete=models.CASCADE,related_name='ambientes')
@@ -67,6 +74,10 @@ class Ambiente(models.Model):
     area = models.ForeignKey(Area,on_delete=models.CASCADE,related_name='ambientes')
     setor = models.ForeignKey(Setor,on_delete=models.CASCADE,related_name='ambientes')
     nome = models.CharField(max_length=20, null=False, blank=False)
+    # Avaliadores do setor inteiro (na tela, "Setores" é este modelo). Somam-se ao
+    # vínculo individual Avaliador.avaliados — a regra está em vinculos.py.
+    avaliadores = models.ManyToManyField('Avaliador', related_name='setores_avaliados', blank=True)
+    modo_avaliacao = models.CharField(max_length=10, choices=MODOS_AVALIACAO, default=MODO_AVALIACAO_QUALQUER)
     class Meta:
         verbose_name = "Ambiente"
         verbose_name_plural = "Ambientes"

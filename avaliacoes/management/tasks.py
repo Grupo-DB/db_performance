@@ -16,6 +16,7 @@ from notifications.signals import notify
 from django.db.models import Q
 from . pdf_utils import gerar_pdf_avaliados
 from .gerar_pdf_rh import gerar_pdf_rh
+from .vinculos import avaliados_pendentes, avaliadores_com_pendencias
 
 caminho_logo = "media/logotelalogin.png"
 
@@ -46,23 +47,18 @@ def enviar_notificacoes(usuario_id):
         print("Avaliador não encontrado.")
         return
 
-    avaliados_sem_avaliacao = avaliador.avaliados.filter(
-        ~Q(avaliacoes_avaliado__periodo=trimestre_atual)
-    ).distinct()
-
     notificacoes_enviadas = 0
-    for avaliado in avaliados_sem_avaliacao:
-        if not Avaliacao.objects.filter(avaliador=avaliador, avaliado=avaliado, periodo=trimestre_atual).exists():
-            try:
-                notify.send(
-                    sender=avaliador,
-                    recipient=usuario,
-                    verb='Nova notificação!!',
-                    description=f'Nova avaliação pendente no período atual para {avaliado.nome}'
-                )
-                notificacoes_enviadas += 1
-            except IntegrityError as e:
-                print(f"Erro ao enviar notificação: {str(e)}")
+    for avaliado in avaliados_pendentes(avaliador, trimestre_atual):
+        try:
+            notify.send(
+                sender=avaliador,
+                recipient=usuario,
+                verb='Nova notificação!!',
+                description=f'Nova avaliação pendente no período atual para {avaliado.nome}'
+            )
+            notificacoes_enviadas += 1
+        except IntegrityError as e:
+            print(f"Erro ao enviar notificação: {str(e)}")
 
     print(f"Notificações enviadas para o usuário {usuario.username}: {notificacoes_enviadas}")
 
@@ -80,30 +76,17 @@ def notificar_rh_gestor():
         print("Nenhum período de avaliação ativo encontrado para a data atual.")
         return
 
-    # Buscar avaliados sem avaliação neste trimestre
-    avaliados_sem_avaliacao = Avaliado.objects.exclude(
-        avaliacoes_avaliado__periodo=trimestre_atual
-    ).distinct()
-
-    # Buscar os avaliadores desses avaliados
-    avaliadores_com_pendencias = Avaliador.objects.filter(
-        avaliados__in=avaliados_sem_avaliacao
-    ).distinct()
-
-    if not avaliadores_com_pendencias.exists():
+    # Avaliadores com pendência no trimestre (individual + setor, ver vinculos.py)
+    pendencias = avaliadores_com_pendencias(trimestre_atual)
+    if not pendencias:
         print("Nenhum avaliador com pendências.")
         return
 
     # Construir relatório
-    dados_relatorio = []
-    for avaliador in avaliadores_com_pendencias:
-        avaliados = avaliados_sem_avaliacao.filter(avaliadores=avaliador)
-        nomes_avaliados = list(avaliados.values_list('nome', flat=True))
-        if nomes_avaliados:
-            dados_relatorio.append({
-                'avaliador': avaliador.nome,
-                'avaliados': nomes_avaliados
-            })
+    dados_relatorio = [
+        {'avaliador': avaliador.nome, 'avaliados': list(pendentes.values_list('nome', flat=True))}
+        for avaliador, pendentes in pendencias
+    ]
 
     # Buscar e-mails do grupo RHGestor
     try:
@@ -207,35 +190,23 @@ def enviar_notificacoes_para_todos_avaliadores():
     now = timezone.now()
     trimestre_atual = obterTrimestre(now)
 
-    # Encontrar todos os avaliados que não foram avaliados no trimestre atual
-    avaliados_sem_avaliacao = Avaliado.objects.filter(
-        ~Q(avaliacoes_avaliado__periodo=trimestre_atual)
-    ).distinct()
-
-    # Encontrar os avaliadores desses avaliados
-    avaliadores_sem_avaliacao = Avaliador.objects.filter(
-        avaliados__in=avaliados_sem_avaliacao
-    ).distinct()
-
     notificacoes_enviadas = 0
-    # Enviar notificações para os avaliadores sem avaliações no trimestre atual
-    for avaliador in avaliadores_sem_avaliacao:
-        for avaliado in avaliador.avaliados.filter(id__in=avaliados_sem_avaliacao).all():
-            # Verificar se o avaliado ainda não foi avaliado no período atual
-            if not Avaliacao.objects.filter(avaliador=avaliador, avaliado=avaliado, periodo=trimestre_atual).exists():
-                # Verificar se o avaliador tem um usuário associado antes de enviar a notificação
-                if avaliador.user:
-                    try:
-                        notify.send(
-                            sender=avaliador,
-                            recipient=avaliador.user,
-                            verb='Nova notificação!!',
-                            description=f'Nova avaliação pendente no período atual para {avaliado.nome}'
-                        )
-                        notificacoes_enviadas += 1
-                    except IntegrityError as e:
-                        # Log do erro e continue
-                        print(f"Erro ao enviar notificação: {str(e)}")    
+    # Enviar notificações para os avaliadores com pendência no trimestre atual
+    for avaliador, pendentes in avaliadores_com_pendencias(trimestre_atual):
+        for avaliado in pendentes:
+            # Verificar se o avaliador tem um usuário associado antes de enviar a notificação
+            if avaliador.user:
+                try:
+                    notify.send(
+                        sender=avaliador,
+                        recipient=avaliador.user,
+                        verb='Nova notificação!!',
+                        description=f'Nova avaliação pendente no período atual para {avaliado.nome}'
+                    )
+                    notificacoes_enviadas += 1
+                except IntegrityError as e:
+                    # Log do erro e continue
+                    print(f"Erro ao enviar notificação: {str(e)}")    
 
 @shared_task
 def enviar_emails_completos_para_todos_avaliadores():
@@ -250,26 +221,14 @@ def enviar_emails_completos_para_todos_avaliadores():
         print("Nenhum período de avaliação ativo encontrado para a data atual.")
         return
 
-    # Encontrar todos os avaliados sem avaliação no trimestre atual
-    avaliados_sem_avaliacao = Avaliado.objects.exclude(
-        avaliacoes_avaliado__periodo=trimestre_atual
-    ).distinct()
-
-    # Encontrar os avaliadores desses avaliados
-    avaliadores_com_pendencias = Avaliador.objects.filter(
-        avaliados__in=avaliados_sem_avaliacao
-    ).distinct()
-
-    if not avaliadores_com_pendencias.exists():
+    pendencias = avaliadores_com_pendencias(trimestre_atual)
+    if not pendencias:
         print("Nenhum avaliador com pendências.")
         return
 
-    for avaliador in avaliadores_com_pendencias:
+    for avaliador, pendentes in pendencias:
         # Lista de avaliados desse avaliador com pendências
-        nomes_avaliados = list(
-            avaliados_sem_avaliacao.filter(avaliadores=avaliador)
-            .values_list('nome', flat=True)
-        )
+        nomes_avaliados = list(pendentes.values_list('nome', flat=True))
 
         if not nomes_avaliados:
             continue
@@ -331,11 +290,7 @@ def enviar_email_para_avaliador(avaliador_id):
         return
 
     # Encontrar avaliados sem avaliação no período atual
-    avaliados_sem_avaliacao = Avaliado.objects.filter(
-        avaliadores=avaliador
-    ).exclude(
-        avaliacoes_avaliado__periodo=periodo_atual
-    ).distinct()
+    avaliados_sem_avaliacao = avaliados_pendentes(avaliador, trimestre_atual)
 
     if not avaliados_sem_avaliacao.exists():
         print(f"Nenhum avaliado pendente para o avaliador {avaliador.nome}")
