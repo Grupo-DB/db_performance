@@ -340,7 +340,7 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='byAmbiente')
     def byAmbiente(self, request):
         ambiente_id = request.query_params.get('ambiente_id')
-        colaboradores = Colaborador.objects.filter(ambiente_id=ambiente_id)
+        colaboradores = self.get_queryset().filter(ambiente_id=ambiente_id).order_by('nome')
         serializer = self.get_serializer(colaboradores, many=True)
         return Response(serializer.data)
 
