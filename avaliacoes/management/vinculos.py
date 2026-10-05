@@ -78,6 +78,19 @@ def avaliadores_com_pendencias(periodo):
     return resultado
 
 
+def quem_avaliou(avaliados, periodo, exceto=None):
+    """{avaliado_id: [nomes dos avaliadores que já avaliaram no período]}, na ordem em que avaliaram."""
+    qs = Avaliacao.objects.filter(periodo=periodo, avaliado__in=avaliados)
+    if exceto is not None:
+        qs = qs.exclude(avaliador=exceto)
+    quem = {}
+    for avaliado_id, nome in qs.order_by('create_at').values_list('avaliado_id', 'avaliador__nome'):
+        nomes = quem.setdefault(avaliado_id, [])
+        if nome not in nomes:
+            nomes.append(nome)
+    return quem
+
+
 def avaliados_por_colega(avaliador, periodo):
     """
     Avaliados do avaliador que já saíram da pendência dele porque um colega do
@@ -92,10 +105,5 @@ def avaliados_por_colega(avaliador, periodo):
     avaliados = list(
         avaliados_do_avaliador(avaliador).exclude(pk__in=pendentes).exclude(pk__in=ja_avaliou).order_by('nome')
     )
-    quem = {}
-    for avaliado_id, nome in (
-        Avaliacao.objects.filter(periodo=periodo, avaliado__in=avaliados)
-        .order_by('create_at').values_list('avaliado_id', 'avaliador__nome')
-    ):
-        quem.setdefault(avaliado_id, []).append(nome)
+    quem = quem_avaliou(avaliados, periodo)
     return [(a, quem.get(a.pk, [])) for a in avaliados]

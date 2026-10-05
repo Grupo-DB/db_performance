@@ -6,6 +6,7 @@ depois de cadastrar número novo ou renomear um existente:
 
     python manage.py whatsapp_escopos
     python manage.py whatsapp_escopos --usuario ana   # por que ESTA pessoa vê o que vê
+    python manage.py whatsapp_escopos --conversa 5199  # dono, avisos e autores de UMA conversa
 """
 from django.contrib.auth.models import Group, User
 from django.core.management.base import BaseCommand
@@ -21,11 +22,16 @@ class Command(BaseCommand):
         parser.add_argument(
             '--usuario', action='append', default=[],
             help='username, nome ou e-mail (parcial). Explica o que a pessoa enxerga e por quê. Pode repetir.')
+        parser.add_argument(
+            '--conversa', action='append', default=[],
+            help='id, nome do contato ou parte do telefone. Linha do tempo de mensagens e avisos. Pode repetir.')
 
     def handle(self, *args, **opcoes):
-        if opcoes['usuario']:
+        if opcoes['usuario'] or opcoes['conversa']:
             for termo in opcoes['usuario']:
                 self._explicar_usuario(termo)
+            for termo in opcoes['conversa']:
+                self._linha_do_tempo(termo)
             return
 
         self.stdout.write('NÚMEROS CADASTRADOS')
@@ -143,3 +149,35 @@ class Command(BaseCommand):
                     f'    #{c.pk} {c.contato_nome or c.contato_telefone} — com '
                     f'{c.responsavel.username} — número {getattr(c.numero, "nome", "(padrão)")} '
                     f'[escopo {services.escopo_da_conversa(c) or "nenhum"}]')
+
+    def _linha_do_tempo(self, termo, limite=40):
+        """Mensagens (com autor) e avisos (com destinatário) misturados por horário."""
+        from django.db.models import Q
+        from django.utils import timezone
+
+        from whatsapp.models import WhatsAppNotificacao
+
+        filtro = Q(contato_nome__icontains=termo) | Q(contato_telefone__icontains=termo)
+        if termo.isdigit():
+            filtro |= Q(pk=int(termo))
+        conversas = Conversa.objects.filter(filtro).select_related('responsavel', 'numero', 'fila')
+        if not conversas:
+            self.stdout.write(self.style.ERROR(f'Nenhuma conversa casa com "{termo}".'))
+            return
+        for c in conversas.order_by('-ultima_mensagem_em')[:5]:
+            self.stdout.write(self.style.MIGRATE_HEADING(
+                f'#{c.pk} {c.contato_nome or "-"} {c.contato_telefone} — {c.status} — '
+                f'número {getattr(c.numero, "nome", "(padrão)")} [escopo {services.escopo_da_conversa(c) or "nenhum"}] — '
+                f'fila {getattr(c.fila, "nome", "-")} — dono AGORA: {getattr(c.responsavel, "username", "ninguém")}'))
+            eventos = []
+            for m in c.mensagens.select_related('autor').order_by('-created_at')[:limite]:
+                if m.direcao == 'ENTRADA':
+                    quem = 'cliente'
+                else:
+                    quem = m.autor.username if m.autor_id else 'robô/celular'
+                eventos.append((m.created_at, f'msg {m.direcao:<7} {quem:<22} {(m.texto or m.tipo)[:60]!r}'))
+            for n in (WhatsAppNotificacao.objects.filter(conversa=c)
+                      .select_related('usuario_notificado').order_by('-created_at')[:limite]):
+                eventos.append((n.created_at, f'aviso -> {n.usuario_notificado.username:<20} {n.tipo}{"" if n.lido else " (não lido)"}'))
+            for quando, texto in sorted(eventos)[-limite:]:
+                self.stdout.write(f'  {timezone.localtime(quando):%d/%m %H:%M:%S}  {texto}')
