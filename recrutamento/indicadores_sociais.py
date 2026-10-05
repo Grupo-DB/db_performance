@@ -227,11 +227,19 @@ def desenvolvimento(ativos, ano):
     horas_genero = Counter()
     treinados = set()
     participacoes = 0
+    # O vínculo Aluno.colaborador quase nunca foi preenchido na importação da planilha:
+    # sem o nome como reserva, "% do quadro treinado" saía 0 com horas lançadas.
+    por_nome = {}
+    for c in ativos:
+        por_nome.setdefault(' '.join(_sem_acento(c.nome).split()), c.pk)
+
     for m in matriculas:
         horas = float(m.turma.horas_aula or 0)
         horas_total += horas
         participacoes += 1
         col = m.aluno.colaborador_id
+        if col not in ativos_ids:
+            col = por_nome.get(' '.join(_sem_acento(m.aluno.nome).split()))
         if col in ativos_ids:
             treinados.add(col)
             horas_genero[genero_de[col]] += horas
