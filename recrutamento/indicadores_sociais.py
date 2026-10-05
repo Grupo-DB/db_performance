@@ -84,7 +84,30 @@ def _texto(v):
 
 def _q_ativo():
     agora = timezone.now()
-    return Q(data_demissao__isnull=True) | Q(data_demissao__gt=agora)
+    # Filial desativada (Filial.ativa, migration 0012) sai do quadro inteiro, não só
+    # da tabela por unidade: quem ainda aparece lá é cadastro a revisar.
+    return (Q(data_demissao__isnull=True) | Q(data_demissao__gt=agora)) & ~Q(filial__ativa=False)
+
+
+def _faixa_idade(c, hoje):
+    idade = _anos(c.data_nascimento, hoje)
+    return next((r for r, a, b in FAIXAS_IDADE if idade is not None and a <= idade <= b), NAO_INFORMADO)
+
+
+def _faixa_casa(c, hoje):
+    if not c.data_admissao:
+        return NAO_INFORMADO
+    d = c.data_admissao.date() if hasattr(c.data_admissao, 'date') else c.data_admissao
+    anos = (hoje - d).days / 365.25
+    return next((r for r, a, b in FAIXAS_CASA if a <= anos < b), NAO_INFORMADO)
+
+
+def _raca(c):
+    return NAO_INFORMADO if _sem_acento(c.raca) in ('', 'nao informado') else c.raca.strip()
+
+
+def _lider(c):
+    return bool(c.cargo_id and _LIDERANCA.search(_sem_acento(c.cargo.nome)))
 
 
 def perfil(hoje):
@@ -96,14 +119,10 @@ def perfil(hoje):
     generos = Counter(_genero(c) for c in ativos)
     mulheres = generos.get('Feminino', 0)
 
-    lideres = [c for c in ativos if c.cargo_id and _LIDERANCA.search(_sem_acento(c.cargo.nome))]
+    lideres = [c for c in ativos if _lider(c)]
     mulheres_lideranca = sum(1 for c in lideres if _genero(c) == 'Feminino')
 
-    idades = Counter()
-    for c in ativos:
-        idade = _anos(c.data_nascimento, hoje)
-        rotulo = next((r for r, a, b in FAIXAS_IDADE if idade is not None and a <= idade <= b), NAO_INFORMADO)
-        idades[rotulo] += 1
+    idades = Counter(_faixa_idade(c, hoje) for c in ativos)
 
     casa, anos_casa = Counter(), []
     for c in ativos:
@@ -155,15 +174,69 @@ def perfil(hoje):
         'estagiarios': estagiarios,
         'tempo_casa_medio': round(sum(anos_casa) / len(anos_casa), 1) if anos_casa else None,
         'genero': _distribuicao(generos, total, ['Feminino', 'Masculino']),
-        'raca': _distribuicao(Counter(
-            NAO_INFORMADO if _sem_acento(c.raca) in ('', 'nao informado') else c.raca.strip() for c in ativos
-        ), total),
+        'raca': _distribuicao(Counter(_raca(c) for c in ativos), total),
         'idade': _distribuicao(idades, total, [r for r, _, _ in FAIXAS_IDADE]),
         'tempo_casa': _distribuicao(casa, total, [r for r, _, _ in FAIXAS_CASA]),
         'instrucao': _distribuicao(Counter(_texto(c.instrucao) for c in ativos), total, ORDEM_INSTRUCAO),
         'contrato': _distribuicao(contratos, total),
         'unidades': unidades,
         'cadastro_incompleto': {k: {'qtd': v, 'pct': _pct(v, total)} for k, v in campos.items()},
+    }
+
+
+# Grupo com menos gente que isso não mostra média: com 1 ou 2 pessoas a "média" é o
+# salário de alguém identificável.
+MINIMO_GRUPO_SALARIO = 3
+
+
+def _mediana(v):
+    v = sorted(v)
+    n = len(v)
+    if not n:
+        return None
+    return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2
+
+
+def salario_por_perfil(ativos, hoje):
+    """Salário médio e mediano por gênero, raça, idade, escolaridade, casa, contrato, unidade e liderança."""
+    dimensoes = {
+        'genero': ('Gênero', lambda c: _genero(c), ['Feminino', 'Masculino']),
+        'raca': ('Raça / cor', _raca, None),
+        'idade': ('Faixa etária', lambda c: _faixa_idade(c, hoje), [r for r, _, _ in FAIXAS_IDADE]),
+        'instrucao': ('Escolaridade', lambda c: _texto(c.instrucao), ORDEM_INSTRUCAO),
+        'tempo_casa': ('Tempo de casa', lambda c: _faixa_casa(c, hoje), [r for r, _, _ in FAIXAS_CASA]),
+        'contrato': ('Tipo de contrato', lambda c: _texto(c.tipocontrato), None),
+        'unidade': ('Unidade', lambda c: c.filial.nome if c.filial_id else NAO_INFORMADO, None),
+        'lideranca': ('Liderança', lambda c: 'Liderança' if _lider(c) else 'Demais cargos', ['Liderança', 'Demais cargos']),
+    }
+    com_salario = [c for c in ativos if c.salario]
+    resultado = []
+    for chave, (rotulo, classificar, ordem) in dimensoes.items():
+        grupos = defaultdict(list)
+        for c in com_salario:
+            grupos[classificar(c)].append(float(c.salario))
+        nomes = list(grupos)
+        if ordem:
+            nomes.sort(key=lambda k: (k == NAO_INFORMADO, ordem.index(k) if k in ordem else len(ordem), -len(grupos[k])))
+        else:
+            nomes.sort(key=lambda k: (k == NAO_INFORMADO, -(sum(grupos[k]) / len(grupos[k]))))
+        linhas = []
+        for nome in nomes:
+            v = grupos[nome]
+            pequeno = len(v) < MINIMO_GRUPO_SALARIO
+            linhas.append({
+                'rotulo': nome,
+                'qtd': len(v),
+                'media': None if pequeno else round(sum(v) / len(v), 2),
+                'mediana': None if pequeno else round(_mediana(v), 2),
+                'oculto': pequeno,
+            })
+        resultado.append({'chave': chave, 'rotulo': rotulo, 'grupos': linhas})
+    return {
+        'pessoas_consideradas': len(com_salario),
+        'media_geral': round(sum(float(c.salario) for c in com_salario) / len(com_salario), 2) if com_salario else None,
+        'minimo_grupo': MINIMO_GRUPO_SALARIO,
+        'dimensoes': resultado,
     }
 
 
@@ -321,6 +394,7 @@ def apurar(ano=None):
         'ano': ano,
         'perfil': dados_perfil,
         'equidade': equidade_salarial(ativos),
+        'salario_por_perfil': salario_por_perfil(ativos, hoje),
         'desenvolvimento': desenvolvimento(ativos, ano),
         'rotatividade': rotatividade(ano),
         'absenteismo': absenteismo(),

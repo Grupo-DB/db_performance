@@ -37,6 +37,9 @@ class Filial(models.Model):
     cidade = models.CharField(max_length=50,null=False, blank=False)
     estado = models.CharField(max_length=2,null=False, blank=False)
     codigo = models.CharField(max_length=2,null=False, blank=False)
+    # Filial encerrada: o cadastro fica (histórico, colaboradores antigos), mas sai
+    # dos indicadores. Migration 0012.
+    ativa = models.BooleanField(default=True)
     class Meta:
         verbose_name = "Filial"
         verbose_name_plural = "Filiais"
