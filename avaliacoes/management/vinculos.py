@@ -26,15 +26,24 @@ from django.utils import timezone
 from .models import MODO_AVALIACAO_QUALQUER, Avaliacao, Avaliado, Avaliador
 
 
-def _q_ativo():
-    """Pelo setor só entra quem não foi demitido; o individual foi escolhido a dedo e fica como está."""
-    return Q(data_demissao__isnull=True) | Q(data_demissao__gt=timezone.now())
+def q_ativo(prefixo=''):
+    """
+    Colaborador ativo: Situação marcada como ativa no cadastro E sem demissão passada.
+
+    Vale para os dois caminhos (individual e setor) desde 05/10/2026 — antes o
+    individual ficava como estava e o setor olhava só a data de demissão, então
+    colaborador inativo sem data de demissão continuava pendente e nos indicadores.
+    `prefixo` permite usar a mesma regra através de uma relação ('avaliado__').
+    """
+    return Q(**{f'{prefixo}situacao': True}) & (
+        Q(**{f'{prefixo}data_demissao__isnull': True}) | Q(**{f'{prefixo}data_demissao__gt': timezone.now()})
+    )
 
 
 def avaliados_do_avaliador(avaliador):
-    """Todos os avaliados do avaliador: os individuais mais os dos setores dele."""
-    pelo_setor = Q(ambiente__avaliadores=avaliador) & _q_ativo() & ~Q(pk=avaliador.pk)
-    return Avaliado.objects.filter(Q(avaliadores=avaliador) | pelo_setor).distinct()
+    """Todos os avaliados ATIVOS do avaliador: os individuais mais os dos setores dele."""
+    pelo_setor = Q(ambiente__avaliadores=avaliador) & ~Q(pk=avaliador.pk)
+    return Avaliado.objects.filter(Q(avaliadores=avaliador) | pelo_setor).filter(q_ativo()).distinct()
 
 
 def avaliados_pendentes(avaliador, periodo):
@@ -62,7 +71,7 @@ def avaliados_pendentes(avaliador, periodo):
 def avaliadores_com_pendencias(periodo):
     """[(avaliador, queryset de pendentes)] só de quem tem algo pendente no período."""
     resultado = []
-    for avaliador in Avaliador.objects.all():
+    for avaliador in Avaliador.objects.filter(q_ativo()):
         pendentes = avaliados_pendentes(avaliador, periodo)
         if pendentes.exists():
             resultado.append((avaliador, pendentes))

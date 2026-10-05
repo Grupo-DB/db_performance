@@ -20,7 +20,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from avaliacoes.management.models import Avaliacao, Avaliador
-from avaliacoes.management.vinculos import avaliados_do_avaliador, avaliados_pendentes
+from avaliacoes.management.vinculos import avaliados_do_avaliador, avaliados_pendentes, q_ativo
 
 GRUPOS_GERAL = ('Admin', 'Master', 'RHGestor')
 
@@ -115,7 +115,8 @@ def dashboard_avaliacoes(request):
 
     tipo = (request.query_params.get('tipo') or '').strip()
 
-    base = Avaliacao.objects.all()
+    # Só colaboradores ativos (Situação + sem demissão passada), dos dois lados.
+    base = Avaliacao.objects.filter(q_ativo('avaliado__'), q_ativo('avaliador__'))
     if avaliador:
         base = base.filter(avaliador=avaliador)
     if tipo:
@@ -132,7 +133,7 @@ def dashboard_avaliacoes(request):
 
     corrente = periodo_corrente()
     periodos = sorted(
-        {a['periodo'] for a in Avaliacao.objects.values('periodo') if a['periodo']} | {corrente},
+        {a['periodo'] for a in base.values('periodo') if a['periodo']} | {corrente},
         key=_chave_periodo, reverse=True,
     )
     periodo = request.query_params.get('periodo') or corrente
@@ -186,7 +187,7 @@ def dashboard_avaliacoes(request):
                 'feedback': bool(feita and feita['feedback']),
             })
         # Régua: a mesma pergunta respondida por todos os avaliadores no período.
-        todas_periodo = Avaliacao.objects.filter(periodo=periodo)
+        todas_periodo = Avaliacao.objects.filter(q_ativo('avaliado__'), q_ativo('avaliador__'), periodo=periodo)
         if tipo:
             todas_periodo = todas_periodo.filter(tipo__iexact=tipo)
         geral_por_pergunta = defaultdict(list)
@@ -216,7 +217,7 @@ def dashboard_avaliacoes(request):
 
     por_avaliador, pendentes_setor, avaliados_pendentes_ids = [], defaultdict(set), set()
     total_esperados = total_pendentes = 0
-    for av in Avaliador.objects.order_by('nome'):
+    for av in Avaliador.objects.filter(q_ativo()).order_by('nome'):
         esperados = avaliados_do_avaliador(av).count()
         feitas = feitas_por_avaliador.get(av.pk, [])
         if not esperados and not feitas:

@@ -47,7 +47,8 @@ import datetime as dt
 
 import pandas as pd
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import ParametroComissao
@@ -221,9 +222,18 @@ def _data_br(valor) -> str:
     return valor.strftime('%d/%m/%Y')
 
 
+# Comissão por representante: só Admin, Master e vendasAgro (05/10/2026). Antes não
+# exigia nem login — o DEFAULT_PERMISSION_CLASSES do projeto está vazio.
+GRUPOS_RELATORIO = ('Admin', 'Master', 'vendasAgro')
+
+
 @csrf_exempt
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def relatorio_vendas_parcelas(request):
+    user = request.user
+    if not (user.is_superuser or user.groups.filter(name__in=GRUPOS_RELATORIO).exists()):
+        return Response({'detail': 'Acesso restrito a Admin, Master e vendasAgro.'}, status=403)
     data_inicio = request.data.get('dataInicio')
     data_fim = request.data.get('dataFim')
     if not data_inicio or not data_fim:

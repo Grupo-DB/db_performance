@@ -2,8 +2,8 @@
 
 Junta o que já existe em quatro lugares, sem tabela nova:
 
-- perfil e diversidade: ``management.Colaborador`` ativo (sem demissão ou com
-  demissão futura — a mesma regra de ``avaliacoes/management/vinculos.py``);
+- perfil e diversidade: ``management.Colaborador`` ativo (Situação ativa e sem
+  demissão passada — a mesma regra de ``avaliacoes/management/vinculos.py``);
 - rotatividade: ERP ``CONTRATOPESSOAL`` via ``turnover.py`` (pode estar fora do ar,
   então vem em bloco próprio, com ``disponivel``);
 - absenteísmo: espelho de ponto do iPonto importado (``folha_ponto.py``);
@@ -86,7 +86,8 @@ def _q_ativo():
     agora = timezone.now()
     # Filial desativada (Filial.ativa, migration 0012) sai do quadro inteiro, não só
     # da tabela por unidade: quem ainda aparece lá é cadastro a revisar.
-    return (Q(data_demissao__isnull=True) | Q(data_demissao__gt=agora)) & ~Q(filial__ativa=False)
+    # Situação ativa no cadastro (05/10/2026) + sem demissão passada + filial ativa.
+    return Q(situacao=True) & (Q(data_demissao__isnull=True) | Q(data_demissao__gt=agora)) & ~Q(filial__ativa=False)
 
 
 def _faixa_idade(c, hoje):

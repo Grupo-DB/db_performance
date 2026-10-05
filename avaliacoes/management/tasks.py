@@ -32,6 +32,75 @@ def _anexar_logo(email):
     logo.add_header('Content-Disposition', 'inline', filename='logoNovoDb.png')
     email.attach(logo)
 
+# Links dos botões: o login do ManagerDB devolve a pessoa a esta URL depois de entrar.
+SITE = 'https://managerdb.com.br'
+LINK_AVALIAR = f'{SITE}/avaliacoes/novaliacao'
+LINK_PAINEL = f'{SITE}/avaliacoes/avaliacoes'
+
+
+def _contexto_prazo(periodo_atual, trimestre):
+    """Datas do período em dd/mm/aaaa e o selo do prazo (cor muda quando aperta)."""
+    hoje = timezone.localdate()
+    restam = (periodo_atual.dataFim - hoje).days
+    if restam < 0:
+        texto, cor, fundo, borda = 'Prazo encerrado', '#c62828', '#fdecec', '#f6c9c9'
+    elif restam == 0:
+        texto, cor, fundo, borda = 'Termina hoje', '#c62828', '#fdecec', '#f6c9c9'
+    elif restam <= 3:
+        texto, cor, fundo, borda = f'Faltam {restam} dia{"s" if restam > 1 else ""}', '#d97706', '#fff7e6', '#ffe2a8'
+    else:
+        texto, cor, fundo, borda = f'Faltam {restam} dias', '#004EAE', '#f0f6ff', '#d6e5fb'
+    return {
+        'trimestre': trimestre,
+        'data_inicio': periodo_atual.dataInicio.strftime('%d/%m/%Y'),
+        'data_fim': periodo_atual.dataFim.strftime('%d/%m/%Y'),
+        'prazo_texto': texto, 'prazo_cor': cor, 'prazo_fundo': fundo, 'prazo_borda': borda,
+    }
+
+
+def _pendentes_para_email(pendentes):
+    """Nome, iniciais e "cargo · setor" de cada avaliado pendente, em ordem alfabética."""
+    linhas = []
+    for p in pendentes.select_related('cargo', 'ambiente').order_by('nome'):
+        nome = (p.nome or '').title()
+        detalhe = ' · '.join(x for x in [p.cargo.nome if p.cargo_id else '', p.ambiente.nome if p.ambiente_id else ''] if x)
+        palavras = [w for w in nome.split() if w.lower() not in ('da', 'de', 'do', 'das', 'dos', 'e')]
+        iniciais = (palavras[0][0] + palavras[-1][0]) if len(palavras) > 1 else nome[:2]
+        linhas.append({'nome': nome, 'detalhe': detalhe, 'iniciais': iniciais.upper()})
+    return linhas
+
+
+def _email_avaliador(avaliador, pendentes, periodo_atual, trimestre):
+    """Monta (sem enviar) a cobrança de um avaliador: HTML, texto simples e PDF anexo."""
+    lista = _pendentes_para_email(pendentes)
+    ctx = _contexto_prazo(periodo_atual, trimestre)
+    ctx.update({
+        'avaliador': avaliador,
+        'primeiro_nome': (avaliador.nome or '').split()[0].title() if avaliador.nome else '',
+        'pendentes': lista,
+        'total': len(lista),
+        'link': LINK_AVALIAR,
+    })
+    html_content = render_to_string('emails/pendencia_avaliacao.html', ctx)
+    texto = (
+        f"Olá, {ctx['primeiro_nome']}.\n\n"
+        f"Você tem {len(lista)} avaliação(ões) pendente(s) do {trimestre}.\n"
+        f"Prazo: {ctx['data_inicio']} a {ctx['data_fim']} ({ctx['prazo_texto'].lower()}).\n\n"
+        + '\n'.join(f"- {x['nome']}" + (f" ({x['detalhe']})" if x['detalhe'] else '') for x in lista)
+        + f"\n\nAvaliar agora: {LINK_AVALIAR}\n\nRH Grupo Dagoberto Barcellos"
+    )
+    plural = 'avaliações pendentes' if len(lista) != 1 else 'avaliação pendente'
+    assunto = f"[Avaliação de desempenho] Você tem {len(lista)} {plural} — prazo {ctx['data_fim']}"
+
+    email = EmailMultiAlternatives(assunto, texto, from_email='rh@dagobertobarcellos.com.br', to=[avaliador.email])
+    email.attach_alternative(html_content, "text/html")
+    _anexar_logo(email)
+    nomes = [x['nome'] for x in lista]
+    pdf_buffer = gerar_pdf_avaliados(avaliador.nome, nomes, caminho_logo, trimestre)
+    email.attach(f"Avaliacoes_Pendentes_{avaliador.nome}.pdf", pdf_buffer.read(), 'application/pdf')
+    return email
+
+
 @shared_task
 def enviar_notificacoes(usuario_id):
     now = timezone.now()
@@ -82,11 +151,15 @@ def notificar_rh_gestor():
         print("Nenhum avaliador com pendências.")
         return
 
-    # Construir relatório
-    dados_relatorio = [
-        {'avaliador': avaliador.nome, 'avaliados': list(pendentes.values_list('nome', flat=True))}
-        for avaliador, pendentes in pendencias
-    ]
+    # Construir relatório (mais pendências primeiro: é onde o RH precisa agir)
+    dados_relatorio = sorted(
+        (
+            {'avaliador': (avaliador.nome or '').title(),
+             'avaliados': [n.title() for n in pendentes.order_by('nome').values_list('nome', flat=True)]}
+            for avaliador, pendentes in pendencias
+        ),
+        key=lambda x: (-len(x['avaliados']), x['avaliador']),
+    )
 
     # Buscar e-mails do grupo RHGestor
     try:
@@ -112,17 +185,24 @@ def notificar_rh_gestor():
         print("Nenhum e-mail válido encontrado no grupo RHGestor.")
         return
 
-    data_inicio_formatada = periodo_atual.dataInicio.strftime('%d-%m-%Y')
-    data_fim_formatada = periodo_atual.dataFim.strftime('%d-%m-%Y')
-
-    # Render HTML
-    html_content = render_to_string('emails/relatorio_rh.html', {
+    ctx = _contexto_prazo(periodo_atual, trimestre_atual)
+    total_colaboradores = sum(len(x['avaliados']) for x in dados_relatorio)
+    ctx.update({
         'dados_relatorio': dados_relatorio,
-        #'trimestre': trimestre_atual,
-        'data_inicio': data_inicio_formatada,
-        'data_fim': data_fim_formatada,
+        'total_avaliadores': len(dados_relatorio),
+        'total_colaboradores': total_colaboradores,
+        'link': LINK_PAINEL,
     })
-    text_content = strip_tags(html_content)
+    html_content = render_to_string('emails/relatorio_rh.html', ctx)
+    text_content = (
+        f"Avaliações pendentes — {trimestre_atual}\n"
+        f"{len(dados_relatorio)} avaliador(es), {total_colaboradores} avaliação(ões) a fazer. "
+        f"Prazo {ctx['data_inicio']} a {ctx['data_fim']} ({ctx['prazo_texto'].lower()}).\n\n"
+        + '\n'.join(f"{x['avaliador']} ({len(x['avaliados'])}): {', '.join(x['avaliados'])}" for x in dados_relatorio)
+        + f"\n\nPainel: {LINK_PAINEL}"
+    )
+    subject = (f"[Avaliação de desempenho] {len(dados_relatorio)} avaliador(es) com "
+               f"{total_colaboradores} pendência(s) — {trimestre_atual}")
 
     email = EmailMultiAlternatives(
         subject,
@@ -210,7 +290,6 @@ def enviar_notificacoes_para_todos_avaliadores():
 
 @shared_task
 def enviar_emails_completos_para_todos_avaliadores():
-    subject = 'RH Dagoberto Barcellos'
     now = timezone.now()
     trimestre_atual = obterTrimestre(now)
 
@@ -227,37 +306,9 @@ def enviar_emails_completos_para_todos_avaliadores():
         return
 
     for avaliador, pendentes in pendencias:
-        # Lista de avaliados desse avaliador com pendências
-        nomes_avaliados = list(pendentes.values_list('nome', flat=True))
-
-        if not nomes_avaliados:
+        if not avaliador.email or not pendentes.exists():
             continue
-
-        data_inicio_formatada = periodo_atual.dataInicio.strftime('%d-%m-%Y')
-        data_fim_formatada = periodo_atual.dataFim.strftime('%d-%m-%Y')
-
-        # Render HTML com base no template
-        html_content = render_to_string('emails/pendencia_avaliacao.html', {
-            'avaliador': avaliador,
-            'nomes_avaliados': nomes_avaliados,
-            'data_inicio': data_inicio_formatada,
-            'data_fim': data_fim_formatada,
-        })
-        text_content = strip_tags(html_content)
-
-        # Cria o e-mail
-        email = EmailMultiAlternatives(
-            subject,
-            text_content,
-            from_email='rh@dagobertobarcellos.com.br',  # ou settings.DEFAULT_FROM_EMAIL
-            to=[avaliador.email],
-        )
-        email.attach_alternative(html_content, "text/html")
-        _anexar_logo(email)
-
-        # Gera o PDF para esse avaliador
-        pdf_buffer = gerar_pdf_avaliados(avaliador.nome, nomes_avaliados, caminho_logo, trimestre_atual)
-        email.attach(f"Avaliacoes_Pendentes_{avaliador.nome}.pdf", pdf_buffer.read(), 'application/pdf')
+        email = _email_avaliador(avaliador, pendentes, periodo_atual, trimestre_atual)
 
         try:
             email.send()
@@ -271,7 +322,6 @@ def enviar_emails_completos_para_todos_avaliadores():
 
 @shared_task
 def enviar_email_para_avaliador(avaliador_id):
-    subject = 'RH Dagoberto Barcellos'
     now = timezone.now()
     trimestre_atual = obterTrimestre(now)
 
@@ -296,32 +346,10 @@ def enviar_email_para_avaliador(avaliador_id):
         print(f"Nenhum avaliado pendente para o avaliador {avaliador.nome}")
         return
 
-    nomes_avaliados = [av.nome for av in avaliados_sem_avaliacao]
-
-    data_inicio_formatada = periodo_atual.dataInicio.strftime('%d-%m-%Y')
-    data_fim_formatada = periodo_atual.dataFim.strftime('%d-%m-%Y')
-
-    # Renderizar HTML do e-mail com as datas de início e fim do período
-    html_content = render_to_string('emails/pendencia_avaliacao.html', {
-        'avaliador': avaliador,
-        'nomes_avaliados': nomes_avaliados,
-        'data_inicio': data_inicio_formatada,
-        'data_fim': data_fim_formatada,
-    })
-    text_content = strip_tags(html_content)
-
-    email = EmailMultiAlternatives(
-        subject,
-        text_content,
-        from_email='rh@dagobertobarcellos.com.br',
-        to=[avaliador.email],
-    )
-    email.attach_alternative(html_content, "text/html")
-    _anexar_logo(email)
-
-    # Gerar PDF dinâmico (supondo que você tenha uma função para isso)
-    pdf_buffer = gerar_pdf_avaliados(avaliador.nome, nomes_avaliados,caminho_logo,trimestre_atual)
-    email.attach(f"Avaliacoes_Pendentes_{avaliador.nome}.pdf", pdf_buffer.read(), 'application/pdf')
+    if not avaliador.email:
+        print(f"Avaliador {avaliador.nome} sem e-mail cadastrado.")
+        return
+    email = _email_avaliador(avaliador, avaliados_sem_avaliacao, periodo_atual, trimestre_atual)
 
     try:
         email.send()
