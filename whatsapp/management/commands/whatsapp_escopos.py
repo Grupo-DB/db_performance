@@ -169,6 +169,16 @@ class Command(BaseCommand):
                 f'#{c.pk} {c.contato_nome or "-"} {c.contato_telefone} — {c.status} — '
                 f'número {getattr(c.numero, "nome", "(padrão)")} [escopo {services.escopo_da_conversa(c) or "nenhum"}] — '
                 f'fila {getattr(c.fila, "nome", "-")} — dono AGORA: {getattr(c.responsavel, "username", "ninguém")}'))
+            # O veredito do servidor, pessoa a pessoa: é a mesma função que a API usa.
+            membros = set(c.fila.membros.filter(is_active=True)) if c.fila_id else set()
+            escopo = services.escopo_da_conversa(c)
+            if escopo:
+                cfg = services.ESCOPOS[escopo]
+                membros |= set(User.objects.filter(is_active=True, groups__name__in=[cfg['gestor'], cfg['atendentes']]))
+            for u in sorted(membros, key=lambda u: u.username):
+                self.stdout.write(
+                    f'  {u.username:<32} vê: {"SIM" if services.pode_ver(u, c) else "não":<4} '
+                    f'responde: {"SIM" if services.pode_atender(u, c) else "não"}')
             eventos = []
             for m in c.mensagens.select_related('autor').order_by('-created_at')[:limite]:
                 if m.direcao == 'ENTRADA':
