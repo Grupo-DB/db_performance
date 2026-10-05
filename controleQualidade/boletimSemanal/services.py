@@ -176,6 +176,11 @@ def _queryset_do_indicador(indicador, ano: int):
         if texto:
             qs = qs.filter(_filtro_ou(campo, texto))
 
+    # Análise de treinamento é exercício de laboratorista, não medição do produto:
+    # fica fora de todo indicador, mesmo sem filtro de finalidade (pedido de 05/10/2026).
+    # O exclude do Django mantém as amostras com finalidade vazia (NULL).
+    qs = qs.exclude(amostra__finalidade__iexact='Treinamento')
+
     produtos_ids = list(indicador.produtos.values_list('id', flat=True))
     if produtos_ids:
         qs = qs.filter(amostra__produto_amostra_id__in=produtos_ids)
