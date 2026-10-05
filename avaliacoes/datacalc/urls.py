@@ -1,5 +1,6 @@
 from django.urls import path
 from .dashboard import dashboard_avaliacoes
+from .ficha import ficha_colaborador
 from .views import filtrar_colaboradores,filtrar_avaliacoes,periodo,filtrar_avaliacoes_logado,filtrar_avaliados,filtrar_avaliacoes_periodo,filtrar_avaliacoes_avaliador_periodo,get_unique_periodos,filtrar_historico,get_unique_tipos
 urlpatterns = [
     path('periodo/', periodo, name='periodo'),
@@ -11,6 +12,7 @@ urlpatterns = [
     path('filtrar-avaliacoes-avaliador-periodo/', filtrar_avaliacoes_avaliador_periodo, name='filter_avaliacoes_avaliador_periodo'),
     path('get-periodos/', get_unique_periodos, name='get_unique_periodos'),
     path('get-tipos/', get_unique_tipos, name='get_unique_tipos'),
+    path('ficha-colaborador/<int:pk>/', ficha_colaborador, name='ficha_colaborador'),
     path('dashboard-avaliacoes/', dashboard_avaliacoes, name='dashboard_avaliacoes'),
     path('filtrar-historico/', filtrar_historico, name='filtrar_historico'),
 ]
