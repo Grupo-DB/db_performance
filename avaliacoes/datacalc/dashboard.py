@@ -185,6 +185,17 @@ def dashboard_avaliacoes(request):
                 'media': feita['_media'] if feita else None,
                 'feedback': bool(feita and feita['feedback']),
             })
+        # Régua: a mesma pergunta respondida por todos os avaliadores no período.
+        todas_periodo = Avaliacao.objects.filter(periodo=periodo)
+        if tipo:
+            todas_periodo = todas_periodo.filter(tipo__iexact=tipo)
+        geral_por_pergunta = defaultdict(list)
+        for pr in todas_periodo.values_list('perguntasRespostas', flat=True):
+            for pergunta, nota in _notas(pr)[0].items():
+                geral_por_pergunta[pergunta].append(nota)
+        for item in perguntas:
+            item['media_geral'] = _media(geral_por_pergunta.get(item['pergunta'], []))
+
         esperados = len(avaliados)
         resposta['kpis'] = {
             'avaliacoes': len(do_periodo),
@@ -254,6 +265,21 @@ def dashboard_avaliacoes(request):
         'feedback_dados': feedback_dados,
         'feedback_pendentes': len(do_periodo) - feedback_dados,
     }
+    # Média que cada avaliador deu em cada pergunta: o filtro da dash escolhe a pergunta.
+    notas_av_pergunta = defaultdict(lambda: defaultdict(list))
+    for a in do_periodo:
+        for pergunta, nota in a['_notas'].items():
+            notas_av_pergunta[a['avaliador_id']][pergunta].append(nota)
+    nomes = {a['id']: a['nome'] for a in por_avaliador}
+    resposta['por_avaliador_pergunta'] = [
+        {
+            'id': av_id,
+            'nome': nomes.get(av_id) or Avaliador.objects.filter(pk=av_id).values_list('nome', flat=True).first() or '',
+            'medias': {p: {'media': _media(v), 'respostas': len(v)} for p, v in por_p.items()},
+            'media': _media([n for v in por_p.values() for n in v]),
+        }
+        for av_id, por_p in notas_av_pergunta.items()
+    ]
     resposta['por_avaliador'] = por_avaliador
     resposta['por_setor'] = por_setor
     resposta['avaliadores'] = [{'id': a['id'], 'nome': a['nome']} for a in por_avaliador]

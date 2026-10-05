@@ -1,6 +1,7 @@
 import json
 from django.shortcuts import render
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
@@ -1109,10 +1110,16 @@ def get_unique_tipos(request):
     return Response(tipos)
 
 ###################--------------------------- FILTRAR HISTÓRICO COLABORADOR -------------######################################
-@csrf_exempt
+# Devolve salário e histórico salarial: era csrf_exempt sem autenticação nenhuma
+# (aberto na internet). Agora exige token JWT de alguém do RH.
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def filtrar_historico(request):
+    user = request.user
+    if not (user.is_superuser or user.groups.filter(name__in=('Admin', 'Master', 'RHGestor')).exists()):
+        return Response({'detail': 'Acesso restrito ao RH.'}, status=403)
     if request.method == 'POST':
-        data = json.loads(request.body)
+        data = request.data
         selected_avaliados = data.get('avaliadoSelecionadoId', None)
         selected_empresas = data.get('selectedEmpresas', [])
         selected_filiais = data.get('selectedFiliais', [])
