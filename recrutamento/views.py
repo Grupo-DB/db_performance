@@ -579,6 +579,27 @@ class IndicadoresViewSet(viewsets.ViewSet):
         })
 
 
+class IndicadoresSociaisViewSet(viewsets.ViewSet):
+    """
+    Indicadores sociais / ESG da Gestão de Pessoas (diversidade, equidade salarial,
+    rotatividade, absenteísmo, treinamento e avaliação). Ver ``indicadores_sociais.py``.
+
+    ``GET /api/recrutamento/indicadores-sociais/?ano=2026``
+    """
+
+    # Salário médio por gênero e por cargo: só o RH.
+    permission_classes = [IsRH]
+
+    def list(self, request):
+        from .indicadores_sociais import apurar as apurar_sociais
+        try:
+            ano = int(request.query_params.get('ano') or date.today().year)
+        except ValueError:
+            ano = date.today().year
+        ano = max(2000, min(ano, date.today().year))
+        return Response(apurar_sociais(ano))
+
+
 class TurnoverViewSet(viewsets.ViewSet):
     """
     Turnover (rotatividade) e absenteísmo.

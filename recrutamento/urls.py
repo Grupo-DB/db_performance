@@ -8,6 +8,7 @@ from .views import (
     IndicadoresViewSet,
     ProcessoViewSet,
     TurnoverViewSet,
+    IndicadoresSociaisViewSet,
     VagaViewSet,
 )
 
@@ -19,6 +20,7 @@ router.register(r'processos', ProcessoViewSet, basename='processo')
 router.register(r'fichas', FichaEntrevistaViewSet, basename='ficha-entrevista')
 router.register(r'indicadores', IndicadoresViewSet, basename='indicador')
 router.register(r'turnover', TurnoverViewSet, basename='turnover')
+router.register(r'indicadores-sociais', IndicadoresSociaisViewSet, basename='indicadores-sociais')
 router.register(r'folha-ponto', FolhaPontoViewSet, basename='folha-ponto')
 
 urlpatterns = router.urls
