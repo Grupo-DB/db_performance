@@ -5,6 +5,7 @@ O vínculo entre grupo e número é o NOME do número no admin, então vale conf
 depois de cadastrar número novo ou renomear um existente:
 
     python manage.py whatsapp_escopos
+    python manage.py whatsapp_escopos --usuario ana   # por que ESTA pessoa vê o que vê
 """
 from django.contrib.auth.models import Group, User
 from django.core.management.base import BaseCommand
@@ -16,7 +17,17 @@ from whatsapp.models import Conversa, NumeroNegocio
 class Command(BaseCommand):
     help = 'Confere o casamento entre grupos, números e conversas do WhatsApp.'
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--usuario', action='append', default=[],
+            help='username, nome ou e-mail (parcial). Explica o que a pessoa enxerga e por quê. Pode repetir.')
+
     def handle(self, *args, **opcoes):
+        if opcoes['usuario']:
+            for termo in opcoes['usuario']:
+                self._explicar_usuario(termo)
+            return
+
         self.stdout.write('NÚMEROS CADASTRADOS')
         for numero in NumeroNegocio.objects.all():
             marca = ' (padrão)' if numero.is_padrao else ''
@@ -77,3 +88,58 @@ class Command(BaseCommand):
         if orfas:
             self.stdout.write('')
             self.stdout.write(f'{orfas} conversa(s) sem número — contam para o escopo do número padrão.')
+
+        # Staff conta como gestor de TODOS os escopos (services.filtro_de_conversas,
+        # pode_atender, eh_gestor_de). Quem ganhou staff só para editar texto no
+        # admin passa a ver e a ser avisado de todo o RH sem estar no grupo.
+        staff = User.objects.filter(
+            is_active=True, is_staff=True,
+            groups__name__in=[cfg['atendentes'] for cfg in services.ESCOPOS.values()],
+        ).distinct()
+        if staff:
+            self.stdout.write('')
+            self.stdout.write(self.style.WARNING(
+                'ATENÇÃO: atendente(s) com is_staff — enxergam e atendem TUDO, de todos os '
+                'números, como gestor: ' + ', '.join(u.username for u in staff)))
+
+    def _explicar_usuario(self, termo):
+        from django.db.models import Q
+
+        achados = User.objects.filter(
+            Q(username__icontains=termo) | Q(first_name__icontains=termo)
+            | Q(last_name__icontains=termo) | Q(email__icontains=termo)
+        ).order_by('username')
+        if not achados:
+            self.stdout.write(self.style.ERROR(f'Nenhum usuário casa com "{termo}".'))
+            return
+        for u in achados:
+            self.stdout.write(self.style.MIGRATE_HEADING(
+                f'{u.username} — {u.get_full_name() or "(sem nome)"}{"" if u.is_active else " [INATIVO]"}'))
+            grupos = sorted(u.groups.values_list('name', flat=True))
+            self.stdout.write(f'  staff: {u.is_staff}   superusuário: {u.is_superuser}')
+            self.stdout.write(f'  grupos do WhatsApp: {", ".join(g for g in grupos if "hatsapp" in g) or "nenhum"}')
+            self.stdout.write(f'  filas: {", ".join(u.filas_whatsapp.values_list("nome", flat=True)) or "nenhuma"}')
+            papeis = services.escopos_do_usuario(u)
+            if u.is_staff:
+                motivo = 'STAFF: vê, é avisado e atende TODAS as conversas de todos os números'
+            elif not papeis:
+                motivo = 'fora dos grupos novos: regra antiga, vê tudo das filas de que participa'
+            else:
+                motivo = '; '.join(
+                    f'{e}: ' + ('gestor — vê e é avisado de tudo do número' if p == 'gestor'
+                                else 'atendente, equipe vê tudo' if services.escopo_compartilhado(e)
+                                else 'atendente — só as suas e as sem dono')
+                    for e, p in papeis.items())
+            self.stdout.write(f'  regra: {motivo}')
+
+            visiveis = services.conversas_visiveis(u).filter(status='ABERTA')
+            de_outro = visiveis.exclude(responsavel=u).exclude(responsavel__isnull=True)
+            self.stdout.write(
+                f'  conversas abertas que enxerga: {visiveis.count()} '
+                f'(sem dono: {visiveis.filter(responsavel__isnull=True).count()}, '
+                f'de OUTRO atendente: {de_outro.count()})')
+            for c in de_outro.select_related('responsavel', 'numero')[:10]:
+                self.stdout.write(
+                    f'    #{c.pk} {c.contato_nome or c.contato_telefone} — com '
+                    f'{c.responsavel.username} — número {getattr(c.numero, "nome", "(padrão)")} '
+                    f'[escopo {services.escopo_da_conversa(c) or "nenhum"}]')

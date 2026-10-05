@@ -76,3 +76,26 @@ def avaliadores_com_pendencias(periodo):
         if pendentes.exists():
             resultado.append((avaliador, pendentes))
     return resultado
+
+
+def avaliados_por_colega(avaliador, periodo):
+    """
+    Avaliados do avaliador que já saíram da pendência dele porque um colega do
+    setor (modo ``qualquer``) avaliou — e que ele próprio ainda não avaliou.
+
+    A Nova Avaliação oferece esses como opcionais: uma segunda avaliação é
+    permitida, mas não é cobrada de ninguém. Devolve ``[(avaliado, [nomes de
+    quem já avaliou])]``.
+    """
+    pendentes = avaliados_pendentes(avaliador, periodo).values('pk')
+    ja_avaliou = Avaliacao.objects.filter(periodo=periodo, avaliador=avaliador).values('avaliado_id')
+    avaliados = list(
+        avaliados_do_avaliador(avaliador).exclude(pk__in=pendentes).exclude(pk__in=ja_avaliou).order_by('nome')
+    )
+    quem = {}
+    for avaliado_id, nome in (
+        Avaliacao.objects.filter(periodo=periodo, avaliado__in=avaliados)
+        .order_by('create_at').values_list('avaliado_id', 'avaliador__nome')
+    ):
+        quem.setdefault(avaliado_id, []).append(nome)
+    return [(a, quem.get(a.pk, [])) for a in avaliados]

@@ -2,7 +2,7 @@ from amqp import NotFound
 from django.shortcuts import render,HttpResponse
 from baseOrcamentaria.orcamento.models import Gestor
 from baseOrcamentaria.orcamento.serializers import GestorSerializer
-from .vinculos import avaliados_do_avaliador, avaliados_pendentes, avaliadores_com_pendencias
+from .vinculos import avaliados_do_avaliador, avaliados_pendentes, avaliados_por_colega, avaliadores_com_pendencias
 def management(request):
     return HttpResponse(request,'ok')
 #import logging
@@ -717,7 +717,16 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
             avaliados_sem_avaliacao = avaliados_pendentes(avaliador, periodo)
 
             serializer = AvaliadoSerializer(avaliados_sem_avaliacao, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            if request.query_params.get('incluir_colegas') not in ('1', 'true'):
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
+            # Nova Avaliação: além dos pendentes, os que um colega do setor
+            # ("Basta um") já avaliou — segunda avaliação opcional, sem cobrança.
+            por_colega = avaliados_por_colega(avaliador, periodo)
+            opcionais = AvaliadoSerializer([a for a, _ in por_colega], many=True).data
+            for item, (_, nomes) in zip(opcionais, por_colega):
+                item['avaliado_por'] = nomes
+            return Response({'pendentes': serializer.data, 'por_colega': opcionais}, status=status.HTTP_200_OK)
         except Avaliador.DoesNotExist:
             return Response({"error": "Avaliador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:

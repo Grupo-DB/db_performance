@@ -77,18 +77,41 @@ def _pct(parte, total):
     return round(100 * parte / total, 1) if total else None
 
 
+def _por_avaliado(avaliacoes):
+    """
+    Junta as avaliações do mesmo colaborador: {avaliado_id: {pergunta: média}}.
+
+    Com o "Basta um" um colaborador pode receber mais de uma avaliação no
+    período (a segunda é opcional). Sem isso ele pesaria em dobro nas médias;
+    aqui cada pergunta de cada avaliado vira uma nota só, e as médias saem daí.
+    """
+    notas = defaultdict(lambda: defaultdict(list))
+    for a in avaliacoes:
+        for pergunta, nota in a['_notas'].items():
+            notas[a['avaliado_id']][pergunta].append(nota)
+    return {av: {p: sum(v) / len(v) for p, v in por_p.items()} for av, por_p in notas.items()}
+
+
 def _resumo_notas(avaliacoes):
-    """Média geral, distribuição 1..5 + N/A e média por pergunta de uma lista de avaliações."""
+    """
+    Média geral, distribuição 1..5 + N/A e média por pergunta de uma lista de avaliações.
+
+    Médias por avaliado (cada colaborador pesa 1, não importa quantos o avaliaram);
+    a distribuição continua contando respostas, porque é o retrato das notas dadas.
+    `respostas` de cada pergunta é o número de avaliados que a tiveram respondida.
+    """
     todas, por_pergunta = [], defaultdict(list)
     distribuicao = {'5': 0, '4': 0, '3': 0, '2': 0, '1': 0, 'na': 0}
     for a in avaliacoes:
-        for pergunta, nota in a['_notas'].items():
-            todas.append(nota)
-            por_pergunta[pergunta].append(nota)
+        for nota in a['_notas'].values():
             chave = str(int(round(nota)))
             if chave in distribuicao:
                 distribuicao[chave] += 1
         distribuicao['na'] += a['_na']
+    for por_p in _por_avaliado(avaliacoes).values():
+        for pergunta, nota in por_p.items():
+            todas.append(nota)
+            por_pergunta[pergunta].append(nota)
     perguntas = sorted(
         ({'pergunta': p, 'media': _media(v), 'respostas': len(v)} for p, v in por_pergunta.items()),
         key=lambda x: -x['media'],
@@ -191,8 +214,12 @@ def dashboard_avaliacoes(request):
         if tipo:
             todas_periodo = todas_periodo.filter(tipo__iexact=tipo)
         geral_por_pergunta = defaultdict(list)
-        for pr in todas_periodo.values_list('perguntasRespostas', flat=True):
-            for pergunta, nota in _notas(pr)[0].items():
+        todas_linhas = [
+            {'avaliado_id': av_id, '_notas': _notas(pr)[0]}
+            for av_id, pr in todas_periodo.values_list('avaliado_id', 'perguntasRespostas')
+        ]
+        for por_p in _por_avaliado(todas_linhas).values():
+            for pergunta, nota in por_p.items():
                 geral_por_pergunta[pergunta].append(nota)
         for item in perguntas:
             item['media_geral'] = _media(geral_por_pergunta.get(item['pergunta'], []))
