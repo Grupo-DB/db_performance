@@ -39,6 +39,13 @@ O tipo 7 sozinho não serve de filtro: ele também é usado em compensações se
 devolução (lote de desconto em folha, por exemplo). Por isso a exclusão vale só
 para nota que tem devolução vinculada.
 
+**Base do período (06/10/2026).** `base=recebimento` (padrão, o fechamento da
+comissão) é o descrito acima. `base=emissao` filtra pela data de EMISSÃO da nota:
+mostra o que foi vendido no período e quanto disso já entrou até hoje — recebida
+é a parcela com recebimento em qualquer data, ou título quitado sem data no ERP
+(~31 mil ITEMRECEBIMENTO sem RECEBIMENTO; sem isso viraria saldo em aberto falso).
+Devoluções e estorno passam a ser os das notas emitidas no período, até hoje.
+
 **Cancelamentos.** Nota cancelada (`NFSIT = 2`) não tem título no ERP e o número não
 é reaproveitado, então nunca gerou parcela aqui. Elas aparecem listadas por
 representante, só como informação.
@@ -82,8 +89,22 @@ def _rec_valido(rec: str) -> str:
             WHERE IDV.INFNFCOD = NF.NFCOD))"""
 
 
-def _sql(data_inicio: str, data_fim: str) -> str:
+def _sql(data_inicio: str, data_fim: str, base: str = 'recebimento') -> str:
     grupos = ','.join(str(g) for g in GRUPOS_ALMOX_AGRO)
+    if base == 'emissao':
+        # Recebimento em qualquer data; o período é a emissão da nota.
+        janela_rec = ''
+        filtro_periodo = f"CAST(NF.NFDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'"
+    else:
+        janela_rec = f"AND CAST(REC.RECDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'"
+        filtro_periodo = f"""(
+            EXISTS (SELECT 1 FROM ITEMRECEBIMENTO IR2
+                    JOIN RECEBIMENTO REC2 ON REC2.RECNUM = IR2.IRECREC
+                    WHERE IR2.IRECCR = CR.CRNUM
+                      AND CAST(REC2.RECDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+                      AND {_rec_valido('REC2')})
+            OR CAST(CR.CRVENC AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+      )"""
     return f"""
     SELECT
         R.REPNOME                            AS REPRESENTANTE,
@@ -102,10 +123,11 @@ def _sql(data_inicio: str, data_fim: str) -> str:
         D.DUPPARTOT                          AS PARCELA_TOT,
         CAST(CR.CRVENC AS DATE)              AS VENCIMENTO,
         -- Data do recebimento DENTRO da janela: é o que caracteriza "recebida no período".
+        -- (Na base emissão, em qualquer data.)
         (SELECT MAX(CAST(REC.RECDATA AS DATE)) FROM ITEMRECEBIMENTO IR
             JOIN RECEBIMENTO REC ON REC.RECNUM = IR.IRECREC
             WHERE IR.IRECCR = CR.CRNUM
-              AND CAST(REC.RECDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+              {janela_rec}
               AND {_rec_valido('REC')})
                                              AS DATA_RECEBIMENTO,
         -- Total recebido do título em qualquer data: define se ainda está em aberto.
@@ -127,14 +149,7 @@ def _sql(data_inicio: str, data_fim: str) -> str:
       AND (SUBSTRING(NOPFLAGNF,1,1) = 'S' AND SUBSTRING(NOPFLAGNF,25,1) = 'N')
       AND NF.NFSNF NOT IN (8)
       AND ESTQGALM IN ({grupos})
-      AND (
-            EXISTS (SELECT 1 FROM ITEMRECEBIMENTO IR2
-                    JOIN RECEBIMENTO REC2 ON REC2.RECNUM = IR2.IRECREC
-                    WHERE IR2.IRECCR = CR.CRNUM
-                      AND CAST(REC2.RECDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
-                      AND {_rec_valido('REC2')})
-            OR CAST(CR.CRVENC AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
-      )
+      AND {filtro_periodo}
     """
 
 
@@ -158,9 +173,13 @@ def _devolucoes_dos_itens(itens) -> pd.DataFrame:
     return dev
 
 
-def _sql_devolucoes_periodo(data_inicio: str, data_fim: str) -> str:
-    """Devoluções do período, com quantas parcelas da venda já tinham sido pagas antes delas."""
+def _sql_devolucoes_periodo(data_inicio: str, data_fim: str, base: str = 'recebimento') -> str:
+    """Devoluções do período, com quantas parcelas da venda já tinham sido pagas antes delas.
+
+    Base emissão: devoluções (de qualquer data) das notas emitidas no período.
+    """
     grupos = ','.join(str(g) for g in GRUPOS_ALMOX_AGRO)
+    campo = 'NF.NFDATA' if base == 'emissao' else 'NFE.NFEDATA'
     return f"""
     SELECT
         R.REPNOME                            AS REPRESENTANTE,
@@ -188,7 +207,7 @@ def _sql_devolucoes_periodo(data_inicio: str, data_fim: str) -> str:
     LEFT JOIN REPRESENTANTE R  ON R.REPCOD = NF.NFREP
     WHERE NF.NFSIT = 1
       AND ESTQGALM IN ({grupos})
-      AND CAST(NFE.NFEDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+      AND CAST({campo} AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
     """
 
 
@@ -242,15 +261,17 @@ def relatorio_vendas_parcelas(request):
     filtro_rep = (request.data.get('representante') or '').strip().upper()
     # 'recebidas' (padrão) | 'abertas' | 'todas'
     situacao = (request.data.get('situacao') or 'todas').lower()
+    # 'recebimento' (padrão: fechamento da comissão) | 'emissao' (vendas do período)
+    base = 'emissao' if (request.data.get('base') or '').lower() == 'emissao' else 'recebimento'
 
-    df = pd.read_sql(_sql(data_inicio, data_fim), engine)
-    df_dev_periodo = pd.read_sql(_sql_devolucoes_periodo(data_inicio, data_fim), engine)
+    df = pd.read_sql(_sql(data_inicio, data_fim, base), engine)
+    df_dev_periodo = pd.read_sql(_sql_devolucoes_periodo(data_inicio, data_fim, base), engine)
     df_canc = pd.read_sql(_sql_canceladas(data_inicio, data_fim), engine)
     taxa = _taxa_comissao()
 
     if not len(df) and not len(df_dev_periodo) and not len(df_canc):
         return Response({
-            'dataInicio': data_inicio, 'dataFim': data_fim,
+            'dataInicio': data_inicio, 'dataFim': data_fim, 'base': base,
             'representantes': [], 'taxa': taxa, 'totais': _totais_vazios(),
         })
 
@@ -266,13 +287,19 @@ def relatorio_vendas_parcelas(request):
     df['PARCELA_TOT_EXIB'] = partot.astype(int)
     df['PARCELA_NUM_EXIB'] = df['PARCELA_NUM'].fillna(1).replace(0, 1).astype(int)
     df['RECEBIDA'] = df['DATA_RECEBIMENTO'].notna()
+    if base == 'emissao':
+        # Título quitado sem recebimento datável (ITEMRECEBIMENTO sem cabeçalho) também
+        # é dinheiro que entrou — fica recebida, sem data.
+        df['RECEBIDA'] |= df['RECEBIDO_TITULO'] >= df['TOTAL_TITULO'] - 0.01
 
     # Devolvido do item até a data que vale para a parcela: a do recebimento (o que foi
     # pago já era líquido da devolução) ou o fim do período, se a parcela está em aberto.
     # Devolução depois do pagamento não entra aqui: vira estorno no período dela.
-    fim_periodo = dt.date.fromisoformat(data_fim)
+    # Na base emissão o retrato é "até hoje": aberta (ou quitada sem data) desconta tudo
+    # o que já voltou.
+    fim_periodo = dt.date.today() if base == 'emissao' else dt.date.fromisoformat(data_fim)
     data_ref = pd.to_datetime(df['DATA_RECEBIMENTO'], errors='coerce').dt.date
-    data_ref = data_ref.where(df['RECEBIDA'], fim_periodo)
+    data_ref = data_ref.where(df['RECEBIDA'] & df['DATA_RECEBIMENTO'].notna(), fim_periodo)
     df['DEVOLVIDO'] = 0.0
     df['QUANT_DEVOLVIDA_NOTA'] = 0.0
     dev_itens = _devolucoes_dos_itens(df['ITEM']) if len(df) else None
@@ -357,7 +384,8 @@ def relatorio_vendas_parcelas(request):
                     'titulo': int(r['TITULO']),
                 }
                 if r['RECEBIDA']:
-                    linha['data_recebimento'] = _data_br(r['DATA_RECEBIMENTO'])
+                    # Base emissão: título quitado sem recebimento datável no ERP.
+                    linha['data_recebimento'] = _data_br(r['DATA_RECEBIMENTO']) or 'sem data'
                     recebidas.append(linha)
                 else:
                     linha['vencida'] = bool(r['VENCIDA'])
@@ -434,6 +462,7 @@ def relatorio_vendas_parcelas(request):
     return Response({
         'dataInicio': data_inicio,
         'dataFim': data_fim,
+        'base': base,
         'situacao': situacao,
         'representantes': representantes,
         'taxa': taxa,
