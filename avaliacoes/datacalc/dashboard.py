@@ -275,12 +275,15 @@ def dashboard_avaliacoes(request):
 
     por_avaliador, pendentes_setor, avaliados_pendentes_ids = [], defaultdict(set), set()
     total_esperados = total_pendentes = 0
+    avaliados_esperados_ids = set()
     for av in Avaliador.objects.filter(q_ativo()).order_by('nome'):
         do_av, pend_qs = avaliados_do_avaliador(av), avaliados_pendentes(av, periodo)
         if avaliado:
             # Com um avaliado aberto, só conta o vínculo com ele.
             do_av, pend_qs = do_av.filter(pk=avaliado['id']), pend_qs.filter(pk=avaliado['id'])
-        esperados = do_av.count()
+        ids_av = set(do_av.values_list('pk', flat=True))
+        avaliados_esperados_ids |= ids_av
+        esperados = len(ids_av)
         feitas = feitas_por_avaliador.get(av.pk, [])
         if not esperados and not feitas:
             continue
@@ -323,6 +326,11 @@ def dashboard_avaliacoes(request):
         'esperados': total_esperados,
         'pendentes': total_pendentes,
         'avaliados_pendentes': len(avaliados_pendentes_ids),
+        # Card "Pendentes" da visão geral: colaborador vinculado que não recebeu NENHUMA
+        # avaliação no período (de nenhum avaliador). `pendentes` soma vínculos e conta
+        # a mesma pessoa uma vez por avaliador que ainda falta.
+        'avaliados_sem_avaliacao': len(avaliados_esperados_ids - {a['avaliado_id'] for a in do_periodo}),
+        'avaliados_esperados': len(avaliados_esperados_ids),
         'conclusao_pct': _pct(total_esperados - total_pendentes, total_esperados),
         'media': media,
         'feedback_dados': feedback_dados,
