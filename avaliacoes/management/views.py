@@ -287,6 +287,43 @@ def _verdadeiro(valor):
     return bool(valor)
 
 
+def _ajustar_papeis_avaliacao(colaborador, dados):
+    """
+    Liga/desliga os papéis de avaliador e avaliado pela edição do colaborador.
+
+    Só mexe no que veio no payload (`tornar_avaliador` / `tornar_avaliado`).
+    Desligar NÃO apaga o registro — Avaliacao.avaliador/avaliado são CASCADE e
+    levariam o histórico —: marca `papel_ativo=False` e desfaz os vínculos
+    (individuais, setores e formulários). Religar só volta a marca; os vínculos
+    são refeitos nas telas de associação.
+    """
+    campos_copia = [f.name for f in Colaborador._meta.fields if f.name != 'id']
+
+    if 'tornar_avaliador' in dados:
+        quer = _verdadeiro(dados.get('tornar_avaliador'))
+        av = Avaliador.objects.filter(colaborador_ptr=colaborador).first()
+        if quer and not av:
+            Avaliador.objects.create(colaborador_ptr=colaborador, **{f: getattr(colaborador, f) for f in campos_copia})
+        elif quer and not av.papel_ativo:
+            Avaliador.objects.filter(pk=av.pk).update(papel_ativo=True)
+        elif not quer and av and av.papel_ativo:
+            av.avaliados.clear()
+            av.setores_avaliados.clear()
+            Avaliador.objects.filter(pk=av.pk).update(papel_ativo=False)
+
+    if 'tornar_avaliado' in dados:
+        quer = _verdadeiro(dados.get('tornar_avaliado'))
+        ad = Avaliado.objects.filter(colaborador_ptr=colaborador).first()
+        if quer and not ad:
+            Avaliado.objects.create(colaborador_ptr=colaborador, **{f: getattr(colaborador, f) for f in campos_copia})
+        elif quer and not ad.papel_ativo:
+            Avaliado.objects.filter(pk=ad.pk).update(papel_ativo=True)
+        elif not quer and ad and ad.papel_ativo:
+            ad.avaliadores.clear()
+            ad.formulario.clear()
+            Avaliado.objects.filter(pk=ad.pk).update(papel_ativo=False)
+
+
 class ColaboradorViewSet(viewsets.ModelViewSet):
     queryset = Colaborador.objects.all()
     serializer_class = ColaboradorSerializer  
@@ -299,8 +336,8 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
             .select_related('empresa', 'filial', 'area', 'setor__filial', 'ambiente__filial', 'cargo', 'user')
             .prefetch_related('ambiente__avaliadores')
             .annotate(
-                _is_avaliador=Exists(Avaliador.objects.filter(pk=OuterRef('pk'))),
-                _is_avaliado=Exists(Avaliado.objects.filter(pk=OuterRef('pk'))),
+                _is_avaliador=Exists(Avaliador.objects.filter(pk=OuterRef('pk'), papel_ativo=True)),
+                _is_avaliado=Exists(Avaliado.objects.filter(pk=OuterRef('pk'), papel_ativo=True)),
                 _is_gestor=Exists(Gestor.objects.filter(pk=OuterRef('pk'))),
             )
         )
@@ -365,8 +402,6 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         username = self.request.data.get('username', None)
         password = self.request.data.get('password', None)
-        tornar_avaliado = _verdadeiro(self.request.data.get('tornar_avaliado', False))
-        tornar_avaliador = _verdadeiro(self.request.data.get('tornar_avaliador', False))
         tornar_gestor = _verdadeiro(self.request.data.get('tornar_gestor', False))
 
         colaborador = serializer.save()
@@ -393,17 +428,7 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
             colaborador.user = user
             colaborador.save()
         
-        if tornar_avaliado and not Avaliado.objects.filter(colaborador_ptr=colaborador).exists():
-            Avaliado.objects.create(
-                colaborador_ptr=colaborador,
-                **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
-            )
-
-        if tornar_avaliador and not Avaliador.objects.filter(colaborador_ptr=colaborador).exists():
-            Avaliador.objects.create(
-                colaborador_ptr=colaborador,
-                **{field: getattr(colaborador, field) for field in [f.name for f in Colaborador._meta.fields if f.name != 'id']}
-            )
+        _ajustar_papeis_avaliacao(colaborador, self.request.data)
 
         if tornar_gestor and not Gestor.objects.filter(colaborador_ptr=colaborador).exists():
             Gestor.objects.create(

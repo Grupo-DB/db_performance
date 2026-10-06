@@ -74,8 +74,8 @@ def ficha_colaborador(request, pk):
         'data_troca_setor': _data(c.data_troca_setor),
         'data_troca_cargo': _data(c.data_troca_cargo),
         'data_demissao': _data(c.data_demissao),
-        'is_avaliado': Avaliado.objects.filter(pk=c.pk).exists(),
-        'is_avaliador': Avaliador.objects.filter(pk=c.pk).exists(),
+        'is_avaliado': Avaliado.objects.filter(pk=c.pk, papel_ativo=True).exists(),
+        'is_avaliador': Avaliador.objects.filter(pk=c.pk, papel_ativo=True).exists(),
     }
     if completo:
         cadastro.update({

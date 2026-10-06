@@ -41,9 +41,19 @@ def q_ativo(prefixo=''):
 
 
 def avaliados_do_avaliador(avaliador):
-    """Todos os avaliados ATIVOS do avaliador: os individuais mais os dos setores dele."""
+    """Todos os avaliados ATIVOS do avaliador: os individuais mais os dos setores dele.
+
+    Papel desligado (``papel_ativo=False``) dos dois lados tira a pessoa daqui —
+    e daqui saem pendências, sino, e-mails e dash.
+    """
+    if not avaliador.papel_ativo:
+        return Avaliado.objects.none()
     pelo_setor = Q(ambiente__avaliadores=avaliador) & ~Q(pk=avaliador.pk)
-    return Avaliado.objects.filter(Q(avaliadores=avaliador) | pelo_setor).filter(q_ativo()).distinct()
+    return (
+        Avaliado.objects.filter(Q(avaliadores=avaliador) | pelo_setor)
+        .filter(q_ativo(), papel_ativo=True)
+        .distinct()
+    )
 
 
 def avaliados_pendentes(avaliador, periodo):
@@ -71,7 +81,7 @@ def avaliados_pendentes(avaliador, periodo):
 def avaliadores_com_pendencias(periodo):
     """[(avaliador, queryset de pendentes)] só de quem tem algo pendente no período."""
     resultado = []
-    for avaliador in Avaliador.objects.filter(q_ativo()):
+    for avaliador in Avaliador.objects.filter(q_ativo(), papel_ativo=True):
         pendentes = avaliados_pendentes(avaliador, periodo)
         if pendentes.exists():
             resultado.append((avaliador, pendentes))

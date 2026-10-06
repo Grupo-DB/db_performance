@@ -179,12 +179,17 @@ def salvar_historico_alteracoes(sender, instance, **kwargs):
 
 class Avaliador(Colaborador):
     avaliados = models.ManyToManyField('Avaliado', related_name='avaliadores')
+    # Papel desligado pelo toggle da edição do colaborador. O registro fica porque
+    # Avaliacao.avaliador é CASCADE: apagar levaria as avaliações feitas. Migration 0013.
+    papel_ativo = models.BooleanField(default=True, db_default=True)
     class Meta:
         verbose_name = "Avaliador"
         verbose_name_plural = "Avaliadores"
 
 class Avaliado(Colaborador):
     formulario = models.ManyToManyField('Formulario',  related_name='avaliados')
+    # Idem Avaliador.papel_ativo: desligado sai também do vínculo por setor.
+    papel_ativo = models.BooleanField(default=True, db_default=True)
 
     class Meta:
         verbose_name = "Avaliado"

@@ -276,7 +276,7 @@ def dashboard_avaliacoes(request):
     por_avaliador, pendentes_setor, avaliados_pendentes_ids = [], defaultdict(set), set()
     total_esperados = total_pendentes = 0
     avaliados_esperados_ids = set()
-    for av in Avaliador.objects.filter(q_ativo()).order_by('nome'):
+    for av in Avaliador.objects.filter(q_ativo(), papel_ativo=True).order_by('nome'):
         do_av, pend_qs = avaliados_do_avaliador(av), avaliados_pendentes(av, periodo)
         if avaliado:
             # Com um avaliado aberto, só conta o vínculo com ele.
@@ -354,5 +354,5 @@ def dashboard_avaliacoes(request):
     resposta['por_avaliador'] = por_avaliador
     resposta['por_setor'] = por_setor
     resposta['avaliadores'] = [{'id': a['id'], 'nome': a['nome']} for a in por_avaliador]
-    resposta['avaliados_opcoes'] = list(Avaliado.objects.filter(q_ativo()).order_by('nome').values('id', 'nome'))
+    resposta['avaliados_opcoes'] = list(Avaliado.objects.filter(q_ativo(), papel_ativo=True).order_by('nome').values('id', 'nome'))
     return Response(resposta)

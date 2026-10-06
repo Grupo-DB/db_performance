@@ -211,11 +211,11 @@ class ColaboradorSerializer(serializers.ModelSerializer):
     # salvo do PATCH não, e aí consulta.
     def get_is_avaliador(self, obj):
         v = getattr(obj, '_is_avaliador', None)
-        return v if v is not None else Avaliador.objects.filter(pk=obj.pk).exists()
+        return v if v is not None else Avaliador.objects.filter(pk=obj.pk, papel_ativo=True).exists()
 
     def get_is_avaliado(self, obj):
         v = getattr(obj, '_is_avaliado', None)
-        return v if v is not None else Avaliado.objects.filter(pk=obj.pk).exists()
+        return v if v is not None else Avaliado.objects.filter(pk=obj.pk, papel_ativo=True).exists()
 
     def get_is_gestor(self, obj):
         from baseOrcamentaria.orcamento.models import Gestor
