@@ -18,6 +18,7 @@ import json
 import re
 from collections import defaultdict
 
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -27,6 +28,24 @@ from avaliacoes.management.models import Avaliacao, Avaliado, Avaliador
 from avaliacoes.management.vinculos import avaliados_do_avaliador, avaliados_pendentes, q_ativo
 
 GRUPOS_GERAL = ('Admin', 'Master', 'RHGestor')
+
+# Nome antigo do tipo (gravado em Avaliacao.tipo até 2024) -> nome do formulário atual.
+TIPO_NOME_ATUAL = {'avaliação do gestor': 'Avaliação de Gestores'}
+
+
+def _tipo_atual(nome):
+    nome = (nome or '').strip()
+    return TIPO_NOME_ATUAL.get(nome.lower(), nome)
+
+
+def _q_tipo(tipo):
+    """Avaliações do tipo, incluindo as gravadas com o nome antigo dele."""
+    q = Q(tipo__iexact=tipo)
+    for antigo, atual in TIPO_NOME_ATUAL.items():
+        if atual.lower() == tipo.lower():
+            q |= Q(tipo__iexact=antigo)
+    return q
+
 
 ORDINAIS = {'primeiro': 1, 'segundo': 2, 'terceiro': 3, 'quarto': 4}
 NOMES_TRIMESTRE = {1: 'Primeiro', 2: 'Segundo', 3: 'Terceiro', 4: 'Quarto'}
@@ -123,11 +142,23 @@ def _resumo_notas(avaliacoes):
     return _media(todas), distribuicao, perguntas
 
 
+def _do_tipo(avaliados, tipo):
+    """Com tipo escolhido, só os avaliados ligados ao formulário daquele tipo.
+
+    `Avaliacao.tipo` grava o NOME do formulário usado (Nova Avaliação), e o avaliado
+    tem os formulários dele em `Avaliado.formulario` — é por aí que se sabe quem
+    deveria receber uma "Avaliação de Gestores" e quem recebe a "Geral".
+    """
+    if not tipo:
+        return avaliados
+    return avaliados.filter(formulario__nome__iexact=tipo).distinct()
+
+
 def _regua_empresa(perguntas, periodo, tipo):
     """Põe em cada pergunta a média da empresa no período (`media_geral`), para comparar."""
     todas_periodo = Avaliacao.objects.filter(q_ativo('avaliado__'), q_ativo('avaliador__'), periodo=periodo)
     if tipo:
-        todas_periodo = todas_periodo.filter(tipo__iexact=tipo)
+        todas_periodo = todas_periodo.filter(_q_tipo(tipo))
     geral_por_pergunta = defaultdict(list)
     todas_linhas = [
         {'avaliado_id': av_id, '_notas': _notas(pr)[0]}
@@ -157,7 +188,7 @@ def dashboard_avaliacoes(request):
         if not avaliador:
             return Response({'detail': 'Você não está cadastrado como avaliador.'}, status=403)
 
-    tipo = (request.query_params.get('tipo') or '').strip()
+    tipo = _tipo_atual(request.query_params.get('tipo'))
     avaliado_id = request.query_params.get('avaliado_id')
     avaliado = None
     if avaliado_id:
@@ -172,9 +203,9 @@ def dashboard_avaliacoes(request):
     # Opções do seletor de tipo: tudo o que já foi gravado, antes de filtrar por tipo/avaliado.
     tipos = {}
     for t in base.exclude(tipo__isnull=True).exclude(tipo='').values_list('tipo', flat=True).distinct():
-        tipos.setdefault(t.strip().lower(), t.strip())
+        tipos.setdefault(_tipo_atual(t).lower(), _tipo_atual(t))
     if tipo:
-        base = base.filter(tipo__iexact=tipo)
+        base = base.filter(_q_tipo(tipo))
     if avaliado:
         base = base.filter(avaliado_id=avaliado['id'])
 
@@ -229,8 +260,8 @@ def dashboard_avaliacoes(request):
     if avaliador:
         # Seletor de avaliado: só os que este avaliador avalia (lista cheia mesmo com um aberto).
         resposta['avaliados_opcoes'] = list(avaliados_do_avaliador(avaliador).order_by('nome').values('id', 'nome'))
-        do_avaliador = avaliados_do_avaliador(avaliador)
-        pend_qs = avaliados_pendentes(avaliador, periodo)
+        do_avaliador = _do_tipo(avaliados_do_avaliador(avaliador), tipo)
+        pend_qs = _do_tipo(avaliados_pendentes(avaliador, periodo), tipo)
         if avaliado:
             do_avaliador = do_avaliador.filter(pk=avaliado['id'])
             pend_qs = pend_qs.filter(pk=avaliado['id'])
@@ -277,7 +308,8 @@ def dashboard_avaliacoes(request):
     total_esperados = total_pendentes = 0
     avaliados_esperados_ids = set()
     for av in Avaliador.objects.filter(q_ativo(), papel_ativo=True).order_by('nome'):
-        do_av, pend_qs = avaliados_do_avaliador(av), avaliados_pendentes(av, periodo)
+        do_av = _do_tipo(avaliados_do_avaliador(av), tipo)
+        pend_qs = _do_tipo(avaliados_pendentes(av, periodo), tipo)
         if avaliado:
             # Com um avaliado aberto, só conta o vínculo com ele.
             do_av, pend_qs = do_av.filter(pk=avaliado['id']), pend_qs.filter(pk=avaliado['id'])
