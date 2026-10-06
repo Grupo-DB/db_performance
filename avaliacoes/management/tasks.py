@@ -38,6 +38,19 @@ LINK_AVALIAR = f'{SITE}/avaliacoes/novaliacao'
 LINK_PAINEL = f'{SITE}/avaliacoes/avaliacoes'
 
 
+def _periodo_vigente():
+    """O período que o RH definiu por último na tela (mesmo critério do GET /periodo), se hoje estiver dentro dele.
+
+    Cada "Definir Período" grava uma linha nova e as antigas ficam. Filtrar as que cobrem hoje e pegar
+    a de maior dataFim escolhia um período velho e mais longo (01/03 a 30/10) no lugar do atual (05/10 a 24/10).
+    """
+    periodo = Periodo.objects.latest('id')
+    hoje = timezone.localdate()
+    if not (periodo.dataInicio <= hoje <= periodo.dataFim):
+        raise Periodo.DoesNotExist
+    return periodo
+
+
 def _contexto_prazo(periodo_atual, trimestre):
     """Datas do período em dd/mm/aaaa e o selo do prazo (cor muda quando aperta)."""
     hoje = timezone.localdate()
@@ -139,8 +152,7 @@ def notificar_rh_gestor():
     trimestre_atual = obterTrimestre(now)
 
     try:
-        periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).latest('dataFim')
-        #periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).first()
+        periodo_atual = _periodo_vigente()
     except Periodo.DoesNotExist:
         print("Nenhum período de avaliação ativo encontrado para a data atual.")
         return
@@ -294,8 +306,7 @@ def enviar_emails_completos_para_todos_avaliadores():
     trimestre_atual = obterTrimestre(now)
 
     try:
-        periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).latest('dataFim')
-        #periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).first()
+        periodo_atual = _periodo_vigente()
     except Periodo.DoesNotExist:
         print("Nenhum período de avaliação ativo encontrado para a data atual.")
         return
@@ -327,8 +338,7 @@ def enviar_email_para_avaliador(avaliador_id):
 
      # Obter o período atual com base na data atual
     try:
-        periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).latest('dataFim')
-        #periodo_atual = Periodo.objects.filter(dataInicio__lte=now, dataFim__gte=now).first()
+        periodo_atual = _periodo_vigente()
     except Periodo.DoesNotExist:
         print("Nenhum período de avaliação ativo encontrado para a data atual.")
         return
