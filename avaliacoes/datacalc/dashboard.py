@@ -7,6 +7,10 @@ O escopo sai de quem pede, não de parâmetro:
 - os demais só veem os próprios números, como avaliador. Sem cadastro de
   avaliador a resposta é 403.
 
+Filtros que valem nos dois escopos: ``?tipo=`` (nome do formulário gravado em
+``Avaliacao.tipo``) e ``?avaliado_id=`` (um colaborador só — as médias dele
+vêm com a da empresa ao lado, e vínculo/pendência ficam restritos a ele).
+
 Pendência e "quem o avaliador avalia" vêm de ``management/vinculos.py`` — o
 vínculo por setor entra junto com o individual, igual ao sino e às cobranças.
 """
@@ -19,7 +23,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from avaliacoes.management.models import Avaliacao, Avaliador
+from avaliacoes.management.models import Avaliacao, Avaliado, Avaliador
 from avaliacoes.management.vinculos import avaliados_do_avaliador, avaliados_pendentes, q_ativo
 
 GRUPOS_GERAL = ('Admin', 'Master', 'RHGestor')
@@ -119,6 +123,23 @@ def _resumo_notas(avaliacoes):
     return _media(todas), distribuicao, perguntas
 
 
+def _regua_empresa(perguntas, periodo, tipo):
+    """Põe em cada pergunta a média da empresa no período (`media_geral`), para comparar."""
+    todas_periodo = Avaliacao.objects.filter(q_ativo('avaliado__'), q_ativo('avaliador__'), periodo=periodo)
+    if tipo:
+        todas_periodo = todas_periodo.filter(tipo__iexact=tipo)
+    geral_por_pergunta = defaultdict(list)
+    todas_linhas = [
+        {'avaliado_id': av_id, '_notas': _notas(pr)[0]}
+        for av_id, pr in todas_periodo.values_list('avaliado_id', 'perguntasRespostas')
+    ]
+    for por_p in _por_avaliado(todas_linhas).values():
+        for pergunta, nota in por_p.items():
+            geral_por_pergunta[pergunta].append(nota)
+    for item in perguntas:
+        item['media_geral'] = _media(geral_por_pergunta.get(item['pergunta'], []))
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_avaliacoes(request):
@@ -137,13 +158,25 @@ def dashboard_avaliacoes(request):
             return Response({'detail': 'Você não está cadastrado como avaliador.'}, status=403)
 
     tipo = (request.query_params.get('tipo') or '').strip()
+    avaliado_id = request.query_params.get('avaliado_id')
+    avaliado = None
+    if avaliado_id:
+        avaliado = Avaliado.objects.filter(pk=avaliado_id).values('id', 'nome').first()
+        if not avaliado:
+            return Response({'detail': 'Avaliado não encontrado.'}, status=404)
 
     # Só colaboradores ativos (Situação + sem demissão passada), dos dois lados.
     base = Avaliacao.objects.filter(q_ativo('avaliado__'), q_ativo('avaliador__'))
     if avaliador:
         base = base.filter(avaliador=avaliador)
+    # Opções do seletor de tipo: tudo o que já foi gravado, antes de filtrar por tipo/avaliado.
+    tipos = {}
+    for t in base.exclude(tipo__isnull=True).exclude(tipo='').values_list('tipo', flat=True).distinct():
+        tipos.setdefault(t.strip().lower(), t.strip())
     if tipo:
         base = base.filter(tipo__iexact=tipo)
+    if avaliado:
+        base = base.filter(avaliado_id=avaliado['id'])
 
     linhas = list(base.values(
         'id', 'periodo', 'feedback', 'avaliador_id', 'avaliado_id',
@@ -179,6 +212,9 @@ def dashboard_avaliacoes(request):
         'escopo': 'individual' if avaliador else 'geral',
         'pode_ver_geral': pode_ver_geral,
         'avaliador': {'id': avaliador.pk, 'nome': avaliador.nome} if avaliador else None,
+        'avaliado': avaliado,
+        'tipo': tipo or None,
+        'tipos': sorted(tipos.values(), key=str.lower),
         'periodo': periodo,
         'periodo_corrente': corrente,
         'periodos': periodos,
@@ -187,9 +223,19 @@ def dashboard_avaliacoes(request):
         'evolucao': evolucao,
     }
 
+    if avaliador or avaliado:
+        _regua_empresa(perguntas, periodo, tipo)
+
     if avaliador:
-        avaliados = list(avaliados_do_avaliador(avaliador).select_related('cargo', 'ambiente').order_by('nome'))
-        pendentes = set(avaliados_pendentes(avaliador, periodo).values_list('pk', flat=True))
+        # Seletor de avaliado: só os que este avaliador avalia (lista cheia mesmo com um aberto).
+        resposta['avaliados_opcoes'] = list(avaliados_do_avaliador(avaliador).order_by('nome').values('id', 'nome'))
+        do_avaliador = avaliados_do_avaliador(avaliador)
+        pend_qs = avaliados_pendentes(avaliador, periodo)
+        if avaliado:
+            do_avaliador = do_avaliador.filter(pk=avaliado['id'])
+            pend_qs = pend_qs.filter(pk=avaliado['id'])
+        avaliados = list(do_avaliador.select_related('cargo', 'ambiente').order_by('nome'))
+        pendentes = set(pend_qs.values_list('pk', flat=True))
         minhas = {a['avaliado_id']: a for a in do_periodo}
         lista = []
         for c in avaliados:
@@ -209,21 +255,6 @@ def dashboard_avaliacoes(request):
                 'media': feita['_media'] if feita else None,
                 'feedback': bool(feita and feita['feedback']),
             })
-        # Régua: a mesma pergunta respondida por todos os avaliadores no período.
-        todas_periodo = Avaliacao.objects.filter(q_ativo('avaliado__'), q_ativo('avaliador__'), periodo=periodo)
-        if tipo:
-            todas_periodo = todas_periodo.filter(tipo__iexact=tipo)
-        geral_por_pergunta = defaultdict(list)
-        todas_linhas = [
-            {'avaliado_id': av_id, '_notas': _notas(pr)[0]}
-            for av_id, pr in todas_periodo.values_list('avaliado_id', 'perguntasRespostas')
-        ]
-        for por_p in _por_avaliado(todas_linhas).values():
-            for pergunta, nota in por_p.items():
-                geral_por_pergunta[pergunta].append(nota)
-        for item in perguntas:
-            item['media_geral'] = _media(geral_por_pergunta.get(item['pergunta'], []))
-
         esperados = len(avaliados)
         resposta['kpis'] = {
             'avaliacoes': len(do_periodo),
@@ -245,11 +276,15 @@ def dashboard_avaliacoes(request):
     por_avaliador, pendentes_setor, avaliados_pendentes_ids = [], defaultdict(set), set()
     total_esperados = total_pendentes = 0
     for av in Avaliador.objects.filter(q_ativo()).order_by('nome'):
-        esperados = avaliados_do_avaliador(av).count()
+        do_av, pend_qs = avaliados_do_avaliador(av), avaliados_pendentes(av, periodo)
+        if avaliado:
+            # Com um avaliado aberto, só conta o vínculo com ele.
+            do_av, pend_qs = do_av.filter(pk=avaliado['id']), pend_qs.filter(pk=avaliado['id'])
+        esperados = do_av.count()
         feitas = feitas_por_avaliador.get(av.pk, [])
         if not esperados and not feitas:
             continue
-        pend = list(avaliados_pendentes(av, periodo).values_list('pk', 'ambiente__nome'))
+        pend = list(pend_qs.values_list('pk', 'ambiente__nome'))
         for pk, setor in pend:
             pendentes_setor[setor or 'Sem setor'].add(pk)
             avaliados_pendentes_ids.add(pk)
@@ -311,4 +346,5 @@ def dashboard_avaliacoes(request):
     resposta['por_avaliador'] = por_avaliador
     resposta['por_setor'] = por_setor
     resposta['avaliadores'] = [{'id': a['id'], 'nome': a['nome']} for a in por_avaliador]
+    resposta['avaliados_opcoes'] = list(Avaliado.objects.filter(q_ativo()).order_by('nome').values('id', 'nome'))
     return Response(resposta)
