@@ -45,8 +45,9 @@ mostra o que foi vendido no período e quanto disso já entrou até hoje — rec
 é a parcela com recebimento em qualquer data, ou título quitado sem data no ERP
 (~31 mil ITEMRECEBIMENTO sem RECEBIMENTO; sem isso viraria saldo em aberto falso).
 Devoluções e estorno passam a ser os das notas emitidas no período, até hoje.
-`base=ambos` é a regra do recebimento com mais um filtro: a nota também precisa ter
-sido emitida no período (vendido E recebido/vencendo no mesmo período).
+`base=ambos` junta as duas visões: parcela recebida/vencendo no período OU de nota
+emitida no período (06/10/2026 — a interseção, a 1ª versão, deixava vazio o mês de
+quem vende a prazo). Recebida continua sendo "recebida dentro do período".
 
 **Cancelamentos.** Nota cancelada (`NFSIT = 2`) não tem título no ERP e o número não
 é reaproveitado, então nunca gerou parcela aqui. Elas aparecem listadas por
@@ -108,7 +109,7 @@ def _sql(data_inicio: str, data_fim: str, base: str = 'recebimento') -> str:
             OR CAST(CR.CRVENC AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
       )"""
         if base == 'ambos':
-            filtro_periodo += f" AND CAST(NF.NFDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'"
+            filtro_periodo = f"({filtro_periodo} OR CAST(NF.NFDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}')"
     return f"""
     SELECT
         R.REPNOME                            AS REPRESENTANTE,
@@ -184,8 +185,8 @@ def _sql_devolucoes_periodo(data_inicio: str, data_fim: str, base: str = 'recebi
     """
     grupos = ','.join(str(g) for g in GRUPOS_ALMOX_AGRO)
     campo = 'NF.NFDATA' if base == 'emissao' else 'NFE.NFEDATA'
-    # Ambos: devolução do período, de nota emitida no período.
-    extra = f"AND CAST(NF.NFDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'" if base == 'ambos' else ''
+    # Ambos: devolução do período OU de nota emitida no período.
+    extra = f"OR CAST(NF.NFDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'" if base == 'ambos' else ''
     return f"""
     SELECT
         R.REPNOME                            AS REPRESENTANTE,
@@ -213,8 +214,8 @@ def _sql_devolucoes_periodo(data_inicio: str, data_fim: str, base: str = 'recebi
     LEFT JOIN REPRESENTANTE R  ON R.REPCOD = NF.NFREP
     WHERE NF.NFSIT = 1
       AND ESTQGALM IN ({grupos})
-      AND CAST({campo} AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
-      {extra}
+      AND (CAST({campo} AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+           {extra})
     """
 
 
