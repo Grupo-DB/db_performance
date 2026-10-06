@@ -45,6 +45,8 @@ mostra o que foi vendido no período e quanto disso já entrou até hoje — rec
 é a parcela com recebimento em qualquer data, ou título quitado sem data no ERP
 (~31 mil ITEMRECEBIMENTO sem RECEBIMENTO; sem isso viraria saldo em aberto falso).
 Devoluções e estorno passam a ser os das notas emitidas no período, até hoje.
+`base=ambos` é a regra do recebimento com mais um filtro: a nota também precisa ter
+sido emitida no período (vendido E recebido/vencendo no mesmo período).
 
 **Cancelamentos.** Nota cancelada (`NFSIT = 2`) não tem título no ERP e o número não
 é reaproveitado, então nunca gerou parcela aqui. Elas aparecem listadas por
@@ -105,6 +107,8 @@ def _sql(data_inicio: str, data_fim: str, base: str = 'recebimento') -> str:
                       AND {_rec_valido('REC2')})
             OR CAST(CR.CRVENC AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
       )"""
+        if base == 'ambos':
+            filtro_periodo += f" AND CAST(NF.NFDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'"
     return f"""
     SELECT
         R.REPNOME                            AS REPRESENTANTE,
@@ -180,6 +184,8 @@ def _sql_devolucoes_periodo(data_inicio: str, data_fim: str, base: str = 'recebi
     """
     grupos = ','.join(str(g) for g in GRUPOS_ALMOX_AGRO)
     campo = 'NF.NFDATA' if base == 'emissao' else 'NFE.NFEDATA'
+    # Ambos: devolução do período, de nota emitida no período.
+    extra = f"AND CAST(NF.NFDATA AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'" if base == 'ambos' else ''
     return f"""
     SELECT
         R.REPNOME                            AS REPRESENTANTE,
@@ -208,6 +214,7 @@ def _sql_devolucoes_periodo(data_inicio: str, data_fim: str, base: str = 'recebi
     WHERE NF.NFSIT = 1
       AND ESTQGALM IN ({grupos})
       AND CAST({campo} AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
+      {extra}
     """
 
 
@@ -262,7 +269,10 @@ def relatorio_vendas_parcelas(request):
     # 'recebidas' (padrão) | 'abertas' | 'todas'
     situacao = (request.data.get('situacao') or 'todas').lower()
     # 'recebimento' (padrão: fechamento da comissão) | 'emissao' (vendas do período)
-    base = 'emissao' if (request.data.get('base') or '').lower() == 'emissao' else 'recebimento'
+    # | 'ambos' (emitida E recebida/vencendo no período)
+    base = (request.data.get('base') or '').lower()
+    if base not in ('emissao', 'ambos'):
+        base = 'recebimento'
 
     df = pd.read_sql(_sql(data_inicio, data_fim, base), engine)
     df_dev_periodo = pd.read_sql(_sql_devolucoes_periodo(data_inicio, data_fim, base), engine)

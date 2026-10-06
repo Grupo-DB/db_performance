@@ -1445,12 +1445,36 @@ def calculos_comissoes(request):
     # taxa e valor. Só descreve — o total continua sendo o de atm_internos.
     atm_componentes = {k: [] for k in atm_internos}
 
-    def _atm_add(nome, descricao, base, taxa):
+    def _notas_da_base(df_base):
+        """Notas que formam a base de uma parcela (uma linha por NF + filial), para a tela
+        de lançamentos da Memória de Cálculo. A soma de `valor` fecha com a base."""
+        if df_base is None or not len(df_base):
+            return []
+        d = df_base.copy()
+        d['_GRUPO'] = d['GRUPO_COMERCIAL'].fillna(d['GRUPO']).fillna('')
+        notas = []
+        for (nf, filial), g in d.groupby(['NOTA_FISCAL', 'EMPRESAFILIAL'], sort=False):
+            data = pd.to_datetime(g['DATA_EMISSAO'].iloc[0], errors='coerce')
+            notas.append({
+                'nota_fiscal': int(nf) if pd.notna(nf) else None,
+                'filial': filial or '',
+                'data': data.strftime('%d/%m/%Y') if pd.notna(data) else '',
+                'data_iso': data.strftime('%Y-%m-%d') if pd.notna(data) else '',
+                'cliente': str(g['CLIENTE_NOME'].iloc[0] or '').strip(),
+                'cidade': str(g['CIDADE_FATURAMENTO'].iloc[0] or ''),
+                'representante': str(g['REPRESENTANTE'].iloc[0] or '').strip(),
+                'grupos': ', '.join(sorted({x for x in g['_GRUPO'] if x})),
+                'valor': round(float(g['VALOR_PRODUTO'].sum()), 2),
+            })
+        return sorted(notas, key=lambda n: -n['valor'])
+
+    def _atm_add(nome, descricao, base, taxa, df_base=None):
         base = float(base or 0.0)
         valor = base * taxa
         atm_internos[nome] = atm_internos.get(nome, 0.0) + valor
         atm_componentes.setdefault(nome, []).append({
             'descricao': descricao, 'base': round(base, 2), 'taxa': taxa, 'valor': round(valor, 2),
+            'notas': _notas_da_base(df_base),
         })
 
     # Filtra somente vendas faturadas pela filial ATM
@@ -1484,7 +1508,7 @@ def calculos_comissoes(request):
         if _sem_cal_sucro_reps:
             df_rep_atm = df_rep_atm[~_mask_cal_sucro.reindex(df_rep_atm.index, fill_value=False)]
         _atm_add(int_atm, f"Representante ATM {rep_ext}" + (' (só notas pela ATM)' if rep_ext in REP_ATM_SOMENTE_ATM else ''),
-                 df_rep_atm['VALOR_PRODUTO'].sum(), p('ATM_INTERNO_REPS', 0.0025))
+                 df_rep_atm['VALOR_PRODUTO'].sum(), p('ATM_INTERNO_REPS', 0.0025), df_rep_atm)
 
     # Nota faturada no PR (ATM) dos externos do RS → Mariane (09/2026). Quem já está no
     # REP_ATM (Rodrigo Planalto, e o Agner, que nem está no loop) já teve a parte ATM
@@ -1495,11 +1519,11 @@ def calculos_comissoes(request):
 
     # Cal Sucro: taxa configurável → 100% Mariane (todas as filiais, qualquer cidade, qualquer vendedor)
     df_cal_sucro = df_cc[_mask_cal_sucro]
-    _atm_add('MARIANE DO ROCIO MOREIRA', 'Cal Sucro (qualquer cidade)', df_cal_sucro['VALOR_PRODUTO'].sum(), p('ATM_CAL_SUCRO', 0.00125))
+    _atm_add('MARIANE DO ROCIO MOREIRA', 'Cal Sucro (qualquer cidade)', df_cal_sucro['VALOR_PRODUTO'].sum(), p('ATM_CAL_SUCRO', 0.00125), df_cal_sucro)
 
     # KRICAL: cliente tratado como rep ATM de Mariane — filtra por CLIENTE_NOME
     df_krical = df_cc[df_cc['CLIENTE_NOME'].str.contains('KRICAL', na=False)]
-    _atm_add('MARIANE DO ROCIO MOREIRA', 'Cliente KRICAL', df_krical['VALOR_PRODUTO'].sum(), p('ATM_KRICAL', 0.0025))
+    _atm_add('MARIANE DO ROCIO MOREIRA', 'Cliente KRICAL', df_krical['VALOR_PRODUTO'].sum(), p('ATM_KRICAL', 0.0025), df_krical)
 
     # Termos de externos CC da Matriz (VINCULO_INT_MATRIZ + Adriano Born) — usados para excluir da dolomita
     def is_ext_cc_matriz(r):
@@ -1574,10 +1598,10 @@ def calculos_comissoes(request):
     else:
         df_dolomita_atm['REGIAO_ATM'] = df_dolomita_atm['CIDADE_FATURAMENTO'].apply(classifica_regiao_atm)
     _taxa_dolomita = p('ATM_DOLOMITA', 0.005)
-    _atm_add('ALEXANDRA PERUSSI', 'Dolomita sem representante — região Alexandra',
-             df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum(), _taxa_dolomita)
-    _atm_add('MARIANE DO ROCIO MOREIRA', 'Dolomita sem representante — região Mariane',
-             df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum(), _taxa_dolomita)
+    _df = df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'ALEXANDRA']
+    _atm_add('ALEXANDRA PERUSSI', 'Dolomita sem representante — região Alexandra', _df['VALOR_PRODUTO'].sum(), _taxa_dolomita, _df)
+    _df = df_dolomita_atm[df_dolomita_atm['REGIAO_ATM'] == 'MARIANE']
+    _atm_add('MARIANE DO ROCIO MOREIRA', 'Dolomita sem representante — região Mariane', _df['VALOR_PRODUTO'].sum(), _taxa_dolomita, _df)
 
     # ATM Direto: taxa configurável (somente filial ATM, excluindo dolomita, cal sucro, externos CC e KRICAL por CLIENTE_NOME)
     _mask_krical_cliente = df_atm_fil['CLIENTE_NOME'].str.contains('KRICAL', na=False)
@@ -1592,17 +1616,18 @@ def calculos_comissoes(request):
     df_atm_direto['REGIAO_ATM'] = df_atm_direto['CIDADE_FATURAMENTO'].apply(
         classifica_regiao_dolomita if data_inicio_dt >= DOLOMITA_SEM_REP_DESDE else classifica_regiao_atm)
     _taxa_atm_direto = p('ATM_DIRETO', 0.005)
-    _atm_add('ALEXANDRA PERUSSI', 'ATM Direto — região Alexandra',
-             df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'ALEXANDRA']['VALOR_PRODUTO'].sum(), _taxa_atm_direto)
-    _atm_add('MARIANE DO ROCIO MOREIRA', 'ATM Direto — região Mariane',
-             df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'MARIANE']['VALOR_PRODUTO'].sum(), _taxa_atm_direto)
+    _df = df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'ALEXANDRA']
+    _atm_add('ALEXANDRA PERUSSI', 'ATM Direto — região Alexandra', _df['VALOR_PRODUTO'].sum(), _taxa_atm_direto, _df)
+    _df = df_atm_direto[df_atm_direto['REGIAO_ATM'] == 'MARIANE']
+    _atm_add('MARIANE DO ROCIO MOREIRA', 'ATM Direto — região Mariane', _df['VALOR_PRODUTO'].sum(), _taxa_atm_direto, _df)
 
     # Darcilei: 0,04% sobre total ATM filial CC excluindo apenas COFCO
     # (equivalente à fórmula =SUMIFS(V:V,B:B,"F08 - UP ATM",S:S,"CC") - SUMIFS(...,F:F,"*cofco*") da planilha)
     _mask_cofco = df_atm_fil['CLIENTE_NOME'].str.contains('COFCO', case=False, na=False)
     venda_up_atm = df_atm_fil[~_mask_cofco]['VALOR_PRODUTO'].sum()
     if not darcilei_externo:
-        _atm_add('DARCILEI DOS SANTOS', 'Total da filial ATM sem COFCO', venda_up_atm, p('DARCILEI_ATM', 0.0004))
+        _atm_add('DARCILEI DOS SANTOS', 'Total da filial ATM sem COFCO', venda_up_atm, p('DARCILEI_ATM', 0.0004),
+                 df_atm_fil[~_mask_cofco])
 
     # DEBUG: breakdown por componente
     _atm_debug = {}
