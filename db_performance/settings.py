@@ -33,6 +33,12 @@ CORS_ALLOW_CREDENTIALS = True
 load_dotenv(dotenv_path=BASE_DIR / '.env')
 
 # ── Credenciais WhatsApp Cloud API (Meta) ───────────────────────────────────
+# Conformidade Legal — leitura de PDFs pelo Claude no Microsoft Foundry (conformidadeLegal/ia.py).
+CONFORMIDADE_IA_FOUNDRY_RESOURCE = os.environ.get('CONFORMIDADE_IA_FOUNDRY_RESOURCE', '')
+CONFORMIDADE_IA_FOUNDRY_KEY = os.environ.get('CONFORMIDADE_IA_FOUNDRY_KEY', '')
+CONFORMIDADE_IA_MODELO = os.environ.get('CONFORMIDADE_IA_MODELO', 'claude-opus-5-5')
+CONFORMIDADE_IA_PERFIL_EMPRESA = os.environ.get('CONFORMIDADE_IA_PERFIL_EMPRESA', '')
+
 WHATSAPP_ACCESS_TOKEN = os.environ.get('WHATSAPP_ACCESS_TOKEN')
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get('WHATSAPP_PHONE_NUMBER_ID')
 WHATSAPP_VERIFY_TOKEN = os.environ.get('WHATSAPP_VERIFY_TOKEN')
@@ -120,6 +126,7 @@ INSTALLED_APPS = [
     'cockpitFinanceiro',
     'pedidosVenda',
     'sipat',
+    'conformidadeLegal',
 ]
 
 MIDDLEWARE = [
