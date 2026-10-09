@@ -287,6 +287,29 @@ def _verdadeiro(valor):
     return bool(valor)
 
 
+def _validar_login(colaborador, username, password):
+    """
+    Confere o login pedido ANTES de salvar o colaborador, para não gravar o cadastro e
+    ignorar o login sem avisar (caso de uma conta que existia sem vínculo e não aparecia
+    na edição). `colaborador` é None na criação.
+    """
+    if not username:
+        return
+    user_atual = colaborador.user if colaborador else None
+    outro = User.objects.filter(username=username).exclude(pk=getattr(user_atual, 'pk', None)).first()
+    if outro:
+        dono = Colaborador.objects.filter(user=outro).exclude(pk=getattr(colaborador, 'pk', None)).first()
+        if dono:
+            raise ValidationError({'username': f"O usuário '{username}' já é o acesso de {dono.nome}."})
+        # Conta solta: ligar automaticamente deixaria qualquer um que edita cadastros
+        # assumir a conta de outra pessoa digitando o login dela.
+        raise ValidationError({'username': (
+            f"Já existe a conta '{username}' sem colaborador vinculado. "
+            "Peça ao administrador para ligá-la a este cadastro, ou use outro nome de usuário.")})
+    if not user_atual and not password:
+        raise ValidationError({'password': 'Informe uma senha para criar o acesso deste colaborador.'})
+
+
 def _ajustar_papeis_avaliacao(colaborador, dados):
     """
     Liga/desliga os papéis de avaliador e avaliado pela edição do colaborador.
@@ -348,7 +371,8 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
         tornar_avaliado = _verdadeiro(self.request.data.get('tornar_avaliado', False))
         tornar_avaliador = _verdadeiro(self.request.data.get('tornar_avaliador', False))
         tornar_gestor = _verdadeiro(self.request.data.get('tornar_gestor', False))
-        
+
+        _validar_login(None, username, password)
         colaborador = serializer.save()
         
         if username and password:
@@ -404,6 +428,7 @@ class ColaboradorViewSet(viewsets.ModelViewSet):
         password = self.request.data.get('password', None)
         tornar_gestor = _verdadeiro(self.request.data.get('tornar_gestor', False))
 
+        _validar_login(serializer.instance, username, password)
         colaborador = serializer.save()
 
         # Usuário existente: troca o login e/ou a senha, cada um quando vier.

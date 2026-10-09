@@ -15,6 +15,8 @@ class Variavel(models.Model):
     tecnica = models.CharField(max_length=255, null=True, blank=True)
     valor = models.FloatField(null=True, blank=True)
     tipo = models.CharField(max_length=255, null=True, blank=True)
+    # Constante de cálculo: o valor vem do cadastro e não pode ser alterado na análise.
+    bloqueada = models.BooleanField(default=False)
     class meta:
         verbose_name = 'Variável'
         verbose_name_plural = 'Variáveis'
