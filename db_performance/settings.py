@@ -119,6 +119,7 @@ INSTALLED_APPS = [
     'pesquisas',
     'cockpitFinanceiro',
     'pedidosVenda',
+    'sipat',
 ]
 
 MIDDLEWARE = [
