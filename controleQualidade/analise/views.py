@@ -110,8 +110,8 @@ _HORAS_TEMPO_CAPILARIDADE = {
 }
 
 
-def _horas_encerramento_capilaridade(d):
-    """Ponto em que o ensaio de capilaridade encerrou, em horas.
+def _rotulo_encerramento_capilaridade(d):
+    """Rótulo do tempo em que o ensaio de capilaridade encerrou ("6h", "22:30h").
 
     `duracao_ensaio` é o rótulo do tempo do Δmt máximo. Registro antigo sem ele cai na
     última linha de `dados` com Δmt > 0 (linha em branco grava Δmt '').
@@ -129,7 +129,12 @@ def _horas_encerramento_capilaridade(d):
             if delta > 0:
                 rotulo = ponto.get('tLabel')
                 break
-    return _HORAS_TEMPO_CAPILARIDADE.get(str(rotulo).strip()) if rotulo else None
+    return str(rotulo).strip() if rotulo else None
+
+
+def _horas_encerramento_capilaridade(d):
+    """O mesmo ponto em horas, para média/mín/máx funcionarem no relatório."""
+    return _HORAS_TEMPO_CAPILARIDADE.get(_rotulo_encerramento_capilaridade(d))
 
 
 # Cálculos especiais de argamassa: cada um é um campo JSON dedicado no modelo Analise
@@ -201,9 +206,9 @@ for _chave, _rotulo in CAMPOS_CAL_COMPLETO:
         '%',
     )
 
-# Capilaridade por tempo: a tabela "Resultado por Tempo" da análise, tempo × valor.
-# Espelha ESPECIAIS_CAPILARIDADE_TEMPO em shared/campos-especiais.ts; a ordem dos
-# tempos é a de _HORAS_TEMPO_CAPILARIDADE (= TEMPOS_CAPILARIDADE do front).
+# Capilaridade no encerramento: Raiz t, Média e Δmt da tabela "Resultado por Tempo"
+# no tempo em que o ensaio parou (cada análise para num tempo diferente).
+# Espelha os itens -23..-25 de shared/campos-especiais.ts.
 _PI_PLANILHA = 3.1416  # constante escrita à mão na planilha; é o que faz bater dígito a dígito
 
 
@@ -214,32 +219,22 @@ def _num(v):
         return None
 
 
-def _ponto_capilaridade(d, rotulo):
+def _delta_mt_capilaridade(d, rotulo):
     for ponto in (d or {}).get('dados') or []:
         if isinstance(ponto, dict) and ponto.get('tLabel') == rotulo:
-            return ponto
+            delta = _num(ponto.get('deltaMt'))
+            # Δmt <= 0 é linha vazia (mesmo critério do cálculo do Aw).
+            return delta if delta is not None and delta > 0 else None
     return None
 
 
-def _delta_mt_capilaridade(d, rotulo):
-    delta = _num((_ponto_capilaridade(d, rotulo) or {}).get('deltaMt'))
-    # Δmt <= 0 é linha vazia (mesmo critério do cálculo do Aw).
-    return delta if delta is not None and delta > 0 else None
-
-
-def _raiz_t_capilaridade(d, rotulo):
-    # Só nos tempos que entraram no gráfico, e do rótulo — nunca o √t digitado (2,45 ≠ √6).
-    if _delta_mt_capilaridade(d, rotulo) is None:
-        return None
-    return _HORAS_TEMPO_CAPILARIDADE[rotulo] ** 0.5
-
-
-def _media_capilaridade(d, i_tempo):
+def _media_capilaridade(d, rotulo):
     """Média simples dos CPs ("Média 1") no tempo — core/utils/capilaridade.ts.
 
     Δmt do CP = (m_t − m_t0)/1000/área, área = 3,1416·r² com r = média dos dois raios.
     Sem dados brutos (`cps`) não há média: o Δmt foi digitado.
     """
+    i_tempo = list(_HORAS_TEMPO_CAPILARIDADE).index(rotulo)
     valores = []
     for cp in (d or {}).get('cps') or []:
         if not isinstance(cp, dict):
@@ -255,19 +250,26 @@ def _media_capilaridade(d, i_tempo):
     return sum(valores) / len(valores) if valores else None
 
 
-for _i, _rotulo in enumerate(_HORAS_TEMPO_CAPILARIDADE):
-    CAMPOS_ESPECIAIS[f'cap_raiz_t_{_i}'] = (
-        'capilaridade', lambda d, r=_rotulo: _raiz_t_capilaridade(d, r),
-        f'Capilaridade — {_rotulo} — Raiz t', 'h¹/²',
-    )
-    CAMPOS_ESPECIAIS[f'cap_media_{_i}'] = (
-        'capilaridade', lambda d, i=_i: _media_capilaridade(d, i),
-        f'Capilaridade — {_rotulo} — Média', 'kg/m²',
-    )
-    CAMPOS_ESPECIAIS[f'cap_delta_mt_{_i}'] = (
-        'capilaridade', lambda d, r=_rotulo: _delta_mt_capilaridade(d, r),
-        f'Capilaridade — {_rotulo} — Δmt', 'kg/m²',
-    )
+def _no_encerramento(extrator):
+    """Aplica o extrator no tempo do encerramento; sem encerramento, sem valor."""
+    def extrair(d):
+        rotulo = _rotulo_encerramento_capilaridade(d)
+        return extrator(d, rotulo) if rotulo in _HORAS_TEMPO_CAPILARIDADE else None
+    return extrair
+
+
+CAMPOS_ESPECIAIS['capilaridade_raiz_t'] = (
+    'capilaridade', _no_encerramento(lambda d, r: _HORAS_TEMPO_CAPILARIDADE[r] ** 0.5),
+    'Capilaridade — Raiz t no encerramento', 'h¹/²',
+)
+CAMPOS_ESPECIAIS['capilaridade_media'] = (
+    'capilaridade', _no_encerramento(_media_capilaridade),
+    'Capilaridade — Média no encerramento', 'kg/m²',
+)
+CAMPOS_ESPECIAIS['capilaridade_delta_mt'] = (
+    'capilaridade', _no_encerramento(_delta_mt_capilaridade),
+    'Capilaridade — Δmt no encerramento', 'kg/m²',
+)
 
 _LABEL_METRICA_PENEIRA = {
     'retido': 'Retido',
