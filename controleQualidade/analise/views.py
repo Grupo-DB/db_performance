@@ -128,6 +128,12 @@ CAMPOS_ESPECIAIS = {
     'variacao_massa_m28': ('variacao_massa', lambda d: ((d or {}).get('m28') or {}).get('media'), 'Variação de Massa (M28)', '%'),
     'massa_especifica_media': ('massa_especifica', lambda d: (d or {}).get('media'), 'Massa Específica (Areia/Calcário)', 'kg/m³'),
     'retencao_agua_resultado': ('retencao_agua', lambda d: (d or {}).get('resultado'), 'Retenção de Água', '%'),
+    # Mesma precedência do laudo: o Aw ajustado pelo laboratório vence o calculado.
+    'capilaridade_aw': (
+        'capilaridade',
+        lambda d: (d or {}).get('aw_laboratorio') if (d or {}).get('aw_laboratorio') is not None else (d or {}).get('aw_calculado'),
+        'Coef. de Capilaridade (Aw)', 'kg/m²·h^0,5',
+    ),
 }
 
 # Cal Completo: os 15 resultados da planilha DB CAL Plan ficam num único JSON
