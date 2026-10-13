@@ -4,10 +4,19 @@ from rest_framework import serializers
 from .models import EvidenciaAnexo, ExtracaoIA, Norma, PlanoAcao, Requisito, Verificacao
 
 
-def _nome_usuario(u):
+def nome_usuario(u):
+    """
+    Nome de quem é responsável, como as pessoas se conhecem: o do cadastro de
+    colaboradores (Colaborador.user), não o login. Sem colaborador ligado, cai no
+    nome do usuário e, por fim, no login.
+    """
     if not u:
         return None
-    return (u.get_full_name() or u.username).strip()
+    # Acesso reverso de OneToOne sem registro levanta RelatedObjectDoesNotExist,
+    # que também é AttributeError — o getattr com default cobre.
+    colaborador = getattr(u, 'colaborador', None)
+    nome = (getattr(colaborador, 'nome', '') or '').strip()
+    return nome or (u.get_full_name() or u.username).strip()
 
 
 class NormaSerializer(serializers.ModelSerializer):
@@ -51,7 +60,7 @@ class RequisitoSerializer(serializers.ModelSerializer):
         read_only_fields = ['situacao', 'ultima_verificacao', 'proxima_verificacao', 'criado_em', 'atualizado_em']
 
     def get_responsavel_nome(self, obj):
-        return _nome_usuario(obj.responsavel)
+        return nome_usuario(obj.responsavel)
 
 
 class EvidenciaAnexoSerializer(serializers.ModelSerializer):
@@ -79,7 +88,7 @@ class VerificacaoSerializer(serializers.ModelSerializer):
         read_only_fields = ['requisito', 'criado_em']
 
     def get_verificado_por_nome(self, obj):
-        return _nome_usuario(obj.verificado_por)
+        return nome_usuario(obj.verificado_por)
 
 
 class PlanoAcaoSerializer(serializers.ModelSerializer):
@@ -98,7 +107,7 @@ class PlanoAcaoSerializer(serializers.ModelSerializer):
         read_only_fields = ['tarefa', 'concluido_em', 'criado_em']
 
     def get_responsavel_nome(self, obj):
-        return _nome_usuario(obj.responsavel)
+        return nome_usuario(obj.responsavel)
 
     def get_requisito_resumo(self, obj):
         r = obj.requisito

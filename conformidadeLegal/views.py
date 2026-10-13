@@ -8,12 +8,14 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from kanban.models import KanbanColumn, KanbanTask
 
 from . import ia
 from .models import TEMAS, EvidenciaAnexo, ExtracaoIA, Norma, PlanoAcao, Requisito, Verificacao
 from .permissions import IsConformidade
+from .serializers import nome_usuario
 from .serializers import (
     ExtracaoIASerializer, NormaSerializer, PlanoAcaoSerializer, RequisitoSerializer, VerificacaoSerializer,
 )
@@ -211,7 +213,7 @@ class RequisitoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = (Requisito.objects
-              .select_related('norma', 'responsavel')
+              .select_related('norma', 'responsavel__colaborador')
               .annotate(planos_abertos=Count('planos', filter=Q(planos__concluido_em__isnull=True)
                                              & (Q(planos__tarefa__isnull=True) | Q(planos__tarefa__concluido_em__isnull=True)))))
         p = self.request.query_params
@@ -272,7 +274,7 @@ class RequisitoViewSet(viewsets.ModelViewSet):
 
         proximas = (aplicaveis.filter(proxima_verificacao__isnull=False,
                                       proxima_verificacao__lte=hoje + timedelta(days=30))
-                    .select_related('norma', 'responsavel').order_by('proxima_verificacao')[:12])
+                    .select_related('norma', 'responsavel__colaborador').order_by('proxima_verificacao')[:12])
 
         return Response({
             'total': ativos.count(),
@@ -442,7 +444,7 @@ class VerificacaoViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
     serializer_class = VerificacaoSerializer
 
     def get_queryset(self):
-        qs = Verificacao.objects.select_related('verificado_por').prefetch_related('anexos')
+        qs = Verificacao.objects.select_related('verificado_por__colaborador').prefetch_related('anexos')
         if self.request.query_params.get('requisito'):
             qs = qs.filter(requisito=self.request.query_params['requisito'])
         return qs
@@ -465,7 +467,7 @@ class PlanoAcaoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = PlanoAcao.objects.select_related(
-            'requisito__norma', 'responsavel', 'tarefa__coluna__quadro')
+            'requisito__norma', 'responsavel__colaborador', 'tarefa__coluna__quadro')
         p = self.request.query_params
         if p.get('requisito'):
             qs = qs.filter(requisito=p['requisito'])
@@ -491,3 +493,23 @@ class PlanoAcaoViewSet(viewsets.ModelViewSet):
         plano.save(update_fields=['concluido_em'])
         return Response(self.get_serializer(plano).data)
 
+
+class ResponsaveisView(APIView):
+    """
+    Pessoas que podem ser responsáveis por requisito ou plano: usuários ativos, com o
+    nome do cadastro de colaboradores. Própria do módulo — a lista geral de usuários
+    (management/get_users) é usada pelo Kanban e mostra o login.
+    """
+
+    permission_classes = [IsConformidade]
+
+    def get(self, request):
+        import unicodedata
+        usuarios = User.objects.filter(is_active=True).select_related('colaborador')
+        lista = [{'id': u.id, 'nome': nome_usuario(u), 'login': u.username} for u in usuarios]
+
+        def chave(item):
+            sem_acento = unicodedata.normalize('NFKD', item['nome']).encode('ascii', 'ignore').decode()
+            return sem_acento.casefold()
+
+        return Response(sorted(lista, key=chave))

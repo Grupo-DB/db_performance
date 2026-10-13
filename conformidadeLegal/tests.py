@@ -113,6 +113,25 @@ class ConformidadeLegalTests(APITestCase):
         self.assertEqual(PlanoAcao.objects.count(), 2)
         self.assertFalse(Verificacao.objects.filter(requisito=em_analise).exists())
 
+    def test_responsaveis_traz_ativos_com_o_nome_mais_humano_que_houver(self):
+        User.objects.create_user('jsilva', first_name='João', last_name='Silva', password='x')
+        User.objects.create_user('inativo', password='x', is_active=False)
+        r = self.client.get('/conformidadeLegal/responsaveis/')
+        self.assertEqual(r.status_code, 200)
+        nomes = {u['login']: u['nome'] for u in r.data}
+        self.assertEqual(nomes['jsilva'], 'João Silva')  # sem colaborador ligado: nome do usuário
+        self.assertEqual(nomes['sgi'], 'sgi')            # sem nome nenhum: o login
+        self.assertNotIn('inativo', nomes)
+
+    def test_nome_do_colaborador_vence_o_do_usuario(self):
+        from types import SimpleNamespace
+        from .serializers import nome_usuario
+        usuario = SimpleNamespace(username='jsilva', get_full_name=lambda: 'J Silva',
+                                  colaborador=SimpleNamespace(nome='João da Silva'))
+        self.assertEqual(nome_usuario(usuario), 'João da Silva')
+        usuario.colaborador = SimpleNamespace(nome='  ')
+        self.assertEqual(nome_usuario(usuario), 'J Silva')
+
     def test_sem_grupo_nao_entra(self):
         self.client.force_authenticate(User.objects.create_user('outro', password='x'))
         self.assertEqual(self.client.get('/conformidadeLegal/requisitos/').status_code, 403)
