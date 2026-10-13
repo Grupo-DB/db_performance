@@ -201,6 +201,74 @@ for _chave, _rotulo in CAMPOS_CAL_COMPLETO:
         '%',
     )
 
+# Capilaridade por tempo: a tabela "Resultado por Tempo" da análise, tempo × valor.
+# Espelha ESPECIAIS_CAPILARIDADE_TEMPO em shared/campos-especiais.ts; a ordem dos
+# tempos é a de _HORAS_TEMPO_CAPILARIDADE (= TEMPOS_CAPILARIDADE do front).
+_PI_PLANILHA = 3.1416  # constante escrita à mão na planilha; é o que faz bater dígito a dígito
+
+
+def _num(v):
+    try:
+        return float(str(v).replace(',', '.')) if v not in (None, '') else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ponto_capilaridade(d, rotulo):
+    for ponto in (d or {}).get('dados') or []:
+        if isinstance(ponto, dict) and ponto.get('tLabel') == rotulo:
+            return ponto
+    return None
+
+
+def _delta_mt_capilaridade(d, rotulo):
+    delta = _num((_ponto_capilaridade(d, rotulo) or {}).get('deltaMt'))
+    # Δmt <= 0 é linha vazia (mesmo critério do cálculo do Aw).
+    return delta if delta is not None and delta > 0 else None
+
+
+def _raiz_t_capilaridade(d, rotulo):
+    # Só nos tempos que entraram no gráfico, e do rótulo — nunca o √t digitado (2,45 ≠ √6).
+    if _delta_mt_capilaridade(d, rotulo) is None:
+        return None
+    return _HORAS_TEMPO_CAPILARIDADE[rotulo] ** 0.5
+
+
+def _media_capilaridade(d, i_tempo):
+    """Média simples dos CPs ("Média 1") no tempo — core/utils/capilaridade.ts.
+
+    Δmt do CP = (m_t − m_t0)/1000/área, área = 3,1416·r² com r = média dos dois raios.
+    Sem dados brutos (`cps`) não há média: o Δmt foi digitado.
+    """
+    valores = []
+    for cp in (d or {}).get('cps') or []:
+        if not isinstance(cp, dict):
+            continue
+        raios = [x / 100 / 2 for x in (_num(cp.get('diametroA')), _num(cp.get('diametroB'))) if x and x > 0]
+        massas = cp.get('massas') or []
+        massa = _num(massas[i_tempo]) if i_tempo < len(massas) else None
+        massa_t0 = _num(cp.get('massaT0'))
+        if not raios or not massa or massa <= 0 or not massa_t0 or massa_t0 <= 0:
+            continue
+        raio = sum(raios) / len(raios)
+        valores.append((massa - massa_t0) / 1000 / (_PI_PLANILHA * raio * raio))
+    return sum(valores) / len(valores) if valores else None
+
+
+for _i, _rotulo in enumerate(_HORAS_TEMPO_CAPILARIDADE):
+    CAMPOS_ESPECIAIS[f'cap_raiz_t_{_i}'] = (
+        'capilaridade', lambda d, r=_rotulo: _raiz_t_capilaridade(d, r),
+        f'Capilaridade — {_rotulo} — Raiz t', 'h¹/²',
+    )
+    CAMPOS_ESPECIAIS[f'cap_media_{_i}'] = (
+        'capilaridade', lambda d, i=_i: _media_capilaridade(d, i),
+        f'Capilaridade — {_rotulo} — Média', 'kg/m²',
+    )
+    CAMPOS_ESPECIAIS[f'cap_delta_mt_{_i}'] = (
+        'capilaridade', lambda d, r=_rotulo: _delta_mt_capilaridade(d, r),
+        f'Capilaridade — {_rotulo} — Δmt', 'kg/m²',
+    )
+
 _LABEL_METRICA_PENEIRA = {
     'retido': 'Retido',
     'passante': 'Passante',
@@ -1272,6 +1340,9 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                 'usada_laudo': analise.usada_laudo,
                 'laboratorio_atual': analise.laboratorio_atual,
                 'classificacao': analise.classificacao,
+                # Tabela "Resultado por Tempo" no PDF do relatório (relatoriosDinamicos);
+                # poucas análises têm, e o JSON é pequeno.
+                'capilaridade': analise.capilaridade or None,
                 'amostra': {
                     'id': amostra.id if amostra else None,
                     'numero': amostra.numero if amostra else None,
