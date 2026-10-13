@@ -9,7 +9,7 @@ from rest_framework.test import APITestCase
 
 from kanban.models import KanbanBoard, KanbanColumn, KanbanTask
 
-from .models import Norma, PlanoAcao, Requisito, Verificacao
+from .models import EvidenciaAnexo, Norma, PlanoAcao, Requisito, Verificacao
 
 # Anexos dos testes vão para uma pasta descartável, não para o media/ do projeto.
 MEDIA_TESTE = tempfile.mkdtemp(prefix='conformidade-testes-')
@@ -40,6 +40,78 @@ class ConformidadeLegalTests(APITestCase):
         }, format='json')
         self.assertEqual(r.status_code, 201, r.data)
         return Requisito.objects.get(pk=r.data['id'])
+
+    def test_edicao_em_lote_muda_so_os_campos_enviados(self):
+        a = self._requisito(aplicabilidade='EM_ANALISE', unidade='Mina')
+        b = self._requisito(aplicabilidade='EM_ANALISE', unidade='Britagem')
+        r = self.client.post('/conformidadeLegal/requisitos/editar-lote/', {
+            'ids': [a.id, b.id],
+            'campos': {'aplicabilidade': 'NAO_APLICAVEL', 'justificativa': 'Sem caldeira.', 'norma': 999},
+        }, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        for req, unidade in ((a, 'Mina'), (b, 'Britagem')):
+            req.refresh_from_db()
+            # `norma` não é campo de lote e é ignorado; a unidade de cada um fica.
+            self.assertEqual((req.aplicabilidade, req.justificativa, req.unidade, req.norma_id),
+                             ('NAO_APLICAVEL', 'Sem caldeira.', unidade, self.norma.id))
+
+    def test_edicao_em_lote_e_tudo_ou_nada(self):
+        a = self._requisito()
+        r = self.client.post('/conformidadeLegal/requisitos/editar-lote/',
+                             {'ids': [a.id, 987654], 'campos': {'unidade': 'X'}}, format='json')
+        self.assertEqual(r.status_code, 400)
+        r = self.client.post('/conformidadeLegal/requisitos/editar-lote/',
+                             {'ids': [a.id], 'campos': {'aplicabilidade': 'TALVEZ'}}, format='json')
+        self.assertEqual(r.status_code, 400)
+        a.refresh_from_db()
+        self.assertEqual((a.unidade, a.aplicabilidade), ('', 'APLICAVEL'))
+
+    def test_verificacao_em_lote_compartilha_o_anexo(self):
+        import os
+        a, b, c = self._requisito(), self._requisito(), self._requisito()
+        laudo = SimpleUploadedFile('laudo_chamine.pdf', b'%PDF-1.4 laudo', content_type='application/pdf')
+        r = self.client.post('/conformidadeLegal/requisitos/verificar-lote/', {
+            'ids': [a.id, b.id, c.id], 'resultado': 'ATENDIDO', 'data': '2026-10-01',
+            'evidencia': 'Laudo de amostragem 2026.', 'arquivos': [laudo],
+        }, format='multipart')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual((r.data['verificacoes'], r.data['planos']), (3, 0))
+        anexos = list(EvidenciaAnexo.objects.order_by('id'))
+        self.assertEqual(len(anexos), 3)
+        self.assertEqual(len({x.arquivo.name for x in anexos}), 1)  # gravado uma vez só
+        caminho = anexos[0].arquivo.path
+        for req in (a, b, c):
+            req.refresh_from_db()
+            self.assertEqual((req.situacao, req.proxima_verificacao), ('ATENDIDO', date(2027, 4, 1)))
+
+        # Apagar uma das verificações não pode levar o arquivo das outras.
+        self.client.delete(f'/conformidadeLegal/verificacoes/{anexos[0].verificacao_id}/')
+        self.assertTrue(os.path.exists(caminho))
+        for x in anexos[1:]:
+            self.client.delete(f'/conformidadeLegal/verificacoes/{x.verificacao_id}/')
+        self.assertFalse(os.path.exists(caminho))
+
+    def test_verificacao_em_lote_regras(self):
+        a, b = self._requisito(), self._requisito()
+        em_analise = self._requisito(aplicabilidade='EM_ANALISE')
+        url = '/conformidadeLegal/requisitos/verificar-lote/'
+        r = self.client.post(url, {'ids': [a.id, em_analise.id], 'resultado': 'ATENDIDO'}, format='multipart')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('Aplicável', str(r.data['ids']))
+        # Não atendido sem plano é recusado; com plano, cada um ganha o seu.
+        r = self.client.post(url, {'ids': [a.id, b.id], 'resultado': 'NAO_ATENDIDO'}, format='multipart')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('plano_descricao', r.data)
+        r = self.client.post(url, {'ids': [a.id, b.id], 'resultado': 'NAO_ATENDIDO',
+                                   'plano_descricao': 'Contratar amostragem.'}, format='multipart')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['planos'], 2)
+        # De novo: os dois já têm plano aberto, então nada de plano duplicado.
+        r = self.client.post(url, {'ids': [a.id, b.id], 'resultado': 'PARCIAL',
+                                   'plano_descricao': 'Outro.'}, format='multipart')
+        self.assertEqual((r.status_code, r.data['planos']), (201, 0))
+        self.assertEqual(PlanoAcao.objects.count(), 2)
+        self.assertFalse(Verificacao.objects.filter(requisito=em_analise).exists())
 
     def test_sem_grupo_nao_entra(self):
         self.client.force_authenticate(User.objects.create_user('outro', password='x'))

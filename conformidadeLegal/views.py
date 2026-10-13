@@ -148,6 +148,52 @@ class NormaViewSet(viewsets.ModelViewSet):
         return Response(ExtracaoIASerializer(extracao).data, status=status.HTTP_202_ACCEPTED)
 
 
+LIMITE_LOTE = 500
+# O que a edição em lote pode mudar. Norma, descrição e referência são de cada requisito.
+CAMPOS_LOTE = ('aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'periodicidade_meses', 'tema', 'ativo')
+
+
+def _validar_vcl(d):
+    resultado = d.get('resultado')
+    if resultado not in RESULTADOS_VALIDOS:
+        raise ValidationError({'resultado': 'Informe Atendido, Parcial ou Não atendido.'})
+    data_vcl = _data(d.get('data'), 'data') or date.today()
+    if data_vcl > date.today():
+        raise ValidationError({'data': 'A verificação não pode ter data futura.'})
+    return resultado, data_vcl
+
+
+def _registrar_vcl(req, d, resultado, data_vcl, usuario, anexos):
+    """
+    Cria a VCL, liga os anexos e recalcula a situação. `anexos` são uploads (gravados
+    agora) ou EvidenciaAnexo já gravados — no lote, o arquivo vai para o disco uma vez
+    só e as outras verificações apontam para o mesmo caminho. Devolve (vcl, anexos
+    gravados), para o próximo requisito do lote reaproveitar.
+    """
+    vcl = Verificacao.objects.create(
+        requisito=req, data=data_vcl, resultado=resultado,
+        evidencia=d.get('evidencia', '') or '', observacao=d.get('observacao', '') or '',
+        verificado_por=usuario,
+    )
+    gravados = []
+    for a in anexos:
+        if isinstance(a, EvidenciaAnexo):
+            gravados.append(EvidenciaAnexo.objects.create(verificacao=vcl, arquivo=a.arquivo.name, nome=a.nome,
+                                                          tamanho=a.tamanho))
+        else:
+            gravados.append(EvidenciaAnexo.objects.create(verificacao=vcl, arquivo=a, nome=a.name))
+    req.recalcular_situacao()
+    return vcl, gravados
+
+
+def _abrir_plano(req, vcl, d, usuario):
+    return PlanoAcao.objects.create(
+        requisito=req, verificacao=vcl, descricao=d['plano_descricao'].strip(),
+        responsavel=_usuario(d.get('plano_responsavel'), 'plano_responsavel') or req.responsavel,
+        prazo=_data(d.get('plano_prazo'), 'plano_prazo'), criado_por=usuario,
+    )
+
+
 def _total_paginas(norma) -> int | None:
     """Páginas do PDF da norma; None quando não há PDF ou ele não abre."""
     if not norma.arquivo or not norma.arquivo.name.lower().endswith('.pdf'):
@@ -263,35 +309,17 @@ class RequisitoViewSet(viewsets.ModelViewSet):
         if req.aplicabilidade != 'APLICAVEL':
             raise ValidationError({'detail': 'Só requisitos aplicáveis são verificados. Defina a aplicabilidade antes.'})
         d = request.data
-        resultado = d.get('resultado')
-        if resultado not in RESULTADOS_VALIDOS:
-            raise ValidationError({'resultado': 'Informe Atendido, Parcial ou Não atendido.'})
-        data_vcl = _data(d.get('data'), 'data') or date.today()
-        if data_vcl > date.today():
-            raise ValidationError({'data': 'A verificação não pode ter data futura.'})
-        arquivos = request.FILES.getlist('arquivos')
+        resultado, data_vcl = _validar_vcl(d)
         if resultado != 'ATENDIDO' and not (d.get('plano_descricao') or '').strip() \
                 and not req.planos.filter(PLANO_ABERTO).exists():
             # Sem plano, o "não atendido" fica parado sem dono — é o que a ISO cobra.
             raise ValidationError({'plano_descricao': 'Descreva o plano de ação para o que não foi atendido.'})
 
         with transaction.atomic():
-            vcl = Verificacao.objects.create(
-                requisito=req, data=data_vcl, resultado=resultado,
-                evidencia=d.get('evidencia', '') or '', observacao=d.get('observacao', '') or '',
-                verificado_por=request.user,
-            )
-            for f in arquivos:
-                EvidenciaAnexo.objects.create(verificacao=vcl, arquivo=f, nome=f.name)
-            req.recalcular_situacao()
-
+            vcl, _ = _registrar_vcl(req, d, resultado, data_vcl, request.user, request.FILES.getlist('arquivos'))
             plano = None
             if (d.get('plano_descricao') or '').strip():
-                plano = PlanoAcao.objects.create(
-                    requisito=req, verificacao=vcl, descricao=d['plano_descricao'].strip(),
-                    responsavel=_usuario(d.get('plano_responsavel'), 'plano_responsavel') or req.responsavel,
-                    prazo=_data(d.get('plano_prazo'), 'plano_prazo'), criado_por=request.user,
-                )
+                plano = _abrir_plano(req, vcl, d, request.user)
                 if d.get('coluna_id'):
                     _criar_tarefa_kanban(plano, d['coluna_id'], request.user)
 
@@ -301,6 +329,85 @@ class RequisitoViewSet(viewsets.ModelViewSet):
             'requisito': RequisitoSerializer(self.get_queryset().get(pk=req.pk), context=ctx).data,
             'verificacao': VerificacaoSerializer(vcl, context=ctx).data,
             'plano': PlanoAcaoSerializer(plano, context=ctx).data if plano else None,
+        }, status=status.HTTP_201_CREATED)
+
+    def _requisitos_do_lote(self, valor) -> list:
+        """`ids` em lista JSON, repetido no multipart ou "1,2,3" → os requisitos, todos existentes."""
+        if hasattr(self.request.data, 'getlist') and len(self.request.data.getlist('ids')) > 1:
+            valor = self.request.data.getlist('ids')
+        if isinstance(valor, str):
+            valor = valor.split(',')
+        try:
+            ids = {int(i) for i in (valor or []) if str(i).strip()}
+        except (TypeError, ValueError):
+            raise ValidationError({'ids': 'Lista de requisitos inválida.'})
+        if not ids:
+            raise ValidationError({'ids': 'Nenhum requisito selecionado.'})
+        if len(ids) > LIMITE_LOTE:
+            raise ValidationError({'ids': f'No máximo {LIMITE_LOTE} requisitos por vez.'})
+        reqs = list(Requisito.objects.filter(pk__in=ids).order_by('id'))
+        if len(reqs) != len(ids):
+            raise ValidationError({'ids': 'Algum requisito selecionado não existe mais. Recarregue a lista.'})
+        return reqs
+
+    @action(detail=False, methods=['post'], url_path='editar-lote')
+    def editar_lote(self, request):
+        """
+        Aplica os mesmos campos a vários requisitos: ``{"ids": [...], "campos": {...}}``.
+        Só os campos enviados mudam — é a triagem das sugestões da IA ("estes 15 não se
+        aplicam") sem abrir um por um. Tudo ou nada: um inválido desfaz o lote.
+        """
+        reqs = self._requisitos_do_lote(request.data.get('ids'))
+        campos = {k: v for k, v in (request.data.get('campos') or {}).items() if k in CAMPOS_LOTE}
+        if not campos:
+            raise ValidationError({'campos': 'Nada para alterar.'})
+        ctx = {'request': request}
+        with transaction.atomic():
+            for req in reqs:
+                s = RequisitoSerializer(req, data=campos, partial=True, context=ctx)
+                s.is_valid(raise_exception=True)
+                req = s.save()
+                if 'periodicidade_meses' in s.validated_data:
+                    req.recalcular_situacao()
+        return Response(RequisitoSerializer(self.get_queryset().filter(pk__in=[r.pk for r in reqs]),
+                                            many=True, context=ctx).data)
+
+    @action(detail=False, methods=['post'], url_path='verificar-lote')
+    def verificar_lote(self, request):
+        """
+        Mesma VCL para vários requisitos — o caso do laudo único que comprova vários
+        itens. Multipart como em `verificar`, mais `ids`. Os anexos são gravados UMA vez
+        e ligados a todas as verificações. Fora de "Atendido", requisito sem plano aberto
+        ganha um plano com a descrição informada (a tarefa no Kanban, se quiser, sai
+        depois pela tela de planos — uma por plano).
+        """
+        reqs = self._requisitos_do_lote(request.data.get('ids'))
+        fora = [r for r in reqs if r.aplicabilidade != 'APLICAVEL']
+        if fora:
+            raise ValidationError({'ids': f'{len(fora)} dos selecionados não estão como "Aplicável". '
+                                          'Só requisitos aplicáveis são verificados.'})
+        d = request.data
+        resultado, data_vcl = _validar_vcl(d)
+        descricao_plano = (d.get('plano_descricao') or '').strip()
+        com_plano = set(Requisito.objects.filter(pk__in=[r.pk for r in reqs], planos__in=PlanoAcao.objects.filter(PLANO_ABERTO))
+                        .values_list('pk', flat=True))
+        if resultado != 'ATENDIDO' and not descricao_plano and any(r.pk not in com_plano for r in reqs):
+            raise ValidationError({'plano_descricao': 'Descreva o plano de ação para o que não foi atendido.'})
+
+        planos = 0
+        with transaction.atomic():
+            anexos = request.FILES.getlist('arquivos')
+            for req in reqs:
+                vcl, anexos = _registrar_vcl(req, d, resultado, data_vcl, request.user, anexos)
+                if resultado != 'ATENDIDO' and descricao_plano and req.pk not in com_plano:
+                    _abrir_plano(req, vcl, d, request.user)
+                    planos += 1
+
+        return Response({
+            'requisitos': RequisitoSerializer(self.get_queryset().filter(pk__in=[r.pk for r in reqs]), many=True,
+                                              context={'request': request}).data,
+            'verificacoes': len(reqs),
+            'planos': planos,
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], url_path='criar-lote')
@@ -342,9 +449,13 @@ class VerificacaoViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
 
     def perform_destroy(self, instance):
         req = instance.requisito
-        for anexo in instance.anexos.all():
-            anexo.arquivo.delete(save=False)
+        anexos = list(instance.anexos.all())
         instance.delete()
+        # A verificação em lote liga o MESMO arquivo a várias verificações: só sai do
+        # disco quando a última que aponta para ele for embora.
+        for anexo in anexos:
+            if not EvidenciaAnexo.objects.filter(arquivo=anexo.arquivo.name).exists():
+                anexo.arquivo.delete(save=False)
         req.recalcular_situacao()
 
 
