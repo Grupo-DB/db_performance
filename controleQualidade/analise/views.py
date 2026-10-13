@@ -103,6 +103,35 @@ FILTROS_SUPORTADOS = sorted(
     + [f'{c}_fim' for c in CAMPOS_DATA_AMOSTRA]
 )
 
+# Rótulos de tempo da capilaridade (core/utils/capilaridade.ts → TEMPOS_CAPILARIDADE).
+_HORAS_TEMPO_CAPILARIDADE = {
+    '5min': 0.083, '20min': 0.33, '1h': 1, '2h': 2, '4h': 4,
+    '6h': 6, '8h': 8, '22:30h': 22.5, '24h': 24,
+}
+
+
+def _horas_encerramento_capilaridade(d):
+    """Ponto em que o ensaio de capilaridade encerrou, em horas.
+
+    `duracao_ensaio` é o rótulo do tempo do Δmt máximo. Registro antigo sem ele cai na
+    última linha de `dados` com Δmt > 0 (linha em branco grava Δmt '').
+    """
+    d = d or {}
+    rotulo = d.get('duracao_ensaio')
+    if not rotulo:
+        for ponto in reversed(d.get('dados') or []):
+            if not isinstance(ponto, dict):
+                continue
+            try:
+                delta = float(str(ponto.get('deltaMt')).replace(',', '.'))
+            except (TypeError, ValueError):
+                continue
+            if delta > 0:
+                rotulo = ponto.get('tLabel')
+                break
+    return _HORAS_TEMPO_CAPILARIDADE.get(str(rotulo).strip()) if rotulo else None
+
+
 # Cálculos especiais de argamassa: cada um é um campo JSON dedicado no modelo Analise
 # (preenchido pelos drawers do menu "Ações Argamassa"/"Peneiras" em analise.ts), fora do
 # pipeline genérico de Ensaio/CalculoEnsaio. Mapeia campo_especial -> (nome do campo no
@@ -133,6 +162,12 @@ CAMPOS_ESPECIAIS = {
         'capilaridade',
         lambda d: (d or {}).get('aw_laboratorio') if (d or {}).get('aw_laboratorio') is not None else (d or {}).get('aw_calculado'),
         'Coef. de Capilaridade (Aw)', 'kg/m²·h^0,5',
+    ),
+    # Tempo do Δmt máximo ("Duração do ensaio" do laudo), em horas para média/mín/máx
+    # funcionarem; o front devolve o rótulo ("6h", "22:30h").
+    'capilaridade_encerramento': (
+        'capilaridade', lambda d: _horas_encerramento_capilaridade(d),
+        'Capilaridade — Encerrado em', 'h',
     ),
 }
 
