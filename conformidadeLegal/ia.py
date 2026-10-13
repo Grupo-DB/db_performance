@@ -5,8 +5,7 @@ A IA nunca é a fonte da obrigação: ela lê o documento que a equipe anexou e
 devolve sugestões, cada uma com o trecho literal e a página de onde saiu. Quem
 aprova confere o trecho na tela de revisão antes de virar requisito.
 
-Configuração (variáveis de ambiente, repetidas no settings.py da VM — o
-settings não é versionado):
+Configuração (variáveis de ambiente, no .env lido pelo settings.py):
     CONFORMIDADE_IA_FOUNDRY_RESOURCE  nome do recurso (o <nome> de
                                       https://<nome>.services.ai.azure.com)
     CONFORMIDADE_IA_FOUNDRY_KEY       chave do recurso
@@ -15,8 +14,10 @@ settings não é versionado):
                                       marcar o que parece não se aplicar
 """
 import base64
+import io
 import json
 import logging
+import re
 
 from django.conf import settings
 
@@ -76,6 +77,66 @@ Regras:
 - Escreva a descrição em português claro, começando por um verbo no infinitivo."""
 
 
+class PaginasInvalidas(ValueError):
+    """Texto de páginas que não dá para usar; a mensagem vai direto para a tela."""
+
+
+def contar_paginas(conteudo_pdf: bytes) -> int:
+    from pypdf import PdfReader
+    return len(PdfReader(io.BytesIO(conteudo_pdf)).pages)
+
+
+def interpretar_paginas(texto: str, total: int) -> list[int]:
+    """'20-21, 24-35' → [20, 21, 24, ..., 35] (numeração do PDF, 1 = primeira).
+
+    Vazio devolve lista vazia, que quer dizer "o documento inteiro". Aceita vírgula
+    ou ponto e vírgula entre os pedaços e hífen ou travessão nos intervalos.
+    """
+    texto = (texto or '').strip()
+    if not texto:
+        return []
+    paginas = set()
+    for pedaco in re.split(r'[,;]', texto):
+        pedaco = pedaco.strip()
+        if not pedaco:
+            continue
+        m = re.fullmatch(r'(\d+)\s*(?:[-–—]\s*(\d+))?', pedaco)
+        if not m:
+            raise PaginasInvalidas(f'"{pedaco}" não é uma página nem um intervalo. Use, por exemplo: 20-21, 24-35.')
+        inicio = int(m.group(1))
+        fim = int(m.group(2) or inicio)
+        if inicio > fim:
+            raise PaginasInvalidas(f'Intervalo invertido: "{pedaco}".')
+        if inicio < 1 or fim > total:
+            raise PaginasInvalidas(f'"{pedaco}" está fora do documento, que tem {total} página(s).')
+        paginas.update(range(inicio, fim + 1))
+    return sorted(paginas)
+
+
+def descrever_paginas(paginas: list[int]) -> str:
+    """[20, 21, 24, 25, 26] → '20-21, 24-26' — a forma guardada e mostrada na tela."""
+    partes, i = [], 0
+    while i < len(paginas):
+        j = i
+        while j + 1 < len(paginas) and paginas[j + 1] == paginas[j] + 1:
+            j += 1
+        partes.append(str(paginas[i]) if i == j else f'{paginas[i]}-{paginas[j]}')
+        i = j + 1
+    return ', '.join(partes)
+
+
+def recortar_pdf(conteudo_pdf: bytes, paginas: list[int]) -> bytes:
+    """Um PDF só com as páginas pedidas, na ordem do original."""
+    from pypdf import PdfReader, PdfWriter
+    leitor = PdfReader(io.BytesIO(conteudo_pdf))
+    escritor = PdfWriter()
+    for n in paginas:
+        escritor.add_page(leitor.pages[n - 1])
+    saida = io.BytesIO()
+    escritor.write(saida)
+    return saida.getvalue()
+
+
 class IANaoConfigurada(Exception):
     pass
 
@@ -105,8 +166,16 @@ def _cliente():
     )
 
 
-def _instrucao(norma, ja_cadastrados: list[str]) -> str:
+def _instrucao(norma, ja_cadastrados: list[str], paginas: list[int] | None = None) -> str:
     partes = [f'Documento: {norma.identificacao} — {norma.ementa}.']
+    if paginas:
+        partes.append(
+            f'Este arquivo é um RECORTE: contém só as páginas {descrever_paginas(paginas)} do documento '
+            f'original, nessa ordem. Em "pagina", informe a posição da página NESTE arquivo '
+            f'(1 a {len(paginas)}), não o número impresso no rodapé — e não cite números de página '
+            f'em "observacao" nem em "descricao" (a numeração deste arquivo não é a do original). '
+            f'Obrigações que dependam de trechos fora do recorte podem ser citadas pelo que aparece aqui.'
+        )
     perfil = getattr(settings, 'CONFORMIDADE_IA_PERFIL_EMPRESA', '')
     if perfil:
         partes.append(f'Perfil da empresa (use só para apontar dúvidas de aplicabilidade em "observacao"): {perfil}')
@@ -117,12 +186,18 @@ def _instrucao(norma, ja_cadastrados: list[str]) -> str:
     return '\n\n'.join(partes)
 
 
-def extrair(norma, conteudo_pdf: bytes, ja_cadastrados: list[str]) -> dict:
-    """Devolve {'resumo', 'itens', 'tokens_entrada', 'tokens_saida'} ou levanta FalhaExtracao."""
-    if len(conteudo_pdf) > LIMITE_PDF_BYTES:
-        raise FalhaExtracao('O PDF passa de 20 MB. Separe as páginas relevantes (ex.: só as condicionantes) e anexe de novo.')
+def extrair(norma, conteudo_pdf: bytes, ja_cadastrados: list[str], paginas: list[int] | None = None) -> dict:
+    """Devolve {'resumo', 'itens', 'tokens_entrada', 'tokens_saida'} ou levanta FalhaExtracao.
+
+    `paginas` (numeração do PDF original) restringe a leitura a essas páginas; as
+    páginas citadas nas sugestões voltam convertidas para a numeração original.
+    """
     if not conteudo_pdf.startswith(b'%PDF'):
         raise FalhaExtracao('O arquivo anexado não é um PDF.')
+    if paginas:
+        conteudo_pdf = recortar_pdf(conteudo_pdf, paginas)
+    if len(conteudo_pdf) > LIMITE_PDF_BYTES:
+        raise FalhaExtracao('O PDF passa de 20 MB. Informe só as páginas relevantes (ex.: as condicionantes) no campo de páginas.')
 
     cliente = _cliente()
     # Stream: documentos longos passam do tempo de uma resposta não-streaming.
@@ -140,7 +215,7 @@ def extrair(norma, conteudo_pdf: bytes, ja_cadastrados: list[str]) -> dict:
                                'data': base64.standard_b64encode(conteudo_pdf).decode()},
                     'title': norma.identificacao,
                 },
-                {'type': 'text', 'text': _instrucao(norma, ja_cadastrados)},
+                {'type': 'text', 'text': _instrucao(norma, ja_cadastrados, paginas)},
             ],
         }],
     ) as stream:
@@ -160,7 +235,8 @@ def extrair(norma, conteudo_pdf: bytes, ja_cadastrados: list[str]) -> dict:
 
     return {
         'resumo': dados.get('resumo', ''),
-        'itens': [_normalizar(i) for i in dados.get('itens', []) if (i.get('descricao') or '').strip()],
+        'itens': [_pagina_original(_normalizar(i), paginas)
+                  for i in dados.get('itens', []) if (i.get('descricao') or '').strip()],
         'tokens_entrada': resposta.usage.input_tokens,
         'tokens_saida': resposta.usage.output_tokens,
     }
@@ -180,3 +256,11 @@ def _normalizar(item: dict) -> dict:
         'pagina': item.get('pagina') or None,
         'observacao': (item.get('observacao') or '').strip(),
     }
+
+
+def _pagina_original(item: dict, paginas: list[int] | None) -> dict:
+    """Página do recorte → página do documento original; fora do recorte vira None."""
+    if paginas and item.get('pagina'):
+        p = item['pagina']
+        item['pagina'] = paginas[p - 1] if isinstance(p, int) and 1 <= p <= len(paginas) else None
+    return item

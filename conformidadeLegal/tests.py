@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 from django.contrib.auth.models import Group, User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from rest_framework.test import APITestCase
 
 from kanban.models import KanbanBoard, KanbanColumn, KanbanTask
@@ -176,14 +176,14 @@ class ExtracaoIATests(APITestCase):
                                           arquivo=SimpleUploadedFile('lo.pdf', b'%PDF-1.4 conteudo'))
         self.url = f'/conformidadeLegal/normas/{self.norma.id}/extracao-ia/'
 
-    def _rodar(self, cliente):
+    def _rodar(self, cliente, dados=None):
         from django.test import override_settings
         from . import views
         with override_settings(CONFORMIDADE_IA_FOUNDRY_RESOURCE='grupodb', CONFORMIDADE_IA_FOUNDRY_KEY='k'), \
                 self.patch('conformidadeLegal.ia._cliente', return_value=cliente), \
                 self.patch.object(views.extrair_requisitos, 'delay', side_effect=lambda i: views.extrair_requisitos(i)), \
                 self.captureOnCommitCallbacks(execute=True):
-            r = self.client.post(self.url)
+            r = self.client.post(self.url, dados or {}, format='json')
         self.assertEqual(r.status_code, 202, r.data)
         return self.client.get(self.url).data
 
@@ -217,6 +217,40 @@ class ExtracaoIATests(APITestCase):
         self.assertEqual(chamada['messages'][0]['content'][0]['type'], 'document')
         self.assertEqual(chamada['output_config']['format']['type'], 'json_schema')
 
+    def test_paginas_recortam_o_pdf_e_voltam_na_numeracao_original(self):
+        import base64
+        import json
+        self.norma.arquivo = SimpleUploadedFile('dt.pdf', _pdf_com_paginas(6))
+        self.norma.save()
+        # A IA cita a posição no RECORTE: 2ª página do recorte = 4ª do original; 9 não existe.
+        texto = json.dumps({'resumo': 'r', 'itens': [
+            {'referencia': '4.8', 'descricao': 'Medir', 'tema': 'AMBIENTAL', 'periodicidade_meses': 12,
+             'prazo_legal': '', 'trecho': 't', 'pagina': 2, 'observacao': ''},
+            {'referencia': '4.9', 'descricao': 'Relatar', 'tema': 'AMBIENTAL', 'periodicidade_meses': 12,
+             'prazo_legal': '', 'trecho': 't', 'pagina': 9, 'observacao': ''},
+        ]})
+        cliente = _ClienteFalso(_RespostaFalsa(texto))
+        resposta = self._rodar(cliente, {'paginas': '5, 2;4 - 4'})
+        dados = resposta['extracao']
+        self.assertEqual(resposta['total_paginas'], 6)
+        self.assertEqual(dados['paginas'], '2, 4-5')
+        self.assertEqual([i['pagina'] for i in dados['itens']], [4, None])
+        # Foi só o recorte, e a instrução avisa que é recorte.
+        conteudo = cliente.chamadas[0]['messages'][0]['content']
+        enviado = base64.b64decode(conteudo[0]['source']['data'])
+        from . import ia
+        self.assertEqual(ia.contar_paginas(enviado), 3)
+        self.assertIn('RECORTE', conteudo[1]['text'])
+
+    def test_paginas_fora_do_documento_voltam_400(self):
+        self.norma.arquivo = SimpleUploadedFile('dt.pdf', _pdf_com_paginas(3))
+        self.norma.save()
+        with override_settings(CONFORMIDADE_IA_FOUNDRY_RESOURCE='r', CONFORMIDADE_IA_FOUNDRY_KEY='k'):
+            r = self.client.post(self.url, {'paginas': '2-7'}, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('3 página', str(r.data['paginas']))
+        self.assertFalse(self.norma.extracoes.exists())
+
     def test_recusa_vira_erro_legivel(self):
         dados = self._rodar(_ClienteFalso(_RespostaFalsa('', stop_reason='refusal')))['extracao']
         self.assertEqual(dados['status'], 'ERRO')
@@ -229,3 +263,41 @@ class ExtracaoIATests(APITestCase):
         with override_settings(CONFORMIDADE_IA_FOUNDRY_RESOURCE='r', CONFORMIDADE_IA_FOUNDRY_KEY='k'):
             r = self.client.post(self.url)
         self.assertEqual(r.status_code, 400)
+
+
+def _pdf_com_paginas(n: int) -> bytes:
+    """PDF de verdade com n páginas, cada uma escrita "Página k"."""
+    import io
+    from reportlab.pdfgen import canvas
+    saida = io.BytesIO()
+    c = canvas.Canvas(saida)
+    for k in range(1, n + 1):
+        c.drawString(100, 750, f'Pagina {k}')
+        c.showPage()
+    c.save()
+    return saida.getvalue()
+
+
+class PaginasTests(SimpleTestCase):
+    def test_interpreta_intervalos_e_listas(self):
+        from .ia import interpretar_paginas
+        self.assertEqual(interpretar_paginas('20-21, 24-26', 39), [20, 21, 24, 25, 26])
+        self.assertEqual(interpretar_paginas('3; 1 – 2, 3', 5), [1, 2, 3])
+        self.assertEqual(interpretar_paginas('  ', 5), [])
+
+    def test_recusa_o_que_nao_da_para_usar(self):
+        from .ia import PaginasInvalidas, interpretar_paginas
+        for texto in ('a-3', '5-2', '0', '4-6', '2,,x'):
+            with self.subTest(texto=texto), self.assertRaises(PaginasInvalidas):
+                interpretar_paginas(texto, 5)
+
+    def test_descreve_de_forma_compacta(self):
+        from .ia import descrever_paginas
+        self.assertEqual(descrever_paginas([1, 2, 3, 7, 9, 10]), '1-3, 7, 9-10')
+
+    def test_recorte_mantem_as_paginas_pedidas_na_ordem(self):
+        import io
+        from pypdf import PdfReader
+        from .ia import recortar_pdf
+        recorte = PdfReader(io.BytesIO(recortar_pdf(_pdf_com_paginas(5), [2, 4])))
+        self.assertEqual([p.extract_text().strip() for p in recorte.pages], ['Pagina 2', 'Pagina 4'])

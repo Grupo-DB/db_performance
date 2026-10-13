@@ -19,8 +19,10 @@ def extrair_requisitos(extracao_id: int):
     try:
         with norma.arquivo.open('rb') as f:
             conteudo = f.read()
-        resultado = ia.extrair(norma, conteudo, ja)
-    except (ia.FalhaExtracao, ia.IANaoConfigurada) as e:
+        # Já validado na view; reinterpretado aqui porque a task só recebe o id.
+        paginas = ia.interpretar_paginas(extracao.paginas, ia.contar_paginas(conteudo)) if extracao.paginas else None
+        resultado = ia.extrair(norma, conteudo, ja, paginas)
+    except (ia.FalhaExtracao, ia.IANaoConfigurada, ia.PaginasInvalidas) as e:
         extracao.status, extracao.erro = 'ERRO', str(e)
     except Exception:  # noqa: BLE001 — qualquer falha precisa sair do "processando"
         logger.exception('Extração IA %s falhou', extracao_id)

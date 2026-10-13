@@ -117,6 +117,7 @@ class NormaViewSet(viewsets.ModelViewSet):
             return Response({
                 'configurada': ia.configurada(),
                 'extracao': ExtracaoIASerializer(ultima).data if ultima else None,
+                'total_paginas': _total_paginas(norma),
             })
 
         if not ia.configurada():
@@ -128,9 +129,34 @@ class NormaViewSet(viewsets.ModelViewSet):
         if em_andamento:
             return Response(ExtracaoIASerializer(em_andamento).data, status=status.HTTP_202_ACCEPTED)
 
-        extracao = ExtracaoIA.objects.create(norma=norma, criado_por=request.user, modelo=ia.modelo())
+        # Páginas opcionais ("20-21, 24-35"): validadas aqui para o erro voltar na hora,
+        # e não minutos depois como extração com status ERRO.
+        texto_paginas = (request.data.get('paginas') or '').strip()
+        paginas = ''
+        if texto_paginas:
+            total = _total_paginas(norma)
+            if not total:
+                raise ValidationError({'paginas': 'Não foi possível contar as páginas deste PDF.'})
+            try:
+                paginas = ia.descrever_paginas(ia.interpretar_paginas(texto_paginas, total))
+            except ia.PaginasInvalidas as e:
+                raise ValidationError({'paginas': str(e)})
+
+        extracao = ExtracaoIA.objects.create(norma=norma, criado_por=request.user, modelo=ia.modelo(),
+                                             paginas=paginas)
         transaction.on_commit(lambda: extrair_requisitos.delay(extracao.id))
         return Response(ExtracaoIASerializer(extracao).data, status=status.HTTP_202_ACCEPTED)
+
+
+def _total_paginas(norma) -> int | None:
+    """Páginas do PDF da norma; None quando não há PDF ou ele não abre."""
+    if not norma.arquivo or not norma.arquivo.name.lower().endswith('.pdf'):
+        return None
+    try:
+        with norma.arquivo.open('rb') as f:
+            return ia.contar_paginas(f.read())
+    except Exception:  # noqa: BLE001 — PDF corrompido não pode derrubar a tela
+        return None
 
 
 class RequisitoViewSet(viewsets.ModelViewSet):

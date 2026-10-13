@@ -273,6 +273,10 @@ class ExtracaoIA(models.Model):
     itens = models.JSONField(default=list, blank=True)
     resumo = models.TextField(blank=True, default='')
     erro = models.TextField(blank=True, default='')
+    # Páginas do PDF que a IA leu, na numeração do original ("20-21, 24-35");
+    # vazio = o documento inteiro. db_default: a coluna nasce com DEFAULT no banco,
+    # então o código antigo continua inserindo enquanto o deploy não termina.
+    paginas = models.CharField(max_length=200, blank=True, default='', db_default='')
     modelo = models.CharField(max_length=80, blank=True, default='')
     tokens_entrada = models.PositiveIntegerField(default=0)
     tokens_saida = models.PositiveIntegerField(default=0)

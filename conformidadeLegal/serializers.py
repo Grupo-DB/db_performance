@@ -115,5 +115,5 @@ class PlanoAcaoSerializer(serializers.ModelSerializer):
 class ExtracaoIASerializer(serializers.ModelSerializer):
     class Meta:
         model = ExtracaoIA
-        fields = ['id', 'norma', 'status', 'itens', 'resumo', 'erro', 'modelo',
+        fields = ['id', 'norma', 'status', 'itens', 'resumo', 'erro', 'modelo', 'paginas',
                   'tokens_entrada', 'tokens_saida', 'criado_em', 'concluido_em']
