@@ -187,6 +187,8 @@ class ExtracaoIATests(APITestCase):
         self.assertEqual(r.status_code, 202, r.data)
         return self.client.get(self.url).data
 
+    # Configuração vazia forçada: o .env de quem roda o teste pode ter a chave de verdade.
+    @override_settings(CONFORMIDADE_IA_FOUNDRY_RESOURCE='', CONFORMIDADE_IA_FOUNDRY_KEY='')
     def test_sem_configuracao_responde_503(self):
         r = self.client.post(self.url)
         self.assertEqual(r.status_code, 503)
