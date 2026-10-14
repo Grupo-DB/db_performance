@@ -264,3 +264,51 @@ def _pagina_original(item: dict, paginas: list[int] | None) -> dict:
         p = item['pagina']
         item['pagina'] = paginas[p - 1] if isinstance(p, int) and 1 <= p <= len(paginas) else None
     return item
+
+
+# ── Triagem de publicações dos diários oficiais (fase 3) ─────────────────
+ESQUEMA_TRIAGEM = {
+    'type': 'object',
+    'properties': {
+        'relevancia': {'type': 'string', 'enum': ['ALTA', 'MEDIA', 'BAIXA', 'NENHUMA'],
+                       'description': 'ALTA: cria ou muda obrigação da empresa; MEDIA: pode afetar, precisa conferir; '
+                                      'BAIXA: tema próximo, sem efeito provável; NENHUMA: não diz respeito à empresa.'},
+        'motivo': {'type': 'string', 'description': 'Até 3 frases: o que a publicação faz e por que (não) afeta a empresa.'},
+        'tema': {'type': 'string', 'enum': [t for t, _ in TEMAS]},
+    },
+    'required': ['relevancia', 'motivo', 'tema'],
+    'additionalProperties': False,
+}
+
+SISTEMA_TRIAGEM = """Você é analista de conformidade legal de uma empresa brasileira e faz a triagem diária
+de publicações de diários oficiais. Diga se a publicação cria, altera ou revoga obrigação que se aplica à
+empresa descrita, usando só o texto recebido. Atos administrativos internos do órgão (pessoal, contratos,
+cooperação entre órgãos, notificações dirigidas a outras empresas) têm relevância NENHUMA ou BAIXA.
+Normas gerais de licenciamento, emissões, mineração, resíduos, recursos hídricos ou taxas ambientais que
+alcancem a atividade da empresa têm relevância ALTA ou MEDIA. Responda em português."""
+
+
+def triar_publicacao(pub) -> dict:
+    """Relevância de uma publicação para a empresa: {'relevancia', 'motivo', 'tema'}."""
+    perfil = getattr(settings, 'CONFORMIDADE_IA_PERFIL_EMPRESA', '') or 'empresa industrial no RS'
+    texto = (pub.texto or '')[:8000]
+    pedido = (f'Empresa: {perfil}\n\n'
+              f'Publicação ({pub.get_fonte_display()}, {pub.data_publicacao:%d/%m/%Y}):\n'
+              f'Órgão: {pub.orgao}\nTipo: {pub.tipo}\nTítulo: {pub.titulo}\n\n{texto}')
+    resposta = _cliente().messages.create(
+        model=modelo(),
+        max_tokens=4000,
+        system=SISTEMA_TRIAGEM,
+        output_config={'effort': 'low', 'format': {'type': 'json_schema', 'schema': ESQUEMA_TRIAGEM}},
+        messages=[{'role': 'user', 'content': pedido}],
+    )
+    if resposta.stop_reason == 'refusal':
+        raise FalhaExtracao('O modelo recusou analisar esta publicação.')
+    texto_resposta = next((b.text for b in resposta.content if b.type == 'text'), '')
+    try:
+        dados = json.loads(texto_resposta)
+    except json.JSONDecodeError:
+        raise FalhaExtracao('A resposta da IA veio fora do formato esperado.')
+    tema = dados.get('tema') if dados.get('tema') in dict(TEMAS) else 'OUTRO'
+    relevancia = dados.get('relevancia') if dados.get('relevancia') in ('ALTA', 'MEDIA', 'BAIXA', 'NENHUMA') else 'MEDIA'
+    return {'relevancia': relevancia, 'motivo': (dados.get('motivo') or '').strip(), 'tema': tema}

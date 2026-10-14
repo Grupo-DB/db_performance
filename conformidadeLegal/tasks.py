@@ -35,3 +35,36 @@ def extrair_requisitos(extracao_id: int):
         extracao.tokens_saida = resultado['tokens_saida']
     extracao.concluido_em = timezone.now()
     extracao.save()
+
+
+@shared_task
+def monitorar_diarios():
+    """
+    Coleta diária dos diários oficiais (CELERY_BEAT_SCHEDULE): recupera os dias que
+    ficaram para trás desde a última coleta boa e, em seguida, faz a triagem pela IA
+    do que entrou. Rodar mais de uma vez no dia é seguro (pega a 2ª edição).
+    """
+    from . import monitor
+    hoje = timezone.localdate()
+    for dia in monitor.dias_a_coletar('DOE_RS', hoje):
+        monitor.coletar_doe_rs(dia)
+    triar_publicacoes()
+
+
+@shared_task
+def triar_publicacoes(limite: int = 40):
+    """IA dá relevância e motivo ao que ainda não foi analisado. Sem IA configurada, a
+    publicação fica sem relevância e a equipe avalia do mesmo jeito."""
+    from .models import PublicacaoMonitorada
+    if not ia.configurada():
+        return
+    pendentes = PublicacaoMonitorada.objects.filter(status='NOVA', analisada_em__isnull=True).order_by('id')[:limite]
+    for pub in pendentes:
+        try:
+            r = ia.triar_publicacao(pub)
+        except Exception:  # noqa: BLE001 — uma publicação ruim não pode travar as outras
+            logger.exception('Triagem IA da publicação %s falhou', pub.id)
+            continue
+        pub.relevancia, pub.analise, pub.tema_sugerido = r['relevancia'], r['motivo'], r['tema']
+        pub.analisada_em = timezone.now()
+        pub.save(update_fields=['relevancia', 'analise', 'tema_sugerido', 'analisada_em'])

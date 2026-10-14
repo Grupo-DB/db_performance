@@ -1,7 +1,7 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from .models import EvidenciaAnexo, ExtracaoIA, Norma, PlanoAcao, Requisito, Verificacao
+from .models import EvidenciaAnexo, ExtracaoIA, Norma, PlanoAcao, PublicacaoMonitorada, Requisito, Verificacao
 
 
 def nome_usuario(u):
@@ -126,3 +126,26 @@ class ExtracaoIASerializer(serializers.ModelSerializer):
         model = ExtracaoIA
         fields = ['id', 'norma', 'status', 'itens', 'resumo', 'erro', 'modelo', 'paginas',
                   'tokens_entrada', 'tokens_saida', 'criado_em', 'concluido_em']
+
+
+class PublicacaoSerializer(serializers.ModelSerializer):
+    """Lista: sem o texto integral (vem no detalhe), que pode ter dezenas de KB."""
+    fonte_rotulo = serializers.CharField(source='get_fonte_display', read_only=True)
+    avaliado_por_nome = serializers.SerializerMethodField()
+    norma_identificacao = serializers.CharField(source='norma.identificacao', read_only=True, default=None)
+
+    class Meta:
+        model = PublicacaoMonitorada
+        fields = ['id', 'fonte', 'fonte_rotulo', 'id_externo', 'data_publicacao', 'orgao', 'tipo', 'titulo', 'link',
+                  'pagina', 'palavras', 'relevancia', 'analise', 'tema_sugerido', 'analisada_em', 'status', 'norma',
+                  'norma_identificacao', 'motivo_descarte', 'avaliado_por_nome', 'avaliado_em', 'criado_em']
+        read_only_fields = fields
+
+    def get_avaliado_por_nome(self, obj):
+        return nome_usuario(obj.avaliado_por)
+
+
+class PublicacaoDetalheSerializer(PublicacaoSerializer):
+    class Meta(PublicacaoSerializer.Meta):
+        fields = PublicacaoSerializer.Meta.fields + ['texto']
+        read_only_fields = fields

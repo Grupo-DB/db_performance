@@ -293,3 +293,73 @@ class ExtracaoIA(models.Model):
 
     def __str__(self):
         return f'{self.norma} — {self.get_status_display()} ({self.criado_em:%d/%m/%Y %H:%M})'
+
+
+class PublicacaoMonitorada(models.Model):
+    """
+    Publicação de diário oficial que pode interessar à empresa (fase 3).
+
+    A coleta diária (monitor.py) só grava o que passou pelo filtro de órgão, tipo e
+    palavras-chave; a IA dá uma relevância com o motivo; quem decide é a equipe —
+    descartar ou cadastrar como norma. Nada aqui vira obrigação sozinho.
+    """
+
+    FONTES = [('DOE_RS', 'Diário Oficial do RS'), ('DOU', 'Diário Oficial da União')]
+    STATUS = [('NOVA', 'Para avaliar'), ('DESCARTADA', 'Descartada'), ('CADASTRADA', 'Cadastrada como norma')]
+    RELEVANCIAS = [('ALTA', 'Alta'), ('MEDIA', 'Média'), ('BAIXA', 'Baixa'), ('NENHUMA', 'Não se aplica')]
+
+    fonte = models.CharField(max_length=10, choices=FONTES)
+    id_externo = models.CharField(max_length=64, help_text='Id da matéria na fonte (evita gravar duas vezes).')
+    data_publicacao = models.DateField()
+    orgao = models.CharField(max_length=255, blank=True, default='')
+    tipo = models.CharField(max_length=120, blank=True, default='')
+    titulo = models.CharField(max_length=500, blank=True, default='')
+    texto = models.TextField(blank=True, default='')
+    link = models.URLField(max_length=500, blank=True, default='')
+    pagina = models.PositiveIntegerField(null=True, blank=True)
+    palavras = models.JSONField(default=list, blank=True, help_text='Palavras-chave que fizeram a publicação entrar.')
+
+    relevancia = models.CharField(max_length=10, choices=RELEVANCIAS, blank=True, default='')
+    analise = models.TextField(blank=True, default='', help_text='Por que a IA acha que interessa (ou não).')
+    tema_sugerido = models.CharField(max_length=15, choices=TEMAS, blank=True, default='')
+    analisada_em = models.DateTimeField(null=True, blank=True)
+
+    status = models.CharField(max_length=12, choices=STATUS, default='NOVA')
+    norma = models.ForeignKey(Norma, null=True, blank=True, on_delete=models.SET_NULL, related_name='publicacoes')
+    motivo_descarte = models.TextField(blank=True, default='')
+    avaliado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
+    )
+    avaliado_em = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-data_publicacao', '-id']
+        constraints = [models.UniqueConstraint(fields=['fonte', 'id_externo'], name='publicacao_unica_por_fonte')]
+        indexes = [models.Index(fields=['status', 'data_publicacao'])]
+        verbose_name = 'Publicação monitorada'
+        verbose_name_plural = 'Publicações monitoradas'
+
+    def __str__(self):
+        return f'{self.get_fonte_display()} {self.data_publicacao:%d/%m/%Y} — {self.titulo[:80]}'
+
+
+class ExecucaoMonitor(models.Model):
+    """Uma coleta de um dia numa fonte. É daqui que sai o aviso de que a fonte parou de responder."""
+
+    fonte = models.CharField(max_length=10, choices=PublicacaoMonitorada.FONTES)
+    data_referencia = models.DateField()
+    iniciado_em = models.DateTimeField(auto_now_add=True)
+    concluido_em = models.DateTimeField(null=True, blank=True)
+    ok = models.BooleanField(default=False)
+    examinadas = models.PositiveIntegerField(default=0, help_text='Matérias vistas nas consultas.')
+    novas = models.PositiveIntegerField(default=0, help_text='Gravadas como publicação para avaliar.')
+    erro = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-iniciado_em']
+        verbose_name = 'Execução do monitor'
+        verbose_name_plural = 'Execuções do monitor'
+
+    def __str__(self):
+        return f'{self.fonte} {self.data_referencia:%d/%m/%Y} — {"ok" if self.ok else "erro"}'

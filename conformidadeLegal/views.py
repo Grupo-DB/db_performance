@@ -13,13 +13,16 @@ from rest_framework.views import APIView
 from kanban.models import KanbanColumn, KanbanTask
 
 from . import ia
-from .models import TEMAS, EvidenciaAnexo, ExtracaoIA, Norma, PlanoAcao, Requisito, Verificacao
+from .models import (
+    TEMAS, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, PlanoAcao, PublicacaoMonitorada, Requisito, Verificacao,
+)
 from .permissions import IsConformidade
 from .serializers import nome_usuario
 from .serializers import (
-    ExtracaoIASerializer, NormaSerializer, PlanoAcaoSerializer, RequisitoSerializer, VerificacaoSerializer,
+    ExtracaoIASerializer, NormaSerializer, PlanoAcaoSerializer, PublicacaoDetalheSerializer, PublicacaoSerializer,
+    RequisitoSerializer, VerificacaoSerializer,
 )
-from .tasks import extrair_requisitos
+from .tasks import extrair_requisitos, monitorar_diarios
 
 RESULTADOS_VALIDOS = {r for r, _ in Verificacao.RESULTADOS}
 TIPOS_COM_VALIDADE = ('LICENCA', 'OUTORGA', 'TAC')
@@ -513,3 +516,105 @@ class ResponsaveisView(APIView):
             return sem_acento.casefold()
 
         return Response(sorted(lista, key=chave))
+
+
+class PublicacaoViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    """
+    Novidades legais: o que a coleta dos diários oficiais achou. A equipe descarta ou
+    cadastra como norma; nada é criado sem essa decisão.
+    """
+
+    permission_classes = [IsConformidade]
+
+    def get_serializer_class(self):
+        return PublicacaoDetalheSerializer if self.action == 'retrieve' else PublicacaoSerializer
+
+    def get_queryset(self):
+        qs = PublicacaoMonitorada.objects.select_related('norma', 'avaliado_por__colaborador')
+        p = self.request.query_params
+        for campo in ('status', 'relevancia', 'fonte'):
+            if p.get(campo):
+                qs = qs.filter(**{campo: p[campo]})
+        if p.get('dias'):
+            try:
+                qs = qs.filter(data_publicacao__gte=date.today() - timedelta(days=int(p['dias'])))
+            except ValueError:
+                pass
+        return qs
+
+    def _avaliar(self, pub, status_novo, request, **extra):
+        pub.status = status_novo
+        pub.avaliado_por = request.user if status_novo != 'NOVA' else None
+        pub.avaliado_em = timezone.now() if status_novo != 'NOVA' else None
+        for k, v in extra.items():
+            setattr(pub, k, v)
+        pub.save()
+        return Response(PublicacaoSerializer(pub, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
+    def descartar(self, request, pk=None):
+        return self._avaliar(self.get_object(), 'DESCARTADA', request,
+                             motivo_descarte=(request.data.get('motivo') or '').strip()[:2000])
+
+    @action(detail=True, methods=['post'])
+    def reabrir(self, request, pk=None):
+        pub = self.get_object()
+        if pub.status == 'CADASTRADA':
+            raise ValidationError({'detail': 'Já virou norma. Para desfazer, exclua ou revogue a norma.'})
+        return self._avaliar(pub, 'NOVA', request, motivo_descarte='')
+
+    @action(detail=True, methods=['post'], url_path='cadastrar-norma')
+    def cadastrar_norma(self, request, pk=None):
+        """
+        Cria a norma a partir da publicação: tipo, número, ano e órgão tirados do
+        título, link oficial e um PDF com o texto publicado — pronto para a leitura
+        por IA. A tela abre a norma em seguida para a pessoa revisar.
+        """
+        from django.core.files.base import ContentFile
+        from . import monitor
+
+        pub = self.get_object()
+        if pub.status == 'CADASTRADA' and pub.norma_id:
+            raise ValidationError({'detail': 'Esta publicação já foi cadastrada como norma.'})
+        with transaction.atomic():
+            norma = Norma(**monitor.dados_de_norma(pub), criado_por=request.user)
+            nome = f'{pub.fonte.lower()}_{pub.data_publicacao:%Y%m%d}_{pub.id_externo}.pdf'
+            norma.arquivo.save(nome, ContentFile(monitor.pdf_da_publicacao(pub)), save=False)
+            norma.save()
+            self._avaliar(pub, 'CADASTRADA', request, norma=norma)
+        return Response({
+            'norma': NormaSerializer(norma, context={'request': request}).data,
+            'publicacao': PublicacaoSerializer(pub, context={'request': request}).data,
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'])
+    def situacao(self, request):
+        """Última coleta de cada fonte (é daqui que a tela avisa que uma fonte parou) e a fila."""
+        fontes = []
+        for fonte, rotulo in PublicacaoMonitorada.FONTES:
+            ultimas = list(ExecucaoMonitor.objects.filter(fonte=fonte).order_by('-iniciado_em')[:10])
+            if not ultimas:
+                continue
+            falhas = 0
+            for e in ultimas:
+                if e.ok:
+                    break
+                falhas += 1
+            u = ultimas[0]
+            fontes.append({
+                'fonte': fonte, 'rotulo': rotulo, 'ok': u.ok, 'erro': u.erro, 'data_referencia': u.data_referencia,
+                'concluido_em': u.concluido_em, 'falhas_seguidas': falhas,
+                'ultima_ok': next((e.concluido_em for e in ultimas if e.ok), None),
+            })
+        return Response({
+            'fontes': fontes,
+            'para_avaliar': PublicacaoMonitorada.objects.filter(status='NOVA').count(),
+            'relevantes': PublicacaoMonitorada.objects.filter(status='NOVA', relevancia__in=['ALTA', 'MEDIA']).count(),
+        })
+
+    @action(detail=False, methods=['post'])
+    def coletar(self, request):
+        """Roda a coleta agora (além dos horários agendados)."""
+        monitorar_diarios.delay()
+        return Response({'detail': 'Coleta iniciada. As novidades aparecem em alguns minutos.'},
+                        status=status.HTTP_202_ACCEPTED)

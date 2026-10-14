@@ -320,6 +320,16 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 
+# Tarefas periódicas definidas em código (o beat da VM roda sem agendador de banco).
+CELERY_BEAT_SCHEDULE = {
+    # Conformidade Legal: coleta dos diários oficiais e triagem por IA — 07:30 e 13:30 de
+    # Brasília (o CELERY_TIMEZONE é UTC). A 2ª passada pega a 2ª edição e as extras.
+    'conformidade-monitorar-diarios': {
+        'task': 'conformidadeLegal.tasks.monitorar_diarios',
+        'schedule': crontab(hour='10,16', minute=30),
+    },
+}
+
 CSRF_TRUSTED_ORIGINS = ["https://managerdb.com.br"]
 
 CORS_ALLOW_HEADERS = [

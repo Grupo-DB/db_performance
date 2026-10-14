@@ -1,6 +1,8 @@
 from django.contrib import admin
 
-from .models import EvidenciaAnexo, ExtracaoIA, Norma, PlanoAcao, Requisito, Verificacao
+from .models import (
+    EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, PlanoAcao, PublicacaoMonitorada, Requisito, Verificacao,
+)
 
 
 @admin.register(Norma)
@@ -42,3 +44,17 @@ class ExtracaoIAAdmin(admin.ModelAdmin):
     list_display = ('norma', 'status', 'modelo', 'tokens_entrada', 'tokens_saida', 'criado_em')
     list_filter = ('status',)
     raw_id_fields = ('norma',)
+
+
+@admin.register(PublicacaoMonitorada)
+class PublicacaoMonitoradaAdmin(admin.ModelAdmin):
+    list_display = ('data_publicacao', 'fonte', 'orgao', 'titulo', 'relevancia', 'status')
+    list_filter = ('fonte', 'status', 'relevancia')
+    search_fields = ('titulo', 'texto', 'orgao')
+    raw_id_fields = ('norma', 'avaliado_por')
+
+
+@admin.register(ExecucaoMonitor)
+class ExecucaoMonitorAdmin(admin.ModelAdmin):
+    list_display = ('data_referencia', 'fonte', 'ok', 'examinadas', 'novas', 'iniciado_em', 'erro')
+    list_filter = ('fonte', 'ok')

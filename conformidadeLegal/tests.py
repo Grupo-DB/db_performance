@@ -392,3 +392,158 @@ class PaginasTests(SimpleTestCase):
         from .ia import recortar_pdf
         recorte = PdfReader(io.BytesIO(recortar_pdf(_pdf_com_paginas(5), [2, 4])))
         self.assertEqual([p.extract_text().strip() for p in recorte.pages], ['Pagina 2', 'Pagina 4'])
+
+
+class _SessaoDoeFalsa:
+    """Imita a API do DOE-RS: busca paginada por dia + detalhe da matéria."""
+
+    def __init__(self, materias, falhar=False):
+        self.materias = materias  # {id: dict do detalhe}, com chave extra '_consulta'
+        self.falhar = falhar
+        self.pedidos = []
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        from types import SimpleNamespace
+        self.pedidos.append((url, params))
+        if self.falhar:
+            return SimpleNamespace(status_code=503, json=lambda: {})
+        if url.endswith('/materias'):
+            chave = params.get('entidade') or params.get('tipoMateria')
+            itens = [{'procergs': {'id': i, 'tipo': m['tipoMateria'], 'data': '13/10/2026', 'conteudo': ''}}
+                     for i, m in self.materias.items() if m['_consulta'] == chave]
+            pagina = itens[(params['page'] - 1) * 10: params['page'] * 10]
+            return SimpleNamespace(status_code=200, json=lambda: {'collection': pagina, 'pageSize': 10,
+                                                                  'collectionSize': len(itens)})
+        i = int(url.rsplit('/', 1)[1])
+        return SimpleNamespace(status_code=200, json=lambda: self.materias[i])
+
+
+def _materia(consulta, tipo, html, orgao='Fundação Estadual de Proteção Ambiental Henrique Luiz Roessler'):
+    return {'_consulta': consulta, 'tipoMateria': tipo, 'conteudo': html, 'orgao': orgao,
+            'data': '2026-10-13', 'pagina': 99}
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class MonitorDiariosTests(APITestCase):
+    FEPAM = 'Fundação Estadual de Proteção Ambiental'
+    SEMA = 'Secretaria do Meio Ambiente e Infraestrutura'
+
+    def setUp(self):
+        from unittest.mock import patch
+        self.patch = patch
+        self.user = User.objects.create_user('sgi', password='x')
+        self.user.groups.add(Group.objects.create(name='ConformidadeLegal'))
+        self.client.force_authenticate(self.user)
+        patch('conformidadeLegal.monitor.PAUSA', 0).start()
+        patch('conformidadeLegal.monitor.time.sleep').start()
+        self.addCleanup(patch.stopall)
+
+    def _sessao(self):
+        return _SessaoDoeFalsa({
+            1: _materia(self.FEPAM, 'Atos Administrativos', '<p><b>RESOLUÇÃO Nº 48/2026</b></p><p>Custos do licenciamento corretivo.</p>'),
+            2: _materia(self.FEPAM, 'Contratos', '<p>Contrato de limpeza.</p>'),
+            3: _materia(self.FEPAM, 'Atos Administrativos', '<p>SÚMULA DE CONTRATO</p><p>Partes: FEPAM e empresa X.</p>'),
+            4: _materia(self.SEMA, 'Atos Administrativos', '<p>PORTARIA SEMA Nº 175</p><p>Nomeia servidor.</p>',
+                        orgao=self.SEMA),
+            5: _materia(self.SEMA, 'Atos Administrativos',
+                        '<p>INSTRUÇÃO NORMATIVA SEMA Nº 07/2026</p><p>Áreas de lavra de calcário e emissões atmosféricas.</p>',
+                        orgao=self.SEMA),
+        })
+
+    def test_coleta_filtra_por_tipo_titulo_e_palavra_e_nao_repete(self):
+        from datetime import date
+        from . import monitor
+        from .models import PublicacaoMonitorada
+        sessao = self._sessao()
+        execucao = monitor.coletar_doe_rs(date(2026, 10, 13), sessao=sessao)
+        self.assertTrue(execucao.ok, execucao.erro)
+        # FEPAM entra inteira, menos contrato (tipo) e súmula (título); da SEMA, só o que tem palavra-chave.
+        pubs = {p.id_externo: p for p in PublicacaoMonitorada.objects.all()}
+        self.assertEqual(set(pubs), {'1', '5'})
+        self.assertEqual(pubs['1'].titulo, 'RESOLUÇÃO Nº 48/2026')
+        self.assertIn('licenciamento', pubs['1'].palavras)
+        self.assertEqual(set(pubs['5'].palavras) >= {'calcário', 'lavra', 'emissões atmosféricas'}, True)
+        self.assertEqual(pubs['5'].link, 'https://www.diariooficial.rs.gov.br/materia?id=5')
+        # Rodar de novo no mesmo dia não duplica nada.
+        self.assertEqual(monitor.coletar_doe_rs(date(2026, 10, 13), sessao=self._sessao()).novas, 0)
+        self.assertEqual(PublicacaoMonitorada.objects.count(), 2)
+
+    def test_fonte_fora_do_ar_vira_execucao_com_erro_e_aparece_na_situacao(self):
+        from datetime import date
+        from . import monitor
+        execucao = monitor.coletar_doe_rs(date(2026, 10, 13), sessao=_SessaoDoeFalsa({}, falhar=True))
+        self.assertFalse(execucao.ok)
+        self.assertIn('HTTP 503', execucao.erro)
+        r = self.client.get('/conformidadeLegal/novidades/situacao/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((r.data['fontes'][0]['ok'], r.data['fontes'][0]['falhas_seguidas']), (False, 1))
+
+    def test_dias_a_coletar_recupera_o_que_ficou_para_tras(self):
+        from datetime import date
+        from . import monitor
+        from .models import ExecucaoMonitor
+        hoje = date(2026, 10, 13)
+        self.assertEqual(monitor.dias_a_coletar('DOE_RS', hoje), [hoje])
+        ExecucaoMonitor.objects.create(fonte='DOE_RS', data_referencia=date(2026, 10, 9), ok=True)
+        ExecucaoMonitor.objects.create(fonte='DOE_RS', data_referencia=date(2026, 10, 10), ok=False)
+        self.assertEqual(monitor.dias_a_coletar('DOE_RS', hoje),
+                         [date(2026, 10, 10), date(2026, 10, 11), date(2026, 10, 12), hoje])
+        ExecucaoMonitor.objects.create(fonte='DOE_RS', data_referencia=date(2026, 8, 1), ok=True)
+        ExecucaoMonitor.objects.filter(data_referencia=date(2026, 10, 9)).delete()
+        self.assertEqual(len(monitor.dias_a_coletar('DOE_RS', hoje)), 8)  # no máximo uma semana para trás
+
+    def test_cadastrar_como_norma_preenche_e_anexa_pdf(self):
+        from datetime import date
+        from .models import PublicacaoMonitorada
+        pub = PublicacaoMonitorada.objects.create(
+            fonte='DOE_RS', id_externo='1491479', data_publicacao=date(2026, 10, 13),
+            orgao='Fundação Estadual de Proteção Ambiental Henrique Luiz Roessler', tipo='Atos Administrativos',
+            titulo='PORTARIA FEPAM Nº 634/2026', texto='PORTARIA FEPAM Nº 634/2026\nDispõe sobre o licenciamento.',
+            link='https://www.diariooficial.rs.gov.br/materia?id=1491479', pagina=99, tema_sugerido='AMBIENTAL')
+        r = self.client.post(f'/conformidadeLegal/novidades/{pub.id}/cadastrar-norma/')
+        self.assertEqual(r.status_code, 201, r.data)
+        norma = Norma.objects.get(pk=r.data['norma']['id'])
+        self.assertEqual((norma.tipo, norma.orgao, norma.numero, norma.ano, norma.esfera),
+                         ('PORTARIA', 'FEPAM', '634', 2026, 'ESTADUAL'))
+        self.assertEqual(norma.identificacao, 'Portaria FEPAM nº 634/2026')
+        with norma.arquivo.open('rb') as f:
+            self.assertTrue(f.read(5).startswith(b'%PDF'))
+        pub.refresh_from_db()
+        self.assertEqual((pub.status, pub.norma_id, pub.avaliado_por_id), ('CADASTRADA', norma.id, self.user.id))
+        self.assertEqual(self.client.post(f'/conformidadeLegal/novidades/{pub.id}/cadastrar-norma/').status_code, 400)
+        self.assertEqual(self.client.post(f'/conformidadeLegal/novidades/{pub.id}/reabrir/').status_code, 400)
+
+    def test_descartar_e_reabrir(self):
+        from datetime import date
+        from .models import PublicacaoMonitorada
+        pub = PublicacaoMonitorada.objects.create(fonte='DOE_RS', id_externo='9', data_publicacao=date(2026, 10, 13))
+        r = self.client.post(f'/conformidadeLegal/novidades/{pub.id}/descartar/', {'motivo': 'Ato interno.'}, format='json')
+        self.assertEqual((r.status_code, r.data['status'], r.data['motivo_descarte']), (200, 'DESCARTADA', 'Ato interno.'))
+        self.assertEqual(self.client.get('/conformidadeLegal/novidades/?status=NOVA').data, [])
+        r = self.client.post(f'/conformidadeLegal/novidades/{pub.id}/reabrir/')
+        self.assertEqual((r.data['status'], r.data['avaliado_por_nome']), ('NOVA', None))
+
+    def test_triagem_grava_relevancia_e_motivo(self):
+        import json
+        from datetime import date
+        from . import tasks
+        from .models import PublicacaoMonitorada
+        pub = PublicacaoMonitorada.objects.create(fonte='DOE_RS', id_externo='5', data_publicacao=date(2026, 10, 13),
+                                                  titulo='INSTRUÇÃO NORMATIVA SEMA Nº 07/2026', texto='lavra de calcário')
+        resposta = _RespostaFalsa(json.dumps({'relevancia': 'ALTA', 'motivo': 'Muda o licenciamento de lavra.', 'tema': 'MINERARIO'}))
+        cliente = type('C', (), {'messages': type('M', (), {'create': lambda _s, **kw: resposta})()})()
+        with override_settings(CONFORMIDADE_IA_FOUNDRY_RESOURCE='r', CONFORMIDADE_IA_FOUNDRY_KEY='k'), \
+                self.patch('conformidadeLegal.ia._cliente', return_value=cliente):
+            tasks.triar_publicacoes()
+        pub.refresh_from_db()
+        self.assertEqual((pub.relevancia, pub.tema_sugerido, pub.analise), ('ALTA', 'MINERARIO', 'Muda o licenciamento de lavra.'))
+        self.assertIsNotNone(pub.analisada_em)
+
+
+class PalavrasChaveTests(SimpleTestCase):
+    def test_casa_sem_acento_e_como_palavra_inteira(self):
+        from .monitor import palavras_encontradas
+        self.assertEqual(palavras_encontradas('Extração de CALCARIO e emissão atmosférica'), ['calcário', 'emissões atmosféricas'])
+        # "cal" solto e "fiscal" não disparam; "brita" sim.
+        self.assertEqual(palavras_encontradas('Auditoria fiscal da Cal. Silva'), [])
+        self.assertIn('britagem', palavras_encontradas('usina de brita'))
