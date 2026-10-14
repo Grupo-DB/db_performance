@@ -1,3 +1,4 @@
+import re
 from rest_framework import serializers
 from .models import Reserva, Objeto
 
@@ -18,5 +19,14 @@ class ReservaSerializer(serializers.ModelSerializer):
             'hora_fim', 
             'tempo_total',
             'responsavel', 
-            'observacoes'
-        ]  
+            'observacoes',
+            'cor'
+        ]
+
+    def validate_cor(self, value):
+        if not value:
+            return None
+        value = value.strip().upper()
+        if not re.fullmatch(r'#[0-9A-F]{6}', value):
+            raise serializers.ValidationError('Cor inválida: use #RRGGBB.')
+        return value  

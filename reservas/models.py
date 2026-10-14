@@ -21,6 +21,8 @@ class Reserva(models.Model):
     tempo_total = models.CharField(max_length=455, null=True, blank=True)
     responsavel = models.CharField(max_length=455, null=False, blank=False)
     observacoes = models.TextField(null=True, blank=True)
+    # Cor do evento no calendário (#RRGGBB), como na planilha do cronograma da UniDB.
+    cor = models.CharField(max_length=7, null=True, blank=True)
     class Meta:
         verbose_name = 'Reserva'
         verbose_name_plural = 'Reservas'
