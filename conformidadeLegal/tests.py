@@ -738,3 +738,132 @@ class MonitorConfiguravelTests(APITestCase):
         self.assertEqual(ia.perfil_empresa(), 'Calcário e cal no RS')
         self.client.patch('/conformidadeLegal/monitor/configuracao/', {'perfil_empresa': ''}, format='json')
         self.assertEqual(ia.perfil_empresa(), 'do servidor')
+
+
+class NormasTecnicasTests(SimpleTestCase):
+    def test_codigos_padronizados(self):
+        from .normas_tecnicas import canonico
+        casos = {
+            'conforme a ABNT NBR 10004:2004': ('ABNT NBR 10004', '2004'),
+            'NBR 10.004/2004': ('ABNT NBR 10004', '2004'),
+            'conforme ABNT NBR 10 .004 ou': ('ABNT NBR 10004', ''),  # quebra do pypdf na Diretriz FEPAM
+            'pela NBR-9547': ('ABNT NBR 9547', ''),
+            'ABNT NBR ISO 14001:2015': ('ABNT NBR ISO 14001', '2015'),
+            'NBR ISO/IEC 17025': ('ABNT NBR ISO/IEC 17025', ''),
+            'ABNT NBR 15575-1': ('ABNT NBR 15575-1', ''),
+        }
+        for texto, (codigo, ano) in casos.items():
+            item = canonico(texto)
+            self.assertEqual((item['codigo'], item['ano']), (codigo, ano), texto)
+        self.assertIsNone(canonico('Resolução CONAMA 382'))
+        self.assertIsNone(canonico('NBR 10 de algo'))
+
+    def test_termo_do_monitor_casa_as_grafias_e_nao_outro_numero(self):
+        from . import monitor
+        from .normas_tecnicas import canonico, termos_monitor
+        nbr = monitor._padrao([termos_monitor(canonico('ABNT NBR 10004'))])
+        for texto in ('ABNT NBR 10004', 'nbr10004', 'NBR 10.004/2004', 'NBR-10004-2', 'Abnt Nbr 10004:2004'):
+            self.assertTrue(nbr.search(monitor.normalizar(texto)), texto)
+        for texto in ('NBR 100041', 'NBR 1000', 'NBR ISO 10004 é outra'.replace('ISO 10004', 'ISO 9001')):
+            self.assertFalse(nbr.search(monitor.normalizar(texto)), texto)
+        iso = monitor._padrao([termos_monitor(canonico('NBR ISO 14001'))])
+        self.assertTrue(iso.search(monitor.normalizar('certificação ISO 14001:2015')))
+
+    def test_texto_e_ia_se_juntam_por_numero(self):
+        from .normas_tecnicas import da_ia, do_texto, juntar
+        texto = do_texto([(3, 'Classificar os resíduos pela ABNT NBR 10004:2004 e amostrar\nconforme NBR 10007.'),
+                          (5, 'De novo a NBR 10.004.')])
+        self.assertEqual([(t['codigo'], t['pagina']) for t in texto], [('ABNT NBR 10004', 3), ('ABNT NBR 10007', 3)])
+        ia_ = da_ia([{'codigo': 'NBR 10004', 'titulo': 'Resíduos sólidos — Classificação', 'trecho': '', 'pagina': 0},
+                     {'codigo': 'sem código', 'titulo': '', 'trecho': '', 'pagina': 1}])
+        juntos = juntar(ia_, texto)
+        self.assertEqual([j['codigo'] for j in juntos], ['ABNT NBR 10004', 'ABNT NBR 10007'])
+        self.assertEqual((juntos[0]['titulo'], juntos[0]['pagina'], juntos[0]['origem']),
+                         ('Resíduos sólidos — Classificação', 3, 'ia+texto'))
+        self.assertEqual(juntos[0]['ano'], '2004')
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class NbrNaLeituraTests(ExtracaoIATests):
+    def test_leitura_traz_nbrs_e_monitorar_cria_palavra_de_qualquer_orgao(self):
+        import json
+        from .models import PalavraChaveMonitor
+        texto = json.dumps({'resumo': 'LO.', 'itens': [], 'normas_tecnicas': [
+            {'codigo': 'ABNT NBR 10004:2004', 'titulo': 'Resíduos sólidos', 'trecho': 'classificar conforme a ABNT NBR 10004', 'pagina': 2},
+            {'codigo': 'NBR ISO 14001', 'titulo': '', 'trecho': 'sistema de gestão', 'pagina': 3},
+        ]})
+        dados = self._rodar(_ClienteFalso(_RespostaFalsa(texto)))['extracao']
+        self.assertEqual([(n['codigo'], n['monitorada']) for n in dados['normas_citadas']],
+                         [('ABNT NBR 10004', False), ('ABNT NBR ISO 14001', False)])
+
+        url = f'/conformidadeLegal/normas/{self.norma.id}/monitorar-nbr/'
+        r = self.client.post(url, {'codigos': ['ABNT NBR 10004', 'ABNT NBR ISO 14001']}, format='json')
+        self.assertEqual(r.data['criadas'], ['ABNT NBR 10004', 'ABNT NBR ISO 14001'])
+        self.assertTrue(all(n['monitorada'] for n in r.data['extracao']['normas_citadas']))
+        p = PalavraChaveMonitor.objects.get(rotulo='ABNT NBR 10004')
+        self.assertEqual((p.qualquer_orgao, p.norma_origem_id), (True, self.norma.id))
+        # Repetir não duplica; desativada volta a valer.
+        p.ativo = False
+        p.save()
+        r = self.client.post(url, {'codigos': ['NBR 10.004']}, format='json')
+        self.assertEqual((r.data['criadas'], r.data['reativadas']), ([], ['ABNT NBR 10004']))
+        self.assertEqual(self.client.post(url, {'codigos': ['CONAMA 382']}, format='json').status_code, 400)
+
+    def test_leitura_antiga_ganha_nbrs_pela_regex_sem_ia(self):
+        from .models import ExtracaoIA
+        self.norma.arquivo = SimpleUploadedFile('lo.pdf', _pdf_com_texto('Condicionante 4: classificar pela ABNT NBR 10004.'))
+        self.norma.save()
+        ex = ExtracaoIA.objects.create(norma=self.norma, status='CONCLUIDA', itens=[])
+        self.assertIsNone(ex.normas_citadas)
+        dados = self.client.get(self.url).data['extracao']
+        self.assertEqual([(n['codigo'], n['pagina']) for n in dados['normas_citadas']], [('ABNT NBR 10004', 1)])
+
+
+def _pdf_com_texto(texto: str) -> bytes:
+    """PDF de uma página com texto extraível (o pypdf só lê texto de fonte de verdade)."""
+    conteudo = f'BT /F1 12 Tf 72 720 Td ({texto}) Tj ET'.encode('latin-1')
+    objetos = [
+        b'<< /Type /Catalog /Pages 2 0 R >>',
+        b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+        b'<< /Length %d >>\nstream\n' % len(conteudo) + conteudo + b'\nendstream',
+        b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ]
+    saida, offsets = b'%PDF-1.4\n', []
+    for i, obj in enumerate(objetos, 1):
+        offsets.append(len(saida))
+        saida += b'%d 0 obj\n' % i + obj + b'\nendobj\n'
+    xref = len(saida)
+    saida += b'xref\n0 %d\n0000000000 65535 f \n' % (len(objetos) + 1)
+    saida += b''.join(b'%010d 00000 n \n' % o for o in offsets)
+    saida += b'trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF' % (len(objetos) + 1, xref)
+    return saida
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE, CONFORMIDADE_INLABS_EMAIL='a@b.c', CONFORMIDADE_INLABS_SENHA='x#y')
+class NbrNoDouTests(APITestCase):
+    def setUp(self):
+        from unittest.mock import patch
+        patch('conformidadeLegal.monitor.time.sleep').start()
+        self.addCleanup(patch.stopall)
+
+    def test_nbr_vigiada_entra_de_qualquer_orgao_so_em_ato_normativo(self):
+        from datetime import date
+        from . import monitor
+        from .models import PalavraChaveMonitor, PublicacaoMonitorada
+        from .normas_tecnicas import canonico, termos_monitor
+        PalavraChaveMonitor.objects.create(rotulo='licenciamento', termos='licenciamento')
+        PalavraChaveMonitor.objects.create(rotulo='ABNT NBR 10004', termos=termos_monitor(canonico('NBR 10004')),
+                                           qualquer_orgao=True)
+        inmetro = 'Ministério do Desenvolvimento, Indústria, Comércio e Serviços/Instituto Nacional de Metrologia'
+        sessao = _SessaoInlabsFalsa({'2026-10-14-DO1.zip': _zip(
+            _xml_dou('1', inmetro, 'Portaria', 'PORTARIA INMETRO Nº 400', 'Os resíduos seguem a ABNT NBR 10.004:2024.'),
+            _xml_dou('2', inmetro, 'Portaria', 'PORTARIA INMETRO Nº 401', 'Licenciamento de laboratório.'),
+            _xml_dou('3', inmetro, 'Despacho', 'DESPACHO', 'Cita a NBR 10004.'),
+        )})
+        e = monitor.coletar_dou(date(2026, 10, 14), sessao=sessao)
+        self.assertTrue(e.ok, e.erro)
+        pubs = list(PublicacaoMonitorada.objects.filter(fonte='DOU'))
+        # Só a portaria que cita a NBR: palavra comum não vale fora dos órgãos acompanhados, e despacho não é norma.
+        self.assertEqual([(p.id_externo, p.palavras, p.origem) for p in pubs],
+                         [('1', ['ABNT NBR 10004'], monitor.ORIGEM_QUALQUER_ORGAO)])

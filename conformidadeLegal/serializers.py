@@ -128,7 +128,17 @@ class ExtracaoIASerializer(serializers.ModelSerializer):
     class Meta:
         model = ExtracaoIA
         fields = ['id', 'norma', 'status', 'itens', 'resumo', 'erro', 'modelo', 'paginas',
-                  'tokens_entrada', 'tokens_saida', 'criado_em', 'concluido_em']
+                  'tokens_entrada', 'tokens_saida', 'criado_em', 'concluido_em', 'normas_citadas']
+
+    def to_representation(self, obj):
+        dados = super().to_representation(obj)
+        # Marca as NBRs que já são palavra-chave ativa do monitor.
+        citadas = dados.get('normas_citadas') or []
+        if citadas:
+            from .normas_tecnicas import rotulo_monitor
+            ativas = set(PalavraChaveMonitor.objects.filter(ativo=True).values_list('rotulo', flat=True))
+            dados['normas_citadas'] = [{**c, 'monitorada': rotulo_monitor(c) in ativas} for c in citadas]
+        return dados
 
 
 class PublicacaoSerializer(serializers.ModelSerializer):
@@ -158,8 +168,11 @@ class PublicacaoDetalheSerializer(PublicacaoSerializer):
 class PalavraChaveSerializer(serializers.ModelSerializer):
     class Meta:
         model = PalavraChaveMonitor
-        fields = ['id', 'rotulo', 'termos', 'ativo', 'atualizado_em']
-        read_only_fields = ['atualizado_em']
+        fields = ['id', 'rotulo', 'termos', 'ativo', 'qualquer_orgao', 'norma_origem', 'norma_origem_identificacao',
+                  'atualizado_em']
+        read_only_fields = ['atualizado_em', 'norma_origem']
+
+    norma_origem_identificacao = serializers.CharField(source='norma_origem.identificacao', read_only=True, default=None)
 
     def validate_termos(self, valor):
         from .monitor import termo_valido

@@ -141,6 +141,16 @@ def carregar_palavras() -> list:
     return compilar_palavras([(p.rotulo, p.lista_termos()) for p in qs if p.ativo])
 
 
+def carregar_palavras_globais() -> list:
+    """Palavras que valem para ato de qualquer órgão do DOU (as NBRs vigiadas, por exemplo)."""
+    from .models import PalavraChaveMonitor
+    return compilar_palavras([(p.rotulo, p.lista_termos())
+                              for p in PalavraChaveMonitor.objects.filter(ativo=True, qualquer_orgao=True)])
+
+
+ORIGEM_QUALQUER_ORGAO = 'Citação (qualquer órgão)'
+
+
 def palavras_encontradas(texto: str, padroes=None) -> list[str]:
     alvo = normalizar(texto)
     padroes = compilar_palavras(PALAVRAS_PADRAO) if padroes is None else padroes
@@ -370,7 +380,7 @@ def coletar_dou(dia: date, sessao=None) -> ExecucaoMonitor:
         _sessao_inlabs(sessao)
         ja = set(PublicacaoMonitorada.objects.filter(fonte='DOU', data_publicacao__gte=dia - timedelta(days=3))
                  .values_list('id_externo', flat=True))
-        regras, padroes = carregar_regras_dou(), carregar_palavras()
+        regras, padroes, globais = carregar_regras_dou(), carregar_palavras(), carregar_palavras_globais()
         for arquivo in _zips_secao1(sessao, dia):
             r = sessao.get(f'{INLABS}/index.php', params={'p': dia.isoformat(), 'dl': arquivo},
                            headers={**INLABS_ORIGEM, 'User-Agent': CABECALHOS['User-Agent']}, timeout=300)
@@ -383,13 +393,22 @@ def coletar_dou(dia: date, sessao=None) -> ExecucaoMonitor:
                 if not id_ext or id_ext in ja:
                     continue
                 regra = _regra_dou(art.get('artCategory', ''), art.get('artType', ''), regras)
-                if not regra:
+                # Fora dos órgãos acompanhados, só entra ato normativo que cite uma
+                # palavra "de qualquer órgão" (NBR de licença) — o texto é lido só nesse caso.
+                if not regra and not (globais and normalizar(art.get('artType', '')) in _NORMATIVOS):
                     continue
                 corpo = art.find('body')
                 ident = (corpo.findtext('Identifica') or '').strip() if corpo is not None else ''
                 ementa = (corpo.findtext('Ementa') or '').strip() if corpo is not None else ''
                 texto = texto_de_html(corpo.findtext('Texto') or '') if corpo is not None else ''
-                palavras = palavras_encontradas('\n'.join((ident, ementa, texto)), padroes)
+                conteudo = '\n'.join((ident, ementa, texto))
+                if not regra:
+                    palavras = palavras_encontradas(conteudo, globais)
+                    if not palavras:
+                        continue
+                    regra = (ORIGEM_QUALQUER_ORGAO, '', True, 'NORMATIVOS')
+                else:
+                    palavras = palavras_encontradas(conteudo, padroes)
                 if regra[2] and not palavras:
                     continue
                 try:

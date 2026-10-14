@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta
 
 from django.conf import settings
@@ -13,7 +14,7 @@ from rest_framework.views import APIView
 
 from kanban.models import KanbanColumn, KanbanTask
 
-from . import ia
+from . import ia, normas_tecnicas
 from .models import (
     TEMAS, ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor,
     PlanoAcao, PublicacaoMonitorada, Requisito, Verificacao,
@@ -26,6 +27,8 @@ from .serializers import (
     PublicacaoSerializer, RequisitoSerializer, VerificacaoSerializer,
 )
 from .tasks import extrair_requisitos, monitorar_diarios
+
+logger = logging.getLogger(__name__)
 
 RESULTADOS_VALIDOS = {r for r, _ in Verificacao.RESULTADOS}
 TIPOS_COM_VALIDADE = ('LICENCA', 'OUTORGA', 'TAC')
@@ -122,6 +125,8 @@ class NormaViewSet(viewsets.ModelViewSet):
         norma = self.get_object()
         if request.method == 'GET':
             ultima = norma.extracoes.first()
+            if ultima and ultima.status == 'CONCLUIDA' and ultima.normas_citadas is None:
+                _preencher_nbrs_pela_regex(ultima)
             return Response({
                 'configurada': ia.configurada(),
                 'extracao': ExtracaoIASerializer(ultima).data if ultima else None,
@@ -154,6 +159,54 @@ class NormaViewSet(viewsets.ModelViewSet):
                                              paginas=paginas)
         transaction.on_commit(lambda: extrair_requisitos.delay(extracao.id))
         return Response(ExtracaoIASerializer(extracao).data, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=True, methods=['post'], url_path='monitorar-nbr')
+    def monitorar_nbr(self, request, pk=None):
+        """
+        Põe NBRs citadas por esta norma no monitor das Novidades legais: uma palavra-chave
+        por NBR, valendo para ato de qualquer órgão do DOU. ``{"codigos": ["ABNT NBR 10004", ...]}``.
+        A que já existe é reativada (e passa a valer em qualquer órgão), sem duplicar.
+        """
+        norma = self.get_object()
+        codigos = request.data.get('codigos') or []
+        if not isinstance(codigos, list) or not codigos:
+            raise ValidationError({'codigos': 'Informe ao menos uma NBR.'})
+        criadas, reativadas = [], []
+        with transaction.atomic():
+            for codigo in codigos[:200]:
+                item = normas_tecnicas.canonico(str(codigo))
+                if not item:
+                    continue
+                rotulo = normas_tecnicas.rotulo_monitor(item)
+                palavra, nova = PalavraChaveMonitor.objects.get_or_create(rotulo=rotulo, defaults={
+                    'termos': normas_tecnicas.termos_monitor(item), 'qualquer_orgao': True, 'norma_origem': norma})
+                if nova:
+                    criadas.append(rotulo)
+                elif not (palavra.ativo and palavra.qualquer_orgao):
+                    palavra.ativo, palavra.qualquer_orgao = True, True
+                    palavra.save(update_fields=['ativo', 'qualquer_orgao', 'atualizado_em'])
+                    reativadas.append(rotulo)
+        if not criadas and not reativadas and not any(normas_tecnicas.canonico(str(c)) for c in codigos):
+            raise ValidationError({'codigos': 'Nenhum código de NBR reconhecido.'})
+        ultima = norma.extracoes.first()
+        return Response({'criadas': criadas, 'reativadas': reativadas,
+                         'extracao': ExtracaoIASerializer(ultima).data if ultima else None})
+
+
+def _preencher_nbrs_pela_regex(extracao):
+    """Leitura feita antes das NBRs existirem: acha as citações no texto do PDF, sem gastar IA."""
+    norma = extracao.norma
+    lista = []
+    if norma.arquivo and norma.arquivo.name.lower().endswith('.pdf'):
+        try:
+            with norma.arquivo.open('rb') as f:
+                conteudo = f.read()
+            paginas = ia.interpretar_paginas(extracao.paginas, ia.contar_paginas(conteudo)) if extracao.paginas else None
+            lista = normas_tecnicas.do_texto(normas_tecnicas.textos_do_pdf(conteudo, paginas))
+        except Exception:  # noqa: BLE001 — sem arquivo legível, fica lista vazia
+            logger.warning('NBRs da extração %s: PDF ilegível', extracao.id)
+    extracao.normas_citadas = lista
+    extracao.save(update_fields=['normas_citadas'])
 
 
 LIMITE_LOTE = 500

@@ -3,7 +3,7 @@ import logging
 from celery import shared_task
 from django.utils import timezone
 
-from . import ia
+from . import ia, normas_tecnicas
 from .models import ExtracaoIA
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,9 @@ def extrair_requisitos(extracao_id: int):
         extracao.resumo = resultado['resumo']
         extracao.tokens_entrada = resultado['tokens_entrada']
         extracao.tokens_saida = resultado['tokens_saida']
+        # NBRs citadas: as da IA + as que a regex acha no texto do PDF (mesmas páginas lidas).
+        extracao.normas_citadas = normas_tecnicas.juntar(
+            resultado.get('normas_tecnicas', []), normas_tecnicas.do_texto(normas_tecnicas.textos_do_pdf(conteudo, paginas)))
     extracao.concluido_em = timezone.now()
     extracao.save()
 

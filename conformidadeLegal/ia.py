@@ -22,6 +22,7 @@ import re
 
 from django.conf import settings
 
+from . import normas_tecnicas
 from .models import TEMAS
 
 logger = logging.getLogger(__name__)
@@ -57,8 +58,23 @@ ESQUEMA = {
                 'additionalProperties': False,
             },
         },
+        'normas_tecnicas': {
+            'type': 'array',
+            'description': 'Normas técnicas ABNT NBR (inclusive NBR ISO/IEC) citadas no documento.',
+            'items': {
+                'type': 'object',
+                'properties': {
+                    'codigo': {'type': 'string', 'description': 'Código como aparece. Ex.: "ABNT NBR 10004:2004", "NBR ISO 14001".'},
+                    'titulo': {'type': 'string', 'description': 'Título da norma se o documento trouxer; senão string vazia.'},
+                    'trecho': {'type': 'string', 'description': 'Cópia LITERAL da frase que cita a norma.'},
+                    'pagina': {'type': 'integer', 'description': 'Página do PDF onde está a citação (1 = primeira).'},
+                },
+                'required': ['codigo', 'titulo', 'trecho', 'pagina'],
+                'additionalProperties': False,
+            },
+        },
     },
-    'required': ['resumo', 'itens'],
+    'required': ['resumo', 'itens', 'normas_tecnicas'],
     'additionalProperties': False,
 }
 
@@ -75,7 +91,9 @@ Regras:
   precisa fazer, manter, monitorar, entregar ou evitar.
 - Periodicidade: use a do texto (semestral = 6, anual = 12...). Obrigação contínua sem frequência
   definida (ex.: "manter", "evitar") → 12, para ser verificada anualmente. Ação que se cumpre uma vez → 0.
-- Escreva a descrição em português claro, começando por um verbo no infinitivo."""
+- Escreva a descrição em português claro, começando por um verbo no infinitivo.
+- Em "normas_tecnicas", liste cada norma ABNT NBR (inclusive NBR ISO/IEC) que o documento cita
+  expressamente, uma vez cada, com a frase onde aparece. Só as citadas no texto; não deduza outras."""
 
 
 class PaginasInvalidas(ValueError):
@@ -245,6 +263,7 @@ def extrair(norma, conteudo_pdf: bytes, ja_cadastrados: list[str], paginas: list
         'resumo': dados.get('resumo', ''),
         'itens': [_pagina_original(_normalizar(i), paginas)
                   for i in dados.get('itens', []) if (i.get('descricao') or '').strip()],
+        'normas_tecnicas': [_pagina_original(n, paginas) for n in normas_tecnicas.da_ia(dados.get('normas_tecnicas', []))],
         'tokens_entrada': resposta.usage.input_tokens,
         'tokens_saida': resposta.usage.output_tokens,
     }

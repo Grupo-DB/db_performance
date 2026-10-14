@@ -277,6 +277,9 @@ class ExtracaoIA(models.Model):
     # vazio = o documento inteiro. db_default: a coluna nasce com DEFAULT no banco,
     # então o código antigo continua inserindo enquanto o deploy não termina.
     paginas = models.CharField(max_length=200, blank=True, default='', db_default='')
+    # Normas técnicas (ABNT NBR) citadas no documento — ver normas_tecnicas.py.
+    # null = leitura anterior a 15/10/2026; a tela preenche pela regex na primeira vez que abre.
+    normas_citadas = models.JSONField(null=True, blank=True)
     modelo = models.CharField(max_length=80, blank=True, default='')
     tokens_entrada = models.PositiveIntegerField(default=0)
     tokens_saida = models.PositiveIntegerField(default=0)
@@ -379,6 +382,13 @@ class PalavraChaveMonitor(models.Model):
     rotulo = models.CharField(max_length=80, unique=True)
     termos = models.TextField(help_text='Um termo por linha.')
     ativo = models.BooleanField(default=True)
+    # No DOU, dispara em ato de QUALQUER órgão (não só nos acompanhados) — é como as
+    # NBRs citadas nas licenças são vigiadas: a Portaria do Inmetro que muda a NBR
+    # não sai pela ANM nem pelo MMA. No DOE-RS a API só busca por órgão, então lá
+    # continua valendo só nos órgãos da lista.
+    qualquer_orgao = models.BooleanField(default=False, db_default=False)
+    # De qual documento a palavra veio (NBR citada numa licença, por exemplo).
+    norma_origem = models.ForeignKey('Norma', null=True, blank=True, on_delete=models.SET_NULL, related_name='palavras_monitor')
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
 
