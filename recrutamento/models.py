@@ -847,7 +847,7 @@ class Desligamento(models.Model):
     gestor = models.ForeignKey('management.Colaborador', null=True, blank=True, on_delete=models.SET_NULL,
                                related_name='+')
     gestor_nome = models.CharField(max_length=150, blank=True, default='')
-    # Só das respostas antigas do Google Forms, que traziam o tempo de casa digitado
+    # Só das respostas antigas do Google Forms, que traziam o tempo de empresa digitado
     # ("1 ano e 3 meses") e não a admissão.
     tempo_casa_texto = models.CharField(max_length=80, blank=True, default='')
     observacao = models.TextField(blank=True, default='')

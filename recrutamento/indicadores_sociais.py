@@ -205,7 +205,7 @@ def salario_por_perfil(ativos, hoje):
         'raca': ('Raça / cor', _raca, None),
         'idade': ('Faixa etária', lambda c: _faixa_idade(c, hoje), [r for r, _, _ in FAIXAS_IDADE]),
         'instrucao': ('Escolaridade', lambda c: _texto(c.instrucao), ORDEM_INSTRUCAO),
-        'tempo_casa': ('Tempo de casa', lambda c: _faixa_casa(c, hoje), [r for r, _, _ in FAIXAS_CASA]),
+        'tempo_casa': ('Tempo de empresa', lambda c: _faixa_casa(c, hoje), [r for r, _, _ in FAIXAS_CASA]),
         'contrato': ('Tipo de contrato', lambda c: _texto(c.tipocontrato), None),
         'unidade': ('Unidade', lambda c: c.filial.nome if c.filial_id else NAO_INFORMADO, None),
         'lideranca': ('Liderança', lambda c: 'Liderança' if _lider(c) else 'Demais cargos', ['Liderança', 'Demais cargos']),
