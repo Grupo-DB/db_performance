@@ -9,7 +9,7 @@ from rest_framework.test import APITestCase
 
 from kanban.models import KanbanBoard, KanbanColumn, KanbanTask
 
-from .models import EvidenciaAnexo, Norma, PlanoAcao, Requisito, Verificacao
+from .models import EvidenciaAnexo, Norma, PalavraChaveMonitor, PlanoAcao, Requisito, Verificacao
 
 # Anexos dos testes vão para uma pasta descartável, não para o media/ do projeto.
 MEDIA_TESTE = tempfile.mkdtemp(prefix='conformidade-testes-')
@@ -461,6 +461,7 @@ class MonitorDiariosTests(APITestCase):
         pubs = {p.id_externo: p for p in PublicacaoMonitorada.objects.all()}
         self.assertEqual(set(pubs), {'1', '5'})
         self.assertEqual(pubs['1'].titulo, 'RESOLUÇÃO Nº 48/2026')
+        self.assertEqual((pubs['1'].origem, pubs['5'].origem), ('FEPAM', 'SEMA / CONSEMA'))
         self.assertIn('licenciamento', pubs['1'].palavras)
         self.assertEqual(set(pubs['5'].palavras) >= {'calcário', 'lavra', 'emissões atmosféricas'}, True)
         self.assertEqual(pubs['5'].link, 'https://www.diariooficial.rs.gov.br/materia?id=5')
@@ -665,3 +666,75 @@ class MonitorDouTests(APITestCase):
         self.assertEqual((d['tipo'], d['orgao'], d['numero'], d['ano'], d['esfera']),
                          ('PORTARIA', 'SQA/MMA', '1.801', 2026, 'FEDERAL'))
         self.assertEqual(Norma(**d).identificacao, 'Portaria SQA/MMA nº 1.801/2026')
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class MonitorConfiguravelTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('sgi', password='x')
+        self.user.groups.add(Group.objects.create(name='ConformidadeLegal'))
+        self.client.force_authenticate(self.user)
+
+    def _semear(self):
+        import importlib
+        from django.apps import apps
+        importlib.import_module('conformidadeLegal.migrations.0004_monitor_configuravel').semear(apps, None)
+
+    def test_carga_inicial_reproduz_o_monitor_de_antes(self):
+        from . import monitor
+        self._semear()
+        textos = ['Lavra de CALCÁRIO e emissões atmosféricas', 'Altera a NR-22 e a Norma Regulamentadora nº 1',
+                  'Taxa de licenciamento e outorga de recursos hídricos', 'Auditoria fiscal da Cal. Silva', 'usina de brita']
+        do_banco, padrao = monitor.carregar_palavras(), monitor.compilar_palavras(monitor.PALAVRAS_PADRAO)
+        self.assertEqual([r for r, _ in do_banco], sorted(r for r, _ in padrao))
+        for t in textos:
+            self.assertEqual(sorted(monitor.palavras_encontradas(t, do_banco)), sorted(monitor.palavras_encontradas(t, padrao)), t)
+        self.assertEqual(monitor.carregar_consultas_doe_rs(), monitor.CONSULTAS_DOE_RS)
+        self.assertEqual([(r, t, e, g) for r, t, e, g in monitor.carregar_regras_dou()], monitor.REGRAS_DOU)
+
+    def test_palavra_desativada_e_regex_invalida(self):
+        from . import monitor
+        self._semear()
+        lavra = PalavraChaveMonitor.objects.get(rotulo='lavra')
+        r = self.client.patch(f'/conformidadeLegal/monitor/palavras/{lavra.id}/', {'ativo': False}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn('lavra', monitor.palavras_encontradas('frente de lavra', monitor.carregar_palavras()))
+        r = self.client.post('/conformidadeLegal/monitor/palavras/', {'rotulo': 'x', 'termos': 're:(abc'}, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('Expressão inválida', str(r.data['termos']))
+        r = self.client.post('/conformidadeLegal/monitor/palavras/', {'rotulo': 'pedreira', 'termos': 'Pedreira, pedreiras\n'}, format='json')
+        self.assertEqual((r.status_code, r.data['termos']), (201, 'Pedreira\npedreiras'))
+        r = self.client.post('/conformidadeLegal/monitor/testar/', {'texto': 'Ampliação da PEDREIRA municipal'}, format='json')
+        self.assertIn('pedreira', r.data['palavras'])
+
+    def test_lista_de_palavras_conta_disparos_e_descartes(self):
+        from datetime import date
+        from .models import PublicacaoMonitorada
+        self._semear()
+        for i, status in enumerate(['DESCARTADA', 'DESCARTADA', 'CADASTRADA', 'NOVA']):
+            PublicacaoMonitorada.objects.create(fonte='DOE_RS', id_externo=str(i), data_publicacao=date.today(),
+                                                palavras=['licenciamento'], status=status, origem='FEPAM')
+        palavras = {p['rotulo']: p for p in self.client.get('/conformidadeLegal/monitor/palavras/').data}
+        self.assertEqual((palavras['licenciamento']['disparos'], palavras['licenciamento']['descartadas'],
+                          palavras['licenciamento']['viraram_norma']), (4, 2, 1))
+        orgaos = {o['rotulo']: o for o in self.client.get('/conformidadeLegal/monitor/orgaos/').data}
+        self.assertEqual(orgaos['FEPAM']['trazidas'], 4)
+
+    def test_orgao_do_dou_so_por_categoria(self):
+        r = self.client.post('/conformidadeLegal/monitor/orgaos/', {'fonte': 'DOU', 'rotulo': 'IBAMA', 'campo': 'entidade',
+                                                                     'valor': 'IBAMA'}, format='json')
+        self.assertEqual(r.status_code, 400)
+        r = self.client.post('/conformidadeLegal/monitor/orgaos/', {'fonte': 'DOU', 'rotulo': 'ICMBio', 'campo': 'categoria',
+                                                                     'valor': 'Instituto Chico Mendes', 'exige_palavra': True},
+                             format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+
+    @override_settings(CONFORMIDADE_IA_PERFIL_EMPRESA='do servidor')
+    def test_perfil_da_tela_vence_o_do_servidor(self):
+        from . import ia
+        self.assertEqual(ia.perfil_empresa(), 'do servidor')
+        r = self.client.patch('/conformidadeLegal/monitor/configuracao/', {'perfil_empresa': 'Calcário e cal no RS'}, format='json')
+        self.assertEqual((r.status_code, r.data['perfil_empresa'], r.data['perfil_servidor']), (200, 'Calcário e cal no RS', 'do servidor'))
+        self.assertEqual(ia.perfil_empresa(), 'Calcário e cal no RS')
+        self.client.patch('/conformidadeLegal/monitor/configuracao/', {'perfil_empresa': ''}, format='json')
+        self.assertEqual(ia.perfil_empresa(), 'do servidor')

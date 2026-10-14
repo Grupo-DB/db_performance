@@ -318,6 +318,8 @@ class PublicacaoMonitorada(models.Model):
     link = models.URLField(max_length=500, blank=True, default='')
     pagina = models.PositiveIntegerField(null=True, blank=True)
     palavras = models.JSONField(default=list, blank=True, help_text='Palavras-chave que fizeram a publicação entrar.')
+    origem = models.CharField(max_length=120, blank=True, default='', db_default='',
+                              help_text='Órgão/consulta do monitor que trouxe a publicação.')
 
     relevancia = models.CharField(max_length=10, choices=RELEVANCIAS, blank=True, default='')
     analise = models.TextField(blank=True, default='', help_text='Por que a IA acha que interessa (ou não).')
@@ -363,3 +365,90 @@ class ExecucaoMonitor(models.Model):
 
     def __str__(self):
         return f'{self.fonte} {self.data_referencia:%d/%m/%Y} — {"ok" if self.ok else "erro"}'
+
+
+# ── Configuração do monitor (editável na tela) ────────────────────────────
+class PalavraChaveMonitor(models.Model):
+    """
+    Palavra-chave das Novidades legais. `termos`: um por linha, comparados ao texto
+    sem acento e sem maiúsculas, como palavra/expressão inteira ("lavra" não casa
+    com "palavra"). Termo começando com "re:" é expressão regular, para os casos que
+    uma lista não cobre (ex.: "re:nr-? ?\\d{1,2}" pega NR-1 a NR-38).
+    """
+
+    rotulo = models.CharField(max_length=80, unique=True)
+    termos = models.TextField(help_text='Um termo por linha.')
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['rotulo']
+        verbose_name = 'Palavra-chave do monitor'
+        verbose_name_plural = 'Palavras-chave do monitor'
+
+    def __str__(self):
+        return self.rotulo
+
+    def lista_termos(self) -> list[str]:
+        """Um termo por linha; numa linha comum, vírgula também separa (exceto em "re:")."""
+        termos = []
+        for linha in self.termos.split('\n'):
+            linha = linha.strip()
+            if linha.startswith('re:'):
+                termos.append(linha)
+            elif linha:
+                termos += [t.strip() for t in linha.split(',') if t.strip()]
+        return termos
+
+
+class OrgaoMonitor(models.Model):
+    """
+    O que o monitor consulta em cada fonte. No DOE-RS a busca da API é por órgão
+    (`entidade`, trecho do nome por extenso) ou por tipo de matéria (`tipoMateria`);
+    no DOU é um trecho do órgão do ato (`artCategory`) mais o grupo de tipos aceito.
+    """
+
+    CAMPOS = [('entidade', 'Órgão (DOE-RS)'), ('tipoMateria', 'Tipo de matéria (DOE-RS)'), ('categoria', 'Órgão (DOU)')]
+    TIPOS_DOU = [('NORMATIVOS', 'Atos normativos (lei, decreto, resolução, portaria, IN…)'),
+                 ('LEIS', 'Só leis, decretos e medidas provisórias')]
+
+    fonte = models.CharField(max_length=10, choices=PublicacaoMonitorada.FONTES)
+    rotulo = models.CharField(max_length=80)
+    campo = models.CharField(max_length=12, choices=CAMPOS)
+    valor = models.CharField(max_length=200, help_text='Como aparece na fonte. Ex.: "Fundação Estadual de Proteção Ambiental".')
+    exige_palavra = models.BooleanField(default=True, help_text='Desligado: entra todo ato desse órgão.')
+    tipos_dou = models.CharField(max_length=12, choices=TIPOS_DOU, blank=True, default='NORMATIVOS')
+    ativo = models.BooleanField(default=True)
+    ordem = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ['fonte', 'ordem', 'id']
+        verbose_name = 'Órgão acompanhado pelo monitor'
+        verbose_name_plural = 'Órgãos acompanhados pelo monitor'
+
+    def __str__(self):
+        return f'{self.get_fonte_display()} — {self.rotulo}'
+
+
+class ConfiguracaoMonitor(models.Model):
+    """Registro único com o que a equipe ajusta sem deploy."""
+
+    perfil_empresa = models.TextField(
+        blank=True, default='',
+        help_text='Atividades e unidades da empresa. A IA usa para julgar a relevância das publicações e para '
+                  'apontar dúvidas de aplicabilidade na leitura de PDFs. Em branco, vale o do servidor (.env).',
+    )
+    atualizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
+    )
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Configuração do monitor'
+        verbose_name_plural = 'Configuração do monitor'
+
+    @classmethod
+    def atual(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

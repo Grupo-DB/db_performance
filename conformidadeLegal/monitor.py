@@ -50,11 +50,11 @@ def normalizar(texto: str) -> str:
 
 
 # ── O que procurar ────────────────────────────────────────────────────────
-# Consultas ao DOE-RS. A API recusa busca sem filtro e devolve no máximo 100
-# resultados, por isso a consulta é por dia e por órgão/tipo. `todas`: grava tudo
-# do órgão (a FEPAM é o órgão licenciador — qualquer ato pode mexer com a licença);
-# senão, só o que tiver palavra-chave. A entidade casa por trecho do nome; a
-# sigla sozinha ("FEPAM") não acha nada.
+# Consultas PADRÃO ao DOE-RS (a migration 0004 grava no banco; a coleta lê de lá).
+# A API recusa busca sem filtro e devolve no máximo 100 resultados, por isso a
+# consulta é por dia e por órgão/tipo. `todas`: grava tudo do órgão (a FEPAM é o
+# órgão licenciador — qualquer ato pode mexer com a licença); senão, só o que tiver
+# palavra-chave. A entidade casa por trecho do nome; a sigla ("FEPAM") não acha nada.
 CONSULTAS_DOE_RS = [
     {'rotulo': 'FEPAM', 'params': {'entidade': 'Fundação Estadual de Proteção Ambiental'}, 'todas': True},
     {'rotulo': 'SEMA / CONSEMA', 'params': {'entidade': 'Secretaria do Meio Ambiente e Infraestrutura'}, 'todas': False},
@@ -63,6 +63,16 @@ CONSULTAS_DOE_RS = [
     # Resoluções de conselhos (CONSEMA, CRH) que não saiam em nome da SEMA.
     {'rotulo': 'Resoluções', 'params': {'tipoMateria': 'Resoluções'}, 'todas': False},
 ]
+
+
+def carregar_consultas_doe_rs() -> list[dict]:
+    from .models import OrgaoMonitor
+    qs = OrgaoMonitor.objects.filter(fonte='DOE_RS')
+    if not qs.exists():
+        return CONSULTAS_DOE_RS
+    return [{'rotulo': o.rotulo, 'params': {o.campo: o.valor}, 'todas': not o.exige_palavra}
+            for o in qs if o.ativo and o.campo in ('entidade', 'tipoMateria')]
+
 
 # Matérias que a FEPAM publica mas não criam obrigação para o regulado: súmulas
 # de contrato, convênio e termo de cooperação. Comparado ao título, sem acento.
@@ -74,31 +84,77 @@ TIPOS_IGNORADOS = {normalizar(t) for t in (
     'Editais', 'Aviso de Licitação', 'Homologação', 'Diárias', 'Férias',
 )}
 
-# Palavras-chave (procuradas no texto sem acento, como palavra inteira). O rótulo é
-# o que aparece na tela. "cal" sozinho não entra: casaria com tudo ("cal." de
-# "fiscal", "Cal" de nomes próprios) — o calcário e os produtos de cal entram por
-# expressões mais longas.
-PALAVRAS_CHAVE = [
-    ('calcário', r'calcari[oa]s?'), ('cal hidratada', r'cal (hidratada|virgem|viva)'), ('argamassa', r'argamassas?'),
-    ('corretivo agrícola', r'corretivos? (agricola|de acidez)'), ('mineração', r'mineracao|minerari[oa]s?|mineradoras?'),
-    ('lavra', r'lavras?'), ('área minerada', r'areas? mineradas?'), ('britagem', r'britagem|brita'),
-    ('licenciamento', r'licenciamento'), ('licença de operação', r'licencas? de operacao'),
-    ('CONSEMA', r'consema'), ('diretriz técnica', r'diretriz(es)? tecnicas?'),
-    ('emissões atmosféricas', r'emiss(ao|oes) atmosferic[ao]s?|poluentes atmosfericos|fontes fixas'),
-    ('material particulado', r'material particulado'), ('qualidade do ar', r'qualidade do ar'),
-    ('efluentes', r'efluentes?'), ('resíduos sólidos', r'residuos solidos'),
-    ('recursos hídricos', r'recursos hidricos|outorga'), ('PRAD', r'prad|recuperacao de areas? degradadas?'),
-    ('potencial poluidor', r'potencial poluidor'), ('taxa ambiental', r'taxas? (de licenciamento|ambientais?)'),
-    ('Resolução 372', r'372/2018'),
-    ('norma regulamentadora', r'normas? regulamentadoras?|nr-? ?\d{1,2}'),
-    ('segurança e saúde no trabalho', r'seguranca e saude no trabalho'),
+# Palavras-chave PADRÃO — as mesmas que a migration 0004 grava no banco, de onde a
+# coleta passa a ler (tela "Configurações do monitor"). Termos comparados ao texto
+# sem acento e sem maiúsculas, como palavra inteira; "re:" = expressão regular.
+# "cal" sozinho não entra: casaria com "fiscal" e nomes próprios.
+PALAVRAS_PADRAO = [
+    ('calcário', ['calcario', 'calcarios', 'calcaria']),
+    ('cal hidratada', ['cal hidratada', 'cal virgem', 'cal viva']),
+    ('argamassa', ['argamassa', 'argamassas']),
+    ('corretivo agrícola', ['corretivo agricola', 'corretivos agricolas', 'corretivo de acidez', 'corretivos de acidez']),
+    ('mineração', ['mineracao', 'minerario', 'mineraria', 'minerarios', 'minerarias', 'mineradora', 'mineradoras']),
+    ('lavra', ['lavra', 'lavras']),
+    ('área minerada', ['area minerada', 'areas mineradas']),
+    ('britagem', ['britagem', 'brita']),
+    ('licenciamento', ['licenciamento']),
+    ('licença de operação', ['licenca de operacao', 'licencas de operacao']),
+    ('CONSEMA', ['consema']),
+    ('diretriz técnica', ['diretriz tecnica', 'diretrizes tecnicas']),
+    ('emissões atmosféricas', ['emissao atmosferica', 'emissoes atmosfericas', 'poluentes atmosfericos', 'fontes fixas']),
+    ('material particulado', ['material particulado']),
+    ('qualidade do ar', ['qualidade do ar']),
+    ('efluentes', ['efluente', 'efluentes']),
+    ('resíduos sólidos', ['residuos solidos']),
+    ('recursos hídricos', ['recursos hidricos', 'outorga']),
+    ('PRAD', ['prad', 'recuperacao de area degradada', 'recuperacao de areas degradadas']),
+    ('potencial poluidor', ['potencial poluidor']),
+    ('taxa ambiental', ['taxa de licenciamento', 'taxas de licenciamento', 'taxa ambiental', 'taxas ambientais']),
+    ('Resolução 372', ['372/2018']),
+    ('norma regulamentadora', ['norma regulamentadora', 'normas regulamentadoras', r're:nr-? ?\d{1,2}']),
+    ('segurança e saúde no trabalho', ['seguranca e saude no trabalho']),
 ]
-_PADROES = [(rotulo, re.compile(r'\b(' + padrao + r')\b')) for rotulo, padrao in PALAVRAS_CHAVE]
 
 
-def palavras_encontradas(texto: str) -> list[str]:
+def _padrao(termos: list[str]):
+    """Termos → uma regex de palavra inteira sobre o texto normalizado (None se nenhum termo é válido)."""
+    partes = []
+    for t in termos:
+        if t.startswith('re:'):
+            partes.append(t[3:].strip())
+        elif normalizar(t).strip():
+            partes.append(re.escape(normalizar(t).strip()))
+    partes = [p for p in partes if p]
+    return re.compile(r'\b(' + '|'.join(partes) + r')\b') if partes else None
+
+
+def compilar_palavras(lista) -> list:
+    return [(rotulo, padrao) for rotulo, termos in lista if (padrao := _padrao(termos))]
+
+
+def carregar_palavras() -> list:
+    """Palavras ativas do banco; sem nenhuma cadastrada (antes da migration), as padrão."""
+    from .models import PalavraChaveMonitor
+    qs = PalavraChaveMonitor.objects.all()
+    if not qs.exists():
+        return compilar_palavras(PALAVRAS_PADRAO)
+    return compilar_palavras([(p.rotulo, p.lista_termos()) for p in qs if p.ativo])
+
+
+def palavras_encontradas(texto: str, padroes=None) -> list[str]:
     alvo = normalizar(texto)
-    return [rotulo for rotulo, padrao in _PADROES if padrao.search(alvo)]
+    padroes = compilar_palavras(PALAVRAS_PADRAO) if padroes is None else padroes
+    return [rotulo for rotulo, padrao in padroes if padrao.search(alvo)]
+
+
+def termo_valido(termo: str) -> str | None:
+    """Erro legível para um termo "re:" que não compila (a tela valida antes de salvar)."""
+    if termo.startswith('re:'):
+        try:
+            re.compile(termo[3:].strip())
+        except re.error as e:
+            return f'Expressão inválida em "{termo}": {e}'
+    return None
 
 
 # ── HTML do DOE → texto ───────────────────────────────────────────────────
@@ -180,7 +236,8 @@ def coletar_doe_rs(dia: date, sessao=None) -> ExecucaoMonitor:
              .values_list('id_externo', flat=True))
     vistos = set()
     try:
-        for consulta in CONSULTAS_DOE_RS:
+        consultas, padroes = carregar_consultas_doe_rs(), carregar_palavras()
+        for consulta in consultas:
             for item in _ids_do_dia(sessao, dia, consulta['params']):
                 id_ext = str(item['id'])
                 if id_ext in vistos:
@@ -195,7 +252,7 @@ def coletar_doe_rs(dia: date, sessao=None) -> ExecucaoMonitor:
                 texto = texto_de_html(materia.get('conteudo', ''))
                 if TITULOS_IGNORADOS.search(normalizar(titulo_de(texto))):
                     continue
-                palavras = palavras_encontradas(texto)
+                palavras = palavras_encontradas(texto, padroes)
                 if not palavras and not consulta['todas']:
                     continue
                 try:
@@ -206,7 +263,7 @@ def coletar_doe_rs(dia: date, sessao=None) -> ExecucaoMonitor:
                         tipo=(materia.get('tipoMateria') or item.get('tipo') or '')[:120],
                         titulo=titulo_de(texto)[:500], texto=texto[:60000],
                         link=DOE_RS_MATERIA.format(id_ext), pagina=_int(materia.get('pagina')),
-                        palavras=palavras,
+                        palavras=palavras, origem=consulta['rotulo'][:120],
                     )
                     execucao.novas += 1
                 except IntegrityError:
@@ -240,19 +297,30 @@ _LEIS = {normalizar(t) for t in ('Lei', 'Lei Complementar', 'Decreto', 'Medida P
 # 06–14/10/2026: 2.276 atos → 3 candidatos (IBAMA, SQA/MMA e Resolução ANM 249).
 # O resto do diário (energia/ANP/ANEEL, Previc, Saúde, comércio exterior…) fica de fora.
 REGRAS_DOU = [
-    # (trecho do órgão, exige palavra-chave, tipos de ato aceitos)
-    ('agencia nacional de mineracao', False, _NORMATIVOS),
-    ('conselho nacional do meio ambiente', False, _NORMATIVOS),
-    ('ministerio do meio ambiente', True, _NORMATIVOS),      # inclui IBAMA, ICMBio, ANA
-    ('ministerio do trabalho', True, _NORMATIVOS),           # NRs entram pela palavra-chave
-    ('atos do poder executivo', True, _LEIS),
-    ('atos do poder legislativo', True, _LEIS),
+    # (rótulo, trecho do órgão, exige palavra-chave, grupo de tipos aceitos)
+    ('ANM', 'agencia nacional de mineracao', False, 'NORMATIVOS'),
+    ('CONAMA', 'conselho nacional do meio ambiente', False, 'NORMATIVOS'),
+    ('Meio Ambiente (IBAMA, ANA…)', 'ministerio do meio ambiente', True, 'NORMATIVOS'),
+    ('Trabalho e Emprego (NRs)', 'ministerio do trabalho', True, 'NORMATIVOS'),
+    ('Leis e decretos federais', 'atos do poder executivo', True, 'LEIS'),
+    ('Leis do Congresso', 'atos do poder legislativo', True, 'LEIS'),
 ]
+_GRUPOS_DOU = {'NORMATIVOS': _NORMATIVOS, 'LEIS': _LEIS}
 
 
-def _regra_dou(categoria: str, tipo: str):
+def carregar_regras_dou() -> list[tuple]:
+    from .models import OrgaoMonitor
+    qs = OrgaoMonitor.objects.filter(fonte='DOU')
+    if not qs.exists():
+        return REGRAS_DOU
+    return [(o.rotulo, normalizar(o.valor), o.exige_palavra, o.tipos_dou or 'NORMATIVOS')
+            for o in qs if o.ativo and o.campo == 'categoria']
+
+
+def _regra_dou(categoria: str, tipo: str, regras=None):
     cat, tp = normalizar(categoria), normalizar(tipo)
-    return next((r for r in REGRAS_DOU if r[0] in cat and tp in r[2]), None)
+    return next((r for r in (REGRAS_DOU if regras is None else regras)
+                 if r[1] in cat and tp in _GRUPOS_DOU.get(r[3], _NORMATIVOS)), None)
 
 
 def _sessao_inlabs(sessao):
@@ -302,6 +370,7 @@ def coletar_dou(dia: date, sessao=None) -> ExecucaoMonitor:
         _sessao_inlabs(sessao)
         ja = set(PublicacaoMonitorada.objects.filter(fonte='DOU', data_publicacao__gte=dia - timedelta(days=3))
                  .values_list('id_externo', flat=True))
+        regras, padroes = carregar_regras_dou(), carregar_palavras()
         for arquivo in _zips_secao1(sessao, dia):
             r = sessao.get(f'{INLABS}/index.php', params={'p': dia.isoformat(), 'dl': arquivo},
                            headers={**INLABS_ORIGEM, 'User-Agent': CABECALHOS['User-Agent']}, timeout=300)
@@ -313,15 +382,15 @@ def coletar_dou(dia: date, sessao=None) -> ExecucaoMonitor:
                 id_ext = art.get('idMateria') or art.get('id') or ''
                 if not id_ext or id_ext in ja:
                     continue
-                regra = _regra_dou(art.get('artCategory', ''), art.get('artType', ''))
+                regra = _regra_dou(art.get('artCategory', ''), art.get('artType', ''), regras)
                 if not regra:
                     continue
                 corpo = art.find('body')
                 ident = (corpo.findtext('Identifica') or '').strip() if corpo is not None else ''
                 ementa = (corpo.findtext('Ementa') or '').strip() if corpo is not None else ''
                 texto = texto_de_html(corpo.findtext('Texto') or '') if corpo is not None else ''
-                palavras = palavras_encontradas('\n'.join((ident, ementa, texto)))
-                if regra[1] and not palavras:
+                palavras = palavras_encontradas('\n'.join((ident, ementa, texto)), padroes)
+                if regra[2] and not palavras:
                     continue
                 try:
                     PublicacaoMonitorada.objects.create(
@@ -331,7 +400,7 @@ def coletar_dou(dia: date, sessao=None) -> ExecucaoMonitor:
                         titulo=(ident or art.get('name') or '')[:500],
                         texto=('\n'.join(t for t in (ementa, texto) if t))[:60000],
                         link=html.unescape(art.get('pdfPage') or '')[:500], pagina=_int(art.get('numberPage')),
-                        palavras=palavras,
+                        palavras=palavras, origem=regra[0][:120],
                     )
                     ja.add(id_ext)
                     execucao.novas += 1

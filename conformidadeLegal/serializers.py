@@ -1,7 +1,10 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from .models import EvidenciaAnexo, ExtracaoIA, Norma, PlanoAcao, PublicacaoMonitorada, Requisito, Verificacao
+from .models import (
+    ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor, PlanoAcao,
+    PublicacaoMonitorada, Requisito, Verificacao,
+)
 
 
 def nome_usuario(u):
@@ -137,7 +140,7 @@ class PublicacaoSerializer(serializers.ModelSerializer):
     class Meta:
         model = PublicacaoMonitorada
         fields = ['id', 'fonte', 'fonte_rotulo', 'id_externo', 'data_publicacao', 'orgao', 'tipo', 'titulo', 'link',
-                  'pagina', 'palavras', 'relevancia', 'analise', 'tema_sugerido', 'analisada_em', 'status', 'norma',
+                  'pagina', 'palavras', 'origem', 'relevancia', 'analise', 'tema_sugerido', 'analisada_em', 'status', 'norma',
                   'norma_identificacao', 'motivo_descarte', 'avaliado_por_nome', 'avaliado_em', 'criado_em']
         read_only_fields = fields
 
@@ -149,3 +152,62 @@ class PublicacaoDetalheSerializer(PublicacaoSerializer):
     class Meta(PublicacaoSerializer.Meta):
         fields = PublicacaoSerializer.Meta.fields + ['texto']
         read_only_fields = fields
+
+
+# ── Configuração do monitor ──────────────────────────────────────────────
+class PalavraChaveSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PalavraChaveMonitor
+        fields = ['id', 'rotulo', 'termos', 'ativo', 'atualizado_em']
+        read_only_fields = ['atualizado_em']
+
+    def validate_termos(self, valor):
+        from .monitor import termo_valido
+        obj = PalavraChaveMonitor(termos=valor or '')
+        termos = obj.lista_termos()
+        if not termos:
+            raise serializers.ValidationError('Informe ao menos um termo.')
+        erros = [e for e in (termo_valido(t) for t in termos) if e]
+        if erros:
+            raise serializers.ValidationError(erros[0])
+        return '\n'.join(termos)
+
+
+class OrgaoMonitorSerializer(serializers.ModelSerializer):
+    fonte_rotulo = serializers.CharField(source='get_fonte_display', read_only=True)
+
+    class Meta:
+        model = OrgaoMonitor
+        fields = ['id', 'fonte', 'fonte_rotulo', 'rotulo', 'campo', 'valor', 'exige_palavra', 'tipos_dou', 'ativo', 'ordem']
+
+    def validate(self, dados):
+        fonte = dados.get('fonte', getattr(self.instance, 'fonte', None))
+        campo = dados.get('campo', getattr(self.instance, 'campo', None))
+        if fonte == 'DOU' and campo != 'categoria':
+            raise serializers.ValidationError({'campo': 'No Diário Oficial da União a consulta é pelo órgão do ato.'})
+        if fonte == 'DOE_RS' and campo not in ('entidade', 'tipoMateria'):
+            raise serializers.ValidationError({'campo': 'No Diário Oficial do RS a consulta é por órgão ou por tipo de matéria.'})
+        if not (dados.get('valor', getattr(self.instance, 'valor', '')) or '').strip():
+            raise serializers.ValidationError({'valor': 'Informe como o órgão aparece na fonte.'})
+        return dados
+
+
+class ConfiguracaoMonitorSerializer(serializers.ModelSerializer):
+    atualizado_por_nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ConfiguracaoMonitor
+        fields = ['perfil_empresa', 'atualizado_por_nome', 'atualizado_em']
+        read_only_fields = ['atualizado_em']
+
+    def get_atualizado_por_nome(self, obj):
+        return nome_usuario(obj.atualizado_por)
+
+
+class ExecucaoMonitorSerializer(serializers.ModelSerializer):
+    fonte_rotulo = serializers.CharField(source='get_fonte_display', read_only=True)
+
+    class Meta:
+        model = ExecucaoMonitor
+        fields = ['id', 'fonte', 'fonte_rotulo', 'data_referencia', 'iniciado_em', 'concluido_em', 'ok', 'examinadas',
+                  'novas', 'erro']

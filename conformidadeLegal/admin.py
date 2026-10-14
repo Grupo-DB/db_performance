@@ -1,7 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, PlanoAcao, PublicacaoMonitorada, Requisito, Verificacao,
+    ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor, PlanoAcao,
+    PublicacaoMonitorada, Requisito, Verificacao,
 )
 
 
@@ -58,3 +59,18 @@ class PublicacaoMonitoradaAdmin(admin.ModelAdmin):
 class ExecucaoMonitorAdmin(admin.ModelAdmin):
     list_display = ('data_referencia', 'fonte', 'ok', 'examinadas', 'novas', 'iniciado_em', 'erro')
     list_filter = ('fonte', 'ok')
+
+
+@admin.register(PalavraChaveMonitor)
+class PalavraChaveMonitorAdmin(admin.ModelAdmin):
+    list_display = ('rotulo', 'ativo', 'atualizado_em')
+    list_filter = ('ativo',)
+
+
+@admin.register(OrgaoMonitor)
+class OrgaoMonitorAdmin(admin.ModelAdmin):
+    list_display = ('rotulo', 'fonte', 'campo', 'valor', 'exige_palavra', 'ativo', 'ordem')
+    list_filter = ('fonte', 'ativo')
+
+
+admin.site.register(ConfiguracaoMonitor)

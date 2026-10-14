@@ -11,7 +11,8 @@ Configuração (variáveis de ambiente, no .env lido pelo settings.py):
     CONFORMIDADE_IA_FOUNDRY_KEY       chave do recurso
     CONFORMIDADE_IA_MODELO            nome da implantação do modelo (padrão: claude-opus-5-5)
     CONFORMIDADE_IA_PERFIL_EMPRESA    opcional: atividades/unidades, para a IA
-                                      marcar o que parece não se aplicar
+                                      marcar o que parece não se aplicar (o texto
+                                      da tela Configurações do monitor tem precedência)
 """
 import base64
 import io
@@ -145,6 +146,13 @@ class FalhaExtracao(Exception):
     pass
 
 
+def perfil_empresa() -> str:
+    """O da tela (Configurações do monitor), se preenchido; senão o do servidor (.env)."""
+    from .models import ConfiguracaoMonitor
+    cfg = ConfiguracaoMonitor.objects.filter(pk=1).only('perfil_empresa').first()
+    return ((cfg.perfil_empresa if cfg else '') or getattr(settings, 'CONFORMIDADE_IA_PERFIL_EMPRESA', '')).strip()
+
+
 def configurada() -> bool:
     return bool(getattr(settings, 'CONFORMIDADE_IA_FOUNDRY_RESOURCE', '')
                 and getattr(settings, 'CONFORMIDADE_IA_FOUNDRY_KEY', ''))
@@ -176,7 +184,7 @@ def _instrucao(norma, ja_cadastrados: list[str], paginas: list[int] | None = Non
             f'em "observacao" nem em "descricao" (a numeração deste arquivo não é a do original). '
             f'Obrigações que dependam de trechos fora do recorte podem ser citadas pelo que aparece aqui.'
         )
-    perfil = getattr(settings, 'CONFORMIDADE_IA_PERFIL_EMPRESA', '')
+    perfil = perfil_empresa()
     if perfil:
         partes.append(f'Perfil da empresa (use só para apontar dúvidas de aplicabilidade em "observacao"): {perfil}')
     if ja_cadastrados:
@@ -290,7 +298,7 @@ alcancem a atividade da empresa têm relevância ALTA ou MEDIA. Responda em port
 
 def triar_publicacao(pub) -> dict:
     """Relevância de uma publicação para a empresa: {'relevancia', 'motivo', 'tema'}."""
-    perfil = getattr(settings, 'CONFORMIDADE_IA_PERFIL_EMPRESA', '') or 'empresa industrial no RS'
+    perfil = perfil_empresa() or 'empresa industrial no RS'
     texto = (pub.texto or '')[:8000]
     pedido = (f'Empresa: {perfil}\n\n'
               f'Publicação ({pub.get_fonte_display()}, {pub.data_publicacao:%d/%m/%Y}):\n'

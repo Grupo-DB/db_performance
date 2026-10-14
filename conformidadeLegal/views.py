@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import Count, ProtectedError, Q
@@ -14,13 +15,15 @@ from kanban.models import KanbanColumn, KanbanTask
 
 from . import ia
 from .models import (
-    TEMAS, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, PlanoAcao, PublicacaoMonitorada, Requisito, Verificacao,
+    TEMAS, ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor,
+    PlanoAcao, PublicacaoMonitorada, Requisito, Verificacao,
 )
 from .permissions import IsConformidade
 from .serializers import nome_usuario
 from .serializers import (
-    ExtracaoIASerializer, NormaSerializer, PlanoAcaoSerializer, PublicacaoDetalheSerializer, PublicacaoSerializer,
-    RequisitoSerializer, VerificacaoSerializer,
+    ConfiguracaoMonitorSerializer, ExecucaoMonitorSerializer, ExtracaoIASerializer, NormaSerializer,
+    OrgaoMonitorSerializer, PalavraChaveSerializer, PlanoAcaoSerializer, PublicacaoDetalheSerializer,
+    PublicacaoSerializer, RequisitoSerializer, VerificacaoSerializer,
 )
 from .tasks import extrair_requisitos, monitorar_diarios
 
@@ -618,3 +621,86 @@ class PublicacaoViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewse
         monitorar_diarios.delay()
         return Response({'detail': 'Coleta iniciada. As novidades aparecem em alguns minutos.'},
                         status=status.HTTP_202_ACCEPTED)
+
+
+# ── Configurações do monitor (tela "Configurações do monitor") ───────────
+JANELA_ESTATISTICA = 90  # dias de publicações para as contagens da tela
+
+
+def _publicacoes_recentes():
+    desde = date.today() - timedelta(days=JANELA_ESTATISTICA)
+    return list(PublicacaoMonitorada.objects.filter(criado_em__date__gte=desde).values('palavras', 'status', 'origem'))
+
+
+class PalavraChaveViewSet(viewsets.ModelViewSet):
+    """Palavras-chave do monitor. A lista traz quantas publicações cada uma trouxe nos
+    últimos 90 dias e o que a equipe fez com elas — é o que mostra quem só traz ruído."""
+
+    permission_classes = [IsConformidade]
+    serializer_class = PalavraChaveSerializer
+    queryset = PalavraChaveMonitor.objects.all()
+
+    def list(self, request, *args, **kwargs):
+        dados = self.get_serializer(self.get_queryset(), many=True).data
+        pubs = _publicacoes_recentes()
+        for d in dados:
+            minhas = [p for p in pubs if d['rotulo'] in (p['palavras'] or [])]
+            d['disparos'] = len(minhas)
+            d['descartadas'] = sum(1 for p in minhas if p['status'] == 'DESCARTADA')
+            d['viraram_norma'] = sum(1 for p in minhas if p['status'] == 'CADASTRADA')
+        return Response(dados)
+
+
+class OrgaoMonitorViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsConformidade]
+    serializer_class = OrgaoMonitorSerializer
+    queryset = OrgaoMonitor.objects.all()
+
+    def list(self, request, *args, **kwargs):
+        dados = self.get_serializer(self.get_queryset(), many=True).data
+        pubs = _publicacoes_recentes()
+        for d in dados:
+            minhas = [p for p in pubs if p['origem'] == d['rotulo']]
+            d['trazidas'] = len(minhas)
+            d['descartadas'] = sum(1 for p in minhas if p['status'] == 'DESCARTADA')
+            d['viraram_norma'] = sum(1 for p in minhas if p['status'] == 'CADASTRADA')
+        return Response(dados)
+
+
+class ConfiguracaoMonitorView(APIView):
+    permission_classes = [IsConformidade]
+
+    def get(self, request):
+        cfg = ConfiguracaoMonitor.atual()
+        dados = ConfiguracaoMonitorSerializer(cfg).data
+        # O que vale hoje (o da tela ou, vazio, o do servidor) — para a tela mostrar de onde vem.
+        dados['perfil_servidor'] = getattr(settings, 'CONFORMIDADE_IA_PERFIL_EMPRESA', '')
+        return Response(dados)
+
+    def patch(self, request):
+        cfg = ConfiguracaoMonitor.atual()
+        s = ConfiguracaoMonitorSerializer(cfg, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save(atualizado_por=request.user)
+        return self.get(request)
+
+
+class ExecucoesMonitorView(APIView):
+    """As últimas coletas, de todas as fontes."""
+
+    permission_classes = [IsConformidade]
+
+    def get(self, request):
+        qs = ExecucaoMonitor.objects.order_by('-iniciado_em')[:80]
+        return Response(ExecucaoMonitorSerializer(qs, many=True).data)
+
+
+class TestarPalavrasView(APIView):
+    """Cola um trecho e vê quais palavras-chave ativas disparariam (nada é gravado)."""
+
+    permission_classes = [IsConformidade]
+
+    def post(self, request):
+        from . import monitor
+        texto = (request.data.get('texto') or '')[:50000]
+        return Response({'palavras': monitor.palavras_encontradas(texto, monitor.carregar_palavras())})
