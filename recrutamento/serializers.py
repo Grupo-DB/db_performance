@@ -3,9 +3,11 @@ from rest_framework import serializers
 from .models import (
     AreaInteresse,
     Candidato,
+    Desligamento,
     FichaAnexo,
     FichaEntrevista,
     FolhaPonto,
+    FormularioDesligamento,
     Processo,
     Vaga,
 )
@@ -271,3 +273,86 @@ class FolhaPontoSerializer(serializers.ModelSerializer):
 
     def get_nome_arquivo(self, obj):
         return obj.arquivo.name.rsplit('/', 1)[-1] if obj.arquivo else ''
+
+
+# ── Desligamentos ────────────────────────────────────────────────────────
+class FormularioDesligamentoSerializer(serializers.ModelSerializer):
+    formulario_rotulo = serializers.CharField(source='get_formulario_display', read_only=True)
+    preenchido_por_nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FormularioDesligamento
+        fields = ['id', 'desligamento', 'formulario', 'formulario_rotulo', 'tipo_informado', 'respostas',
+                  'classificacao', 'classificacao_revisada', 'classificado_em', 'erro_classificacao',
+                  'data_preenchimento', 'preenchido_por_nome', 'origem', 'criado_em', 'atualizado_em']
+        read_only_fields = ['classificado_em', 'erro_classificacao', 'origem', 'criado_em', 'atualizado_em']
+
+    def get_preenchido_por_nome(self, obj):
+        u = obj.preenchido_por
+        return (u.get_full_name() or u.username) if u else None
+
+    def validate_respostas(self, valor):
+        from .desligamento import PERGUNTAS
+        if not isinstance(valor, dict):
+            raise serializers.ValidationError('Formato inválido.')
+        formulario = self.initial_data.get('formulario') or getattr(self.instance, 'formulario', None)
+        chaves = {p['chave'] for p in PERGUNTAS.get(formulario, [])}
+        return {k: v for k, v in valor.items() if k in chaves}
+
+    def validate_classificacao(self, valor):
+        from .desligamento import CLASSES, perguntas_classificadas
+        formulario = self.initial_data.get('formulario') or getattr(self.instance, 'formulario', None)
+        validos = {p['chave']: {v for v, _ in CLASSES[p['classe']]} for p in perguntas_classificadas(formulario or '')}
+        return {k: v for k, v in (valor or {}).items() if k in validos and v in validos[k]}
+
+
+class DesligamentoListSerializer(serializers.ModelSerializer):
+    tipo_rotulo = serializers.CharField(source='get_tipo_display', read_only=True)
+    tempo_casa_meses = serializers.IntegerField(read_only=True)
+    formularios = serializers.SerializerMethodField()
+    divergencia_tipo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Desligamento
+        fields = ['id', 'colaborador', 'nome', 'cargo', 'setor', 'data_admissao', 'data_desligamento', 'tipo',
+                  'tipo_rotulo', 'gestor', 'gestor_nome', 'tempo_casa_meses', 'tempo_casa_texto', 'formularios',
+                  'divergencia_tipo']
+
+    def get_formularios(self, obj):
+        return {f.formulario: {'id': f.id, 'tipo_informado': f.tipo_informado,
+                               'classificado': bool(f.classificacao), 'revisada': f.classificacao_revisada}
+                for f in obj.formularios.all()}
+
+    def get_divergencia_tipo(self, obj):
+        tipos = {f.tipo_informado for f in obj.formularios.all() if f.tipo_informado}
+        return len(tipos) > 1
+
+
+class DesligamentoSerializer(DesligamentoListSerializer):
+    formularios = FormularioDesligamentoSerializer(many=True, read_only=True)
+
+    class Meta(DesligamentoListSerializer.Meta):
+        fields = DesligamentoListSerializer.Meta.fields + ['observacao', 'criado_em', 'atualizado_em']
+        read_only_fields = ['criado_em', 'atualizado_em']
+        # Escolhido do cadastro, o nome vem dele (validate); obrigatório só sem colaborador.
+        extra_kwargs = {'nome': {'required': False}}
+
+    def validate(self, dados):
+        """Escolhido do cadastro, o que estiver em branco vem dele (a tela já preenche; a API garante)."""
+        c = dados.get('colaborador')
+        if c:
+            dados.setdefault('nome', c.nome)
+            if not dados.get('nome'):
+                dados['nome'] = c.nome
+            if not dados.get('cargo') and c.cargo_id:
+                dados['cargo'] = c.cargo.nome
+            if not dados.get('setor') and c.setor_id:
+                dados['setor'] = c.setor.nome
+            if not dados.get('data_admissao') and c.data_admissao:
+                dados['data_admissao'] = c.data_admissao.date()
+        g = dados.get('gestor')
+        if g and not dados.get('gestor_nome'):
+            dados['gestor_nome'] = g.nome
+        if not (dados.get('nome') or getattr(self.instance, 'nome', '')):
+            raise serializers.ValidationError({'colaborador': 'Escolha o colaborador desligado.'})
+        return dados

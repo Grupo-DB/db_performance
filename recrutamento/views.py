@@ -16,9 +16,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from .models import (
     AreaInteresse,
     Candidato,
+    Desligamento,
     FichaAnexo,
     FichaEntrevista,
     FolhaPonto,
+    FormularioDesligamento,
     Processo,
     Vaga,
 )
@@ -29,10 +31,13 @@ from .serializers import (
     AreaInteresseSerializer,
     CandidatoListSerializer,
     CandidatoSerializer,
+    DesligamentoListSerializer,
+    DesligamentoSerializer,
     FichaAnexoSerializer,
     FichaEntrevistaListSerializer,
     FichaEntrevistaSerializer,
     FolhaPontoSerializer,
+    FormularioDesligamentoSerializer,
     ProcessoSerializer,
     VagaSerializer,
 )
@@ -724,3 +729,127 @@ class FolhaPontoViewSet(
             return Response(
                 {'detail': str(erro)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
+
+
+# ── Desligamentos (justificativa do gestor + entrevista do funcionário) ───
+def aplicar_classificacao(formulario: 'FormularioDesligamento') -> bool:
+    """Roda a IA e grava. Erro fica registrado no próprio formulário (a tela mostra)."""
+    from django.utils import timezone
+    from . import desligamento as dsl
+    try:
+        formulario.classificacao = dsl.classificar(formulario.formulario, formulario.respostas or {})
+        formulario.erro_classificacao = ''
+        formulario.classificado_em = timezone.now()
+        ok = True
+    except Exception as e:  # noqa: BLE001 — sem IA, o formulário continua salvo
+        formulario.erro_classificacao = f'{type(e).__name__}: {e}'[:500]
+        ok = False
+    formulario.save(update_fields=['classificacao', 'erro_classificacao', 'classificado_em', 'atualizado_em'])
+    return ok
+
+
+class DesligamentoViewSet(viewsets.ModelViewSet):
+    """Desligamentos com as duas entrevistas. Só o RH (IsRH)."""
+
+    permission_classes = [IsRH]
+
+    def get_queryset(self):
+        qs = (Desligamento.objects.select_related('colaborador', 'gestor')
+              .prefetch_related('formularios__preenchido_por'))
+        p = self.request.query_params
+        if p.get('inicio'):
+            qs = qs.filter(data_desligamento__gte=p['inicio'])
+        if p.get('fim'):
+            qs = qs.filter(data_desligamento__lte=p['fim'])
+        if p.get('tipo'):
+            qs = qs.filter(tipo=p['tipo'])
+        if p.get('setor'):
+            qs = qs.filter(setor__iexact=p['setor'])
+        if p.get('q'):
+            qs = qs.filter(Q(nome__icontains=p['q']) | Q(setor__icontains=p['q']) | Q(gestor_nome__icontains=p['q'])
+                           | Q(cargo__icontains=p['q']))
+        return qs
+
+    def get_serializer_class(self):
+        return DesligamentoListSerializer if self.action == 'list' else DesligamentoSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(criado_por=self.request.user)
+
+    @action(detail=False, methods=['get'])
+    def perguntas(self, request):
+        """As perguntas dos dois formulários e as categorias da classificação — a tela monta tudo daqui."""
+        from . import desligamento as dsl
+        return Response({
+            'perguntas': dsl.PERGUNTAS,
+            'classes': {k: [{'valor': v, 'rotulo': r} for v, r in itens] for k, itens in dsl.CLASSES.items()},
+            'tipos': [{'valor': v, 'rotulo': r} for v, r in Desligamento.TIPOS],
+        })
+
+    @action(detail=False, methods=['get'])
+    def colaboradores(self, request):
+        """Busca no cadastro de colaboradores (ativos e desligados) para escolher o desligado ou o gestor."""
+        from avaliacoes.management.models import Colaborador
+        termo = (request.query_params.get('q') or '').strip()
+        qs = Colaborador.objects.select_related('setor', 'cargo')
+        if termo:
+            for parte in termo.split():
+                qs = qs.filter(nome__icontains=parte)
+        qs = qs.order_by('-situacao', 'nome')[:25]
+        return Response([{
+            'id': c.id, 'nome': c.nome, 'setor': c.setor.nome if c.setor_id else '',
+            'cargo': c.cargo.nome if c.cargo_id else '',
+            'data_admissao': c.data_admissao.date() if c.data_admissao else None,
+            'data_demissao': c.data_demissao.date() if c.data_demissao else None,
+            'ativo': bool(c.situacao),
+        } for c in qs])
+
+    @action(detail=False, methods=['get'])
+    def indicadores(self, request):
+        from . import desligamento as dsl
+        return Response(dsl.indicadores(self.get_queryset()))
+
+
+class FormularioDesligamentoViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, mixins.UpdateModelMixin,
+                                    mixins.DestroyModelMixin, viewsets.GenericViewSet):
+    """
+    Uma entrevista do desligamento. Ao salvar, a IA classifica as respostas abertas em
+    segundo plano (Celery) — a não ser que o RH já tenha revisado a classificação.
+    """
+
+    permission_classes = [IsRH]
+    serializer_class = FormularioDesligamentoSerializer
+    queryset = FormularioDesligamento.objects.select_related('desligamento', 'preenchido_por')
+
+    def _apos_salvar(self, f):
+        # Tipo do desligamento: o do gestor manda (é o registro da empresa); sem ele, o do funcionário.
+        d = f.desligamento
+        gestor = d.formularios.filter(formulario='GESTOR').exclude(tipo_informado='').first()
+        tipo = gestor.tipo_informado if gestor else f.tipo_informado
+        if tipo and d.tipo != tipo:
+            d.tipo = tipo
+            d.save(update_fields=['tipo', 'atualizado_em'])
+        if not f.classificacao_revisada:
+            from django.db import transaction
+            from .tasks import classificar_formulario_desligamento
+            transaction.on_commit(lambda: classificar_formulario_desligamento.delay(f.id))
+
+    def perform_create(self, serializer):
+        self._apos_salvar(serializer.save(preenchido_por=self.request.user))
+
+    def perform_update(self, serializer):
+        # Mexer na classificação à mão é "revisar": a IA não sobrescreve mais.
+        extra = {'classificacao_revisada': True} if 'classificacao' in serializer.validated_data else {}
+        self._apos_salvar(serializer.save(**extra))
+
+    @action(detail=True, methods=['post'])
+    def classificar(self, request, pk=None):
+        """Classifica agora (síncrono, alguns segundos). `?forcar=1` refaz mesmo revisada."""
+        f = self.get_object()
+        if f.classificacao_revisada and request.query_params.get('forcar') != '1':
+            return Response({'detail': 'Classificação revisada pelo RH. Use forcar=1 para refazer pela IA.'},
+                            status=status.HTTP_409_CONFLICT)
+        f.classificacao_revisada = False
+        f.save(update_fields=['classificacao_revisada'])
+        aplicar_classificacao(f)
+        return Response(FormularioDesligamentoSerializer(f).data)

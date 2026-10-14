@@ -3,8 +3,10 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AreaInteresseViewSet,
     CandidatoViewSet,
+    DesligamentoViewSet,
     FichaEntrevistaViewSet,
     FolhaPontoViewSet,
+    FormularioDesligamentoViewSet,
     IndicadoresViewSet,
     ProcessoViewSet,
     TurnoverViewSet,
@@ -22,5 +24,7 @@ router.register(r'indicadores', IndicadoresViewSet, basename='indicador')
 router.register(r'turnover', TurnoverViewSet, basename='turnover')
 router.register(r'indicadores-sociais', IndicadoresSociaisViewSet, basename='indicadores-sociais')
 router.register(r'folha-ponto', FolhaPontoViewSet, basename='folha-ponto')
+router.register(r'desligamentos', DesligamentoViewSet, basename='desligamento')
+router.register(r'desligamentos-formularios', FormularioDesligamentoViewSet, basename='desligamento-formulario')
 
 urlpatterns = router.urls

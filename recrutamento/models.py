@@ -19,6 +19,7 @@ import re
 from datetime import date
 from uuid import uuid4
 
+from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models.signals import post_delete
@@ -816,3 +817,97 @@ def _apagar_zip_folha_ponto(sender, instance, **kwargs):
     ficha: ``queryset.delete()`` não chama ``delete()`` do objeto."""
     if instance.arquivo:
         instance.arquivo.delete(save=False)
+
+
+# ── Desligamentos (justificativa do gestor + entrevista do funcionário) ───
+class Desligamento(models.Model):
+    """
+    Um desligamento. O colaborador vem do cadastro (management.Colaborador); nome, cargo,
+    setor e gestor são COPIADOS na hora — como a ficha F-018, é documento datado e tem que
+    continuar mostrando o que era verdade no dia, mesmo que o cadastro mude.
+
+    As respostas ficam nos formulários (FormularioDesligamento): a justificativa do gestor
+    e a entrevista do funcionário, um de cada no máximo.
+    """
+
+    TIPOS = [
+        ('VOLUNTARIO', 'Voluntário (pedido do colaborador)'),
+        ('INVOLUNTARIO', 'Involuntário (iniciativa da empresa)'),
+        ('ACORDO', 'Acordo mútuo'),
+    ]
+
+    colaborador = models.ForeignKey('management.Colaborador', null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name='desligamentos')
+    nome = models.CharField(max_length=150)
+    cargo = models.CharField(max_length=120, blank=True, default='')
+    setor = models.CharField(max_length=120, blank=True, default='')
+    data_admissao = models.DateField(null=True, blank=True)
+    data_desligamento = models.DateField()
+    tipo = models.CharField(max_length=15, choices=TIPOS, blank=True, default='')
+    gestor = models.ForeignKey('management.Colaborador', null=True, blank=True, on_delete=models.SET_NULL,
+                               related_name='+')
+    gestor_nome = models.CharField(max_length=150, blank=True, default='')
+    # Só das respostas antigas do Google Forms, que traziam o tempo de casa digitado
+    # ("1 ano e 3 meses") e não a admissão.
+    tempo_casa_texto = models.CharField(max_length=80, blank=True, default='')
+    observacao = models.TextField(blank=True, default='')
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-data_desligamento', '-id']
+        verbose_name = 'Desligamento'
+        verbose_name_plural = 'Desligamentos'
+
+    def __str__(self):
+        return f'{self.nome} — {self.data_desligamento:%d/%m/%Y}'
+
+    @property
+    def tempo_casa_meses(self):
+        from .desligamento import meses_de_texto, meses_entre
+        if self.data_admissao and self.data_desligamento:
+            return meses_entre(self.data_admissao, self.data_desligamento)
+        return meses_de_texto(self.tempo_casa_texto) if self.tempo_casa_texto else None
+
+
+class FormularioDesligamento(models.Model):
+    """
+    Uma das duas entrevistas do desligamento. `respostas` usa as chaves de
+    desligamento.PERGUNTAS; `classificacao` é o que a IA (ou o RH, corrigindo) tirou das
+    respostas abertas — é dela que saem os indicadores.
+    """
+
+    FORMULARIOS = [('GESTOR', 'Justificativa do gestor'), ('FUNCIONARIO', 'Entrevista do funcionário')]
+    ORIGENS = [('SISTEMA', 'Sistema'), ('GOOGLE_FORMS', 'Google Forms (importado)')]
+
+    desligamento = models.ForeignKey(Desligamento, on_delete=models.CASCADE, related_name='formularios')
+    formulario = models.CharField(max_length=12, choices=FORMULARIOS)
+    # O tipo que ESTE formulário informa: gestor e funcionário às vezes divergem
+    # ("acordo mútuo" × "pedido do colaborador") — a divergência é informação.
+    tipo_informado = models.CharField(max_length=15, choices=Desligamento.TIPOS, blank=True, default='')
+    respostas = models.JSONField(default=dict, blank=True)
+    classificacao = models.JSONField(default=dict, blank=True)
+    # Corrigida pelo RH: a IA não sobrescreve mais.
+    classificacao_revisada = models.BooleanField(default=False)
+    classificado_em = models.DateTimeField(null=True, blank=True)
+    erro_classificacao = models.TextField(blank=True, default='')
+    data_preenchimento = models.DateField(default=date.today)
+    preenchido_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                       related_name='+')
+    origem = models.CharField(max_length=15, choices=ORIGENS, default='SISTEMA')
+    # "FUNCIONARIO|2025/05/16 2:30:07 PM GMT-3" — torna a importação idempotente.
+    id_legado = models.CharField(max_length=80, blank=True, default='', db_index=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['desligamento', 'formulario']
+        constraints = [models.UniqueConstraint(fields=['desligamento', 'formulario'],
+                                               name='um_formulario_de_cada_por_desligamento')]
+        verbose_name = 'Formulário de desligamento'
+        verbose_name_plural = 'Formulários de desligamento'
+
+    def __str__(self):
+        return f'{self.get_formulario_display()} — {self.desligamento}'
