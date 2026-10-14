@@ -17,11 +17,12 @@ from kanban.models import KanbanColumn, KanbanTask
 from . import ia, normas_tecnicas
 from .models import (
     TEMAS, ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor,
-    PlanoAcao, PublicacaoMonitorada, Requisito, Verificacao,
+    PlanoAcao, PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao,
 )
 from .permissions import IsConformidade
 from .serializers import nome_usuario
 from .serializers import (
+    TerceiroSerializer, DocumentoTerceiroSerializer,
     ConfiguracaoMonitorSerializer, ExecucaoMonitorSerializer, ExtracaoIASerializer, NormaSerializer,
     OrgaoMonitorSerializer, PalavraChaveSerializer, PlanoAcaoSerializer, PublicacaoDetalheSerializer,
     PublicacaoSerializer, RequisitoSerializer, VerificacaoSerializer,
@@ -211,7 +212,7 @@ def _preencher_nbrs_pela_regex(extracao):
 
 LIMITE_LOTE = 500
 # O que a edição em lote pode mudar. Norma, descrição e referência são de cada requisito.
-CAMPOS_LOTE = ('aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'periodicidade_meses', 'tema', 'ativo')
+CAMPOS_LOTE = ('aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'periodicidade_meses', 'tema', 'ativo', 'terceiro')
 
 
 def _validar_vcl(d):
@@ -252,7 +253,18 @@ def _abrir_plano(req, vcl, d, usuario):
         requisito=req, verificacao=vcl, descricao=d['plano_descricao'].strip(),
         responsavel=_usuario(d.get('plano_responsavel'), 'plano_responsavel') or req.responsavel,
         prazo=_data(d.get('plano_prazo'), 'plano_prazo'), criado_por=usuario,
+        # Sem escolha na tela, o plano fica com o prestador do requisito.
+        terceiro=_terceiro(d.get('plano_terceiro')) or req.terceiro,
     )
+
+
+def _terceiro(valor):
+    if valor in (None, '', 'null'):
+        return None
+    try:
+        return Terceiro.objects.get(pk=int(valor))
+    except (ValueError, Terceiro.DoesNotExist):
+        raise ValidationError({'plano_terceiro': 'Terceiro não encontrado.'})
 
 
 def _total_paginas(norma) -> int | None:
@@ -272,13 +284,13 @@ class RequisitoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = (Requisito.objects
-              .select_related('norma', 'responsavel__colaborador')
+              .select_related('norma', 'responsavel__colaborador', 'terceiro')
               .annotate(planos_abertos=Count('planos', filter=Q(planos__concluido_em__isnull=True)
                                              & (Q(planos__tarefa__isnull=True) | Q(planos__tarefa__concluido_em__isnull=True)))))
         p = self.request.query_params
         if p.get('ativo', '1') != 'todos':
             qs = qs.filter(ativo=True)
-        for campo in ('norma', 'tema', 'aplicabilidade', 'situacao', 'responsavel', 'origem'):
+        for campo in ('norma', 'tema', 'aplicabilidade', 'situacao', 'responsavel', 'origem', 'terceiro'):
             if p.get(campo):
                 qs = qs.filter(**{campo: p[campo]})
         if p.get('vencidos') == '1':
@@ -357,6 +369,7 @@ class RequisitoViewSet(viewsets.ModelViewSet):
                 for n in validades
             ],
             'proximas': RequisitoSerializer(proximas, many=True, context={'request': request}).data,
+            'terceiros': _resumo_terceiros(hoje),
         })
 
     @action(detail=True, methods=['post'])
@@ -526,10 +539,12 @@ class PlanoAcaoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = PlanoAcao.objects.select_related(
-            'requisito__norma', 'responsavel__colaborador', 'tarefa__coluna__quadro')
+            'requisito__norma', 'responsavel__colaborador', 'tarefa__coluna__quadro', 'terceiro')
         p = self.request.query_params
         if p.get('requisito'):
             qs = qs.filter(requisito=p['requisito'])
+        if p.get('terceiro'):
+            qs = qs.filter(terceiro=p['terceiro'])
         if p.get('abertos') == '1':
             qs = qs.filter(PLANO_ABERTO)
         return qs
@@ -757,3 +772,126 @@ class TestarPalavrasView(APIView):
         from . import monitor
         texto = (request.data.get('texto') or '')[:50000]
         return Response({'palavras': monitor.palavras_encontradas(texto, monitor.carregar_palavras())})
+
+
+# ── Terceiros ─────────────────────────────────────────────────────────────
+def _resumo_terceiros(hoje):
+    """Painel: terceiros ativos irregulares/a vencer e os documentos exigidos que pedem atenção."""
+    terceiros = list(Terceiro.objects.filter(ativo=True).prefetch_related('documentos'))
+    alertas = []
+    for t in terceiros:
+        for d in t.documentos_vigentes():
+            if d.obrigatorio and d.situacao in ('VENCIDO', 'A_VENCER', 'PENDENTE'):
+                alertas.append({'terceiro': t.id, 'terceiro_nome': str(t), 'documento': d.id,
+                                'tipo_rotulo': d.get_tipo_display(), 'descricao': d.descricao,
+                                'situacao': d.situacao, 'validade': d.validade, 'dias': d.dias_para_vencer})
+    ordem = {'VENCIDO': 0, 'PENDENTE': 1, 'A_VENCER': 2}
+    alertas.sort(key=lambda a: (ordem[a['situacao']], a['dias'] if a['dias'] is not None else 0))
+    situacoes = [t.situacao_documental() for t in terceiros]
+    return {
+        'ativos': len(terceiros),
+        'irregulares': situacoes.count('IRREGULAR'),
+        'a_vencer': situacoes.count('A_VENCER'),
+        'documentos_vencidos': sum(a['situacao'] == 'VENCIDO' for a in alertas),
+        'documentos_pendentes': sum(a['situacao'] == 'PENDENTE' for a in alertas),
+        'alertas': alertas[:15],
+    }
+
+
+class TerceiroViewSet(viewsets.ModelViewSet):
+    """Prestadores de serviço. ``?situacao=IRREGULAR|A_VENCER|REGULAR|SEM_EXIGENCIA``, ``?ativo=todos``."""
+    permission_classes = [IsConformidade]
+    serializer_class = TerceiroSerializer
+
+    def get_queryset(self):
+        qs = (Terceiro.objects.prefetch_related('documentos__enviado_por__colaborador')
+              .annotate(total_requisitos=Count('requisitos', filter=Q(requisitos__ativo=True), distinct=True),
+                        planos_abertos=Count('planos', filter=Q(planos__concluido_em__isnull=True)
+                                             & (Q(planos__tarefa__isnull=True) | Q(planos__tarefa__concluido_em__isnull=True)),
+                                             distinct=True)))
+        p = self.request.query_params
+        if p.get('ativo', '1') != 'todos':
+            qs = qs.filter(ativo=True)
+        if p.get('categoria'):
+            qs = qs.filter(categoria=p['categoria'])
+        if p.get('q'):
+            termo = p['q'].strip()
+            qs = qs.filter(Q(razao_social__icontains=termo) | Q(nome_fantasia__icontains=termo)
+                           | Q(cnpj__icontains=termo) | Q(servico__icontains=termo))
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        lista = self.get_queryset()
+        situacao = request.query_params.get('situacao')
+        if situacao:
+            lista = [t for t in lista if t.situacao_documental() == situacao]
+        return Response(self.get_serializer(lista, many=True).data)
+
+    def perform_create(self, serializer):
+        serializer.save(criado_por=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        terceiro = self.get_object()
+        if terceiro.documentos.exists() or terceiro.requisitos.exists() or terceiro.planos.exists():
+            return Response({'detail': 'Este terceiro tem documentos, requisitos ou planos ligados. Inative-o em vez de '
+                                       'excluir — os documentos são evidência de que ele estava regular.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        terceiro.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DocumentoTerceiroViewSet(viewsets.ModelViewSet):
+    """
+    Documentos dos terceiros. ``?terceiro=<id>``; ``?historico=1`` inclui as versões
+    substituídas. Multipart com ``arquivo``. Renovar (``/renovar/``) guarda a versão
+    anterior em vez de sobrescrever o arquivo.
+    """
+    permission_classes = [IsConformidade]
+    serializer_class = DocumentoTerceiroSerializer
+
+    def get_queryset(self):
+        qs = DocumentoTerceiro.objects.select_related('terceiro', 'enviado_por__colaborador')
+        p = self.request.query_params
+        if p.get('terceiro'):
+            qs = qs.filter(terceiro=p['terceiro'])
+        # Só a listagem esconde as versões antigas; no detalhe elas existem (e dizem "já renovado").
+        if self.action == 'list' and p.get('historico') != '1':
+            qs = qs.filter(substituido_em__isnull=True)
+        return qs
+
+    def perform_create(self, serializer):
+        enviado = self.request.user if serializer.validated_data.get('arquivo') else None
+        serializer.save(enviado_por=enviado)
+
+    def perform_update(self, serializer):
+        if serializer.instance.substituido_em:
+            raise ValidationError({'detail': 'Versão antiga do documento: só a atual pode ser alterada.'})
+        extra = {'enviado_por': self.request.user} if serializer.validated_data.get('arquivo') else {}
+        serializer.save(**extra)
+
+    def perform_destroy(self, instance):
+        if instance.arquivo:
+            instance.arquivo.delete(save=False)
+        instance.delete()
+
+    @action(detail=True, methods=['post'])
+    def renovar(self, request, pk=None):
+        """Nova versão do documento (arquivo + datas); a anterior vai para o histórico."""
+        antigo = self.get_object()
+        if antigo.substituido_em:
+            raise ValidationError({'detail': 'Este documento já foi renovado.'})
+        if not request.data.get('arquivo'):
+            raise ValidationError({'arquivo': 'Anexe o documento renovado.'})
+        dados = {
+            'terceiro': antigo.terceiro_id, 'tipo': antigo.tipo, 'obrigatorio': antigo.obrigatorio,
+            'descricao': request.data.get('descricao', antigo.descricao), 'orgao': request.data.get('orgao', antigo.orgao),
+            'numero': request.data.get('numero', antigo.numero), 'emissao': request.data.get('emissao') or None,
+            'validade': request.data.get('validade') or None, 'arquivo': request.data.get('arquivo'),
+        }
+        s = self.get_serializer(data=dados)
+        s.is_valid(raise_exception=True)
+        with transaction.atomic():
+            novo = s.save(enviado_por=request.user)
+            antigo.substituido_em = timezone.now()
+            antigo.save(update_fields=['substituido_em'])
+        return Response(self.get_serializer(novo).data, status=status.HTTP_201_CREATED)

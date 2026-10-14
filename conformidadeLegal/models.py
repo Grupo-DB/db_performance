@@ -134,6 +134,8 @@ class Requisito(models.Model):
     # sugerir com citação, e quem aprova confere aqui.
     trecho_fonte = models.TextField(blank=True, default='')
     pagina_fonte = models.PositiveIntegerField(null=True, blank=True)
+    # Prestador ligado à obrigação (ex.: transportador de resíduos para a condicionante da LO).
+    terceiro = models.ForeignKey('Terceiro', null=True, blank=True, on_delete=models.SET_NULL, related_name='requisitos')
 
     ativo = models.BooleanField(default=True)
     criado_por = models.ForeignKey(
@@ -229,6 +231,8 @@ class PlanoAcao(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='planos_acao_legais'
     )
     prazo = models.DateField(null=True, blank=True)
+    # Quem executa o plano, quando é um prestador de serviço.
+    terceiro = models.ForeignKey('Terceiro', null=True, blank=True, on_delete=models.SET_NULL, related_name='planos')
     tarefa = models.ForeignKey(
         'kanban.KanbanTask', null=True, blank=True, on_delete=models.SET_NULL, related_name='planos_conformidade'
     )
@@ -462,3 +466,139 @@ class ConfiguracaoMonitor(models.Model):
     def atual(cls):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+
+# ── Terceiros: prestadores de serviço e seus documentos ──────────────────
+DIAS_AVISO_DOCUMENTO = 30
+
+
+class Terceiro(models.Model):
+    """
+    Empresa terceirizada / prestador de serviço. Quando a atividade exige, o
+    terceiro precisa manter alvarás e licenças em dia (DocumentoTerceiro); a
+    empresa responde junto se o transportador de resíduo estiver sem LO, por
+    exemplo. Requisitos e planos de ação podem apontar para o terceiro.
+    """
+
+    CATEGORIAS = [
+        ('RESIDUOS', 'Resíduos (coleta, transporte, destinação)'),
+        ('TRANSPORTE', 'Transporte de cargas / produtos'),
+        ('MANUTENCAO', 'Manutenção e obras'),
+        ('LIMPEZA', 'Limpeza e conservação'),
+        ('SEGURANCA', 'Vigilância / segurança patrimonial'),
+        ('ALIMENTACAO', 'Alimentação'),
+        ('LABORATORIO', 'Laboratório / análises'),
+        ('SAUDE', 'Saúde ocupacional'),
+        ('EXPLOSIVOS', 'Desmonte / explosivos'),
+        ('CONSULTORIA', 'Consultoria / engenharia'),
+        ('OUTRO', 'Outro'),
+    ]
+
+    razao_social = models.CharField(max_length=200)
+    nome_fantasia = models.CharField(max_length=200, blank=True, default='')
+    cnpj = models.CharField(max_length=18, blank=True, default='', help_text='Só números ou com máscara.')
+    categoria = models.CharField(max_length=15, choices=CATEGORIAS, default='OUTRO')
+    servico = models.TextField(blank=True, default='', help_text='O que o terceiro faz para a empresa.')
+    unidade = models.CharField(max_length=120, blank=True, default='', help_text='Unidade/setor atendido.')
+    contato_nome = models.CharField(max_length=120, blank=True, default='')
+    telefone = models.CharField(max_length=40, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
+    contrato_fim = models.DateField(null=True, blank=True, help_text='Fim do contrato, se houver.')
+    ativo = models.BooleanField(default=True)
+    observacao = models.TextField(blank=True, default='')
+    criado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['razao_social']
+        verbose_name = 'Terceiro (prestador de serviço)'
+        verbose_name_plural = 'Terceiros (prestadores de serviço)'
+
+    def __str__(self):
+        return self.nome_fantasia or self.razao_social
+
+    def documentos_vigentes(self):
+        """Versão atual de cada documento (as renovadas ficam no histórico)."""
+        docs = getattr(self, '_prefetched_objects_cache', {}).get('documentos')
+        docs = docs if docs is not None else self.documentos.all()
+        return [d for d in docs if d.substituido_em is None]
+
+    def situacao_documental(self) -> str:
+        """Pior situação entre os documentos exigidos: IRREGULAR, A_VENCER, REGULAR ou SEM_EXIGENCIA."""
+        exigidos = [d for d in self.documentos_vigentes() if d.obrigatorio]
+        if not exigidos:
+            return 'SEM_EXIGENCIA'
+        situacoes = {d.situacao for d in exigidos}
+        if situacoes & {'VENCIDO', 'PENDENTE'}:
+            return 'IRREGULAR'
+        if 'A_VENCER' in situacoes:
+            return 'A_VENCER'
+        return 'REGULAR'
+
+
+class DocumentoTerceiro(models.Model):
+    """
+    Alvará, licença ou certidão de um terceiro. Renovar cria um registro novo e
+    marca o anterior como substituído — o arquivo antigo fica como evidência de
+    que o terceiro estava regular naquele período.
+    """
+
+    TIPOS = [
+        ('LICENCA_AMBIENTAL', 'Licença ambiental (LO / LI / LP)'),
+        ('ALVARA_FUNCIONAMENTO', 'Alvará de localização e funcionamento'),
+        ('ALVARA_SANITARIO', 'Alvará sanitário'),
+        ('PPCI', 'PPCI / APPCI (bombeiros)'),
+        ('CTF_IBAMA', 'CTF / IBAMA'),
+        ('TRANSPORTE_PERIGOSO', 'Autorização de transporte (ANTT / produtos perigosos)'),
+        ('CR_EXERCITO', 'Certificado de Registro do Exército (explosivos)'),
+        ('OUTORGA', 'Outorga / autorização de órgão'),
+        ('ART', 'ART / responsável técnico'),
+        ('CERTIDAO', 'Certidão de regularidade (FGTS, INSS, tributos)'),
+        ('SEGURO', 'Apólice de seguro'),
+        ('OUTRO', 'Outro'),
+    ]
+
+    terceiro = models.ForeignKey(Terceiro, on_delete=models.CASCADE, related_name='documentos')
+    tipo = models.CharField(max_length=25, choices=TIPOS)
+    descricao = models.CharField(max_length=200, blank=True, default='', help_text='Ex.: "LO de transporte de resíduos Classe I".')
+    orgao = models.CharField(max_length=120, blank=True, default='')
+    numero = models.CharField(max_length=80, blank=True, default='')
+    emissao = models.DateField(null=True, blank=True)
+    validade = models.DateField(null=True, blank=True, help_text='Vazio = sem vencimento.')
+    arquivo = models.FileField(upload_to='conformidade/terceiros/%Y/', blank=True, null=True)
+    # Exigido do terceiro: sem arquivo ou vencido, o terceiro fica irregular.
+    obrigatorio = models.BooleanField(default=True)
+    substituido_em = models.DateTimeField(null=True, blank=True)
+    enviado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['terceiro_id', 'tipo', '-criado_em']
+        verbose_name = 'Documento de terceiro'
+        verbose_name_plural = 'Documentos de terceiros'
+
+    def __str__(self):
+        return f'{self.terceiro} — {self.get_tipo_display()}'
+
+    @property
+    def dias_para_vencer(self):
+        return (self.validade - date.today()).days if self.validade else None
+
+    @property
+    def situacao(self) -> str:
+        """PENDENTE (sem arquivo), VENCIDO, A_VENCER (até 30 dias), EM_DIA ou SEM_VALIDADE."""
+        if not self.arquivo:
+            return 'PENDENTE'
+        dias = self.dias_para_vencer
+        if dias is None:
+            return 'SEM_VALIDADE'
+        if dias < 0:
+            return 'VENCIDO'
+        if dias <= DIAS_AVISO_DOCUMENTO:
+            return 'A_VENCER'
+        return 'EM_DIA'

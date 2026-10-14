@@ -3,7 +3,7 @@ from rest_framework import serializers
 
 from .models import (
     ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor, PlanoAcao,
-    PublicacaoMonitorada, Requisito, Verificacao,
+    PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao,
 )
 
 
@@ -50,12 +50,13 @@ class RequisitoSerializer(serializers.ModelSerializer):
     responsavel_nome = serializers.SerializerMethodField()
     responsavel = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), allow_null=True, required=False)
     planos_abertos = serializers.IntegerField(read_only=True, default=0)
+    terceiro_nome = serializers.CharField(source='terceiro.__str__', read_only=True, default=None)
 
     class Meta:
         model = Requisito
         fields = [
             'id', 'norma', 'norma_identificacao', 'norma_ementa', 'referencia', 'descricao', 'tema',
-            'aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'responsavel_nome',
+            'aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'responsavel_nome', 'terceiro', 'terceiro_nome',
             'periodicidade_meses', 'prazo_legal', 'situacao', 'ultima_verificacao', 'proxima_verificacao',
             'origem', 'trecho_fonte', 'pagina_fonte', 'ativo', 'planos_abertos', 'criado_em', 'atualizado_em',
         ]
@@ -100,11 +101,13 @@ class PlanoAcaoSerializer(serializers.ModelSerializer):
     status = serializers.CharField(read_only=True)
     requisito_resumo = serializers.SerializerMethodField()
     tarefa_coluna = serializers.SerializerMethodField()
+    terceiro_nome = serializers.CharField(source='terceiro.__str__', read_only=True, default=None)
 
     class Meta:
         model = PlanoAcao
         fields = [
             'id', 'requisito', 'requisito_resumo', 'verificacao', 'descricao', 'responsavel', 'responsavel_nome',
+            'terceiro', 'terceiro_nome',
             'prazo', 'tarefa', 'tarefa_coluna', 'concluido_em', 'status', 'criado_em',
         ]
         read_only_fields = ['tarefa', 'concluido_em', 'criado_em']
@@ -224,3 +227,87 @@ class ExecucaoMonitorSerializer(serializers.ModelSerializer):
         model = ExecucaoMonitor
         fields = ['id', 'fonte', 'fonte_rotulo', 'data_referencia', 'iniciado_em', 'concluido_em', 'ok', 'examinadas',
                   'novas', 'erro']
+
+
+def _url_arquivo(serializer, arquivo):
+    if not arquivo:
+        return None
+    request = serializer.context.get('request')
+    return request.build_absolute_uri(arquivo.url) if request else arquivo.url
+
+
+class DocumentoTerceiroSerializer(serializers.ModelSerializer):
+    tipo_rotulo = serializers.CharField(source='get_tipo_display', read_only=True)
+    situacao = serializers.CharField(read_only=True)
+    dias_para_vencer = serializers.IntegerField(read_only=True)
+    arquivo_url = serializers.SerializerMethodField()
+    arquivo_nome = serializers.SerializerMethodField()
+    enviado_por_nome = serializers.SerializerMethodField()
+    # Em multipart o DRF lê booleano ausente como False (checkbox HTML); o padrão é exigir.
+    obrigatorio = serializers.BooleanField(required=False, default=True)
+
+    class Meta:
+        model = DocumentoTerceiro
+        fields = ['id', 'terceiro', 'tipo', 'tipo_rotulo', 'descricao', 'orgao', 'numero', 'emissao', 'validade',
+                  'arquivo', 'arquivo_url', 'arquivo_nome', 'obrigatorio', 'situacao', 'dias_para_vencer',
+                  'substituido_em', 'enviado_por_nome', 'criado_em']
+        read_only_fields = ['substituido_em', 'criado_em']
+        extra_kwargs = {'arquivo': {'write_only': True, 'required': False}}
+
+    def get_arquivo_url(self, obj):
+        return _url_arquivo(self, obj.arquivo)
+
+    def get_arquivo_nome(self, obj):
+        return obj.arquivo.name.rsplit('/', 1)[-1] if obj.arquivo else None
+
+    def get_enviado_por_nome(self, obj):
+        return nome_usuario(obj.enviado_por)
+
+    def validate(self, dados):
+        emissao = dados.get('emissao', getattr(self.instance, 'emissao', None))
+        validade = dados.get('validade', getattr(self.instance, 'validade', None))
+        if emissao and validade and validade < emissao:
+            raise serializers.ValidationError({'validade': 'A validade é anterior à emissão.'})
+        arquivo = dados.get('arquivo')
+        if arquivo and arquivo.size > 25 * 1024 * 1024:
+            raise serializers.ValidationError({'arquivo': 'Limite de 25 MB por arquivo.'})
+        return dados
+
+
+class TerceiroSerializer(serializers.ModelSerializer):
+    categoria_rotulo = serializers.CharField(source='get_categoria_display', read_only=True)
+    situacao_documental = serializers.CharField(read_only=True)
+    documentos = serializers.SerializerMethodField()
+    total_requisitos = serializers.IntegerField(read_only=True, default=0)
+    planos_abertos = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = Terceiro
+        fields = ['id', 'razao_social', 'nome_fantasia', 'cnpj', 'categoria', 'categoria_rotulo', 'servico', 'unidade',
+                  'contato_nome', 'telefone', 'email', 'contrato_fim', 'ativo', 'observacao', 'situacao_documental',
+                  'documentos', 'total_requisitos', 'planos_abertos', 'criado_em', 'atualizado_em']
+        read_only_fields = ['criado_em', 'atualizado_em']
+
+    def get_documentos(self, obj):
+        """Só a versão atual de cada documento; o histórico vem de documentos-terceiros/?historico=1."""
+        return DocumentoTerceiroSerializer(obj.documentos_vigentes(), many=True, context=self.context).data
+
+    def validate_cnpj(self, valor):
+        digitos = ''.join(c for c in (valor or '') if c.isdigit())
+        if not digitos:
+            return ''
+        if len(digitos) != 14 or not cnpj_valido(digitos):
+            raise serializers.ValidationError('CNPJ inválido.')
+        return f'{digitos[:2]}.{digitos[2:5]}.{digitos[5:8]}/{digitos[8:12]}-{digitos[12:]}'
+
+
+def cnpj_valido(d: str) -> bool:
+    if len(set(d)) == 1:
+        return False
+    for tamanho in (12, 13):
+        pesos = list(range(tamanho - 7, 1, -1)) + list(range(9, 1, -1))
+        soma = sum(int(d[i]) * pesos[i] for i in range(tamanho))
+        digito = 0 if soma % 11 < 2 else 11 - soma % 11
+        if int(d[tamanho]) != digito:
+            return False
+    return True

@@ -867,3 +867,104 @@ class NbrNoDouTests(APITestCase):
         # Só a portaria que cita a NBR: palavra comum não vale fora dos órgãos acompanhados, e despacho não é norma.
         self.assertEqual([(p.id_externo, p.palavras, p.origem) for p in pubs],
                          [('1', ['ABNT NBR 10004'], monitor.ORIGEM_QUALQUER_ORGAO)])
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class TerceirosTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('sgi', password='x')
+        self.user.groups.add(Group.objects.create(name='ConformidadeLegal'))
+        self.client.force_authenticate(self.user)
+        self.url = '/conformidadeLegal/terceiros/'
+        self.docs = '/conformidadeLegal/documentos-terceiros/'
+
+    def _terceiro(self, **extra):
+        r = self.client.post(self.url, {'razao_social': 'Transportes Pampa Ltda', 'categoria': 'RESIDUOS',
+                                        'cnpj': '11222333000181', **extra}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        return r.data
+
+    def _doc(self, terceiro, validade=None, arquivo=True, **extra):
+        from datetime import date, timedelta
+        dados = {'terceiro': terceiro, 'tipo': 'LICENCA_AMBIENTAL', 'descricao': 'LO transporte Classe I', **extra}
+        if validade is not None:
+            dados['validade'] = (date.today() + timedelta(days=validade)).isoformat()
+        if arquivo:
+            dados['arquivo'] = SimpleUploadedFile('lo.pdf', b'%PDF-1.4 lo')
+        r = self.client.post(self.docs, dados, format='multipart')
+        self.assertEqual(r.status_code, 201, r.data)
+        return r.data
+
+    def test_cnpj_validado_e_formatado(self):
+        self.assertEqual(self._terceiro()['cnpj'], '11.222.333/0001-81')
+        r = self.client.post(self.url, {'razao_social': 'X', 'cnpj': '11222333000182'}, format='json')
+        self.assertIn('cnpj', r.data)
+
+    def test_situacao_documental_pelo_pior_documento_exigido(self):
+        t = self._terceiro()['id']
+        sit = lambda: self.client.get(f'{self.url}{t}/').data['situacao_documental']
+        self.assertEqual(sit(), 'SEM_EXIGENCIA')
+        self._doc(t, validade=200)
+        self.assertEqual(sit(), 'REGULAR')
+        alvara = self._doc(t, validade=10, tipo='ALVARA_FUNCIONAMENTO')
+        self.assertEqual(alvara['situacao'], 'A_VENCER')
+        self.assertEqual(sit(), 'A_VENCER')
+        self._doc(t, arquivo=False, tipo='CTF_IBAMA')            # exigido e ainda não enviado
+        self.assertEqual(sit(), 'IRREGULAR')
+        self._doc(t, validade=-5, tipo='SEGURO', obrigatorio=False)  # vencido, mas não exigido
+        lista = self.client.get(self.url, {'situacao': 'IRREGULAR'}).data
+        self.assertEqual([x['id'] for x in lista], [t])
+
+    def test_renovar_guarda_a_versao_anterior(self):
+        from datetime import date, timedelta
+        t = self._terceiro()['id']
+        velho = self._doc(t, validade=-3)
+        self.assertEqual(velho['situacao'], 'VENCIDO')
+        self.assertEqual(self.client.post(f"{self.docs}{velho['id']}/renovar/", {}, format='multipart').status_code, 400)
+        r = self.client.post(f"{self.docs}{velho['id']}/renovar/", {
+            'validade': (date.today() + timedelta(days=365)).isoformat(),
+            'arquivo': SimpleUploadedFile('lo2.pdf', b'%PDF-1.4 nova')}, format='multipart')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual((r.data['situacao'], r.data['descricao']), ('EM_DIA', 'LO transporte Classe I'))
+        terceiro = self.client.get(f'{self.url}{t}/').data
+        self.assertEqual([d['id'] for d in terceiro['documentos']], [r.data['id']])
+        self.assertEqual(terceiro['situacao_documental'], 'REGULAR')
+        historico = self.client.get(self.docs, {'terceiro': t, 'historico': 1}).data
+        self.assertEqual(len(historico), 2)
+        self.assertEqual(self.client.post(f"{self.docs}{velho['id']}/renovar/", {
+            'arquivo': SimpleUploadedFile('x.pdf', b'%PDF')}, format='multipart').status_code, 400)
+
+    def test_requisito_e_plano_ligados_ao_terceiro(self):
+        t = self._terceiro()['id']
+        norma = Norma.objects.create(tipo='LICENCA', orgao='FEPAM', ementa='LO')
+        r = self.client.post('/conformidadeLegal/requisitos/', {
+            'norma': norma.id, 'descricao': 'Destinar resíduos Classe I só com transportador licenciado',
+            'aplicabilidade': 'APLICAVEL', 'terceiro': t}, format='json')
+        self.assertEqual((r.data['terceiro'], r.data['terceiro_nome']), (t, 'Transportes Pampa Ltda'))
+        req = r.data['id']
+        # Plano aberto na verificação herda o terceiro do requisito.
+        v = self.client.post(f'/conformidadeLegal/requisitos/{req}/verificar/', {
+            'resultado': 'NAO_ATENDIDO', 'data': '2026-10-14', 'plano_descricao': 'Cobrar a LO renovada'}, format='multipart')
+        self.assertEqual(v.status_code, 201, v.data)
+        planos = self.client.get('/conformidadeLegal/planos-acao/', {'terceiro': t}).data
+        self.assertEqual([p['terceiro_nome'] for p in planos], ['Transportes Pampa Ltda'])
+        self.assertEqual(len(self.client.get('/conformidadeLegal/requisitos/', {'terceiro': t}).data), 1)
+        terceiro = self.client.get(f'{self.url}{t}/').data
+        self.assertEqual((terceiro['total_requisitos'], terceiro['planos_abertos']), (1, 1))
+        # Com ligação não se exclui: inativa.
+        self.assertEqual(self.client.delete(f'{self.url}{t}/').status_code, 400)
+
+    def test_painel_conta_terceiros_e_alertas(self):
+        t = self._terceiro()['id']
+        self._doc(t, validade=-1)
+        self._doc(t, arquivo=False, tipo='ALVARA_FUNCIONAMENTO')
+        resumo = self.client.get('/conformidadeLegal/requisitos/resumo/').data['terceiros']
+        self.assertEqual((resumo['ativos'], resumo['irregulares'], resumo['documentos_vencidos'], resumo['documentos_pendentes']),
+                         (1, 1, 1, 1))
+        self.assertEqual([a['situacao'] for a in resumo['alertas']], ['VENCIDO', 'PENDENTE'])
+
+    def test_validade_antes_da_emissao(self):
+        t = self._terceiro()['id']
+        r = self.client.post(self.docs, {'terceiro': t, 'tipo': 'PPCI', 'emissao': '2026-05-01', 'validade': '2026-04-01'},
+                             format='multipart')
+        self.assertIn('validade', r.data)
