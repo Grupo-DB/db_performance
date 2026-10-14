@@ -44,10 +44,15 @@ def monitorar_diarios():
     ficaram para trás desde a última coleta boa e, em seguida, faz a triagem pela IA
     do que entrou. Rodar mais de uma vez no dia é seguro (pega a 2ª edição).
     """
+    from django.conf import settings
     from . import monitor
     hoje = timezone.localdate()
     for dia in monitor.dias_a_coletar('DOE_RS', hoje):
         monitor.coletar_doe_rs(dia)
+    # DOU só com a conta do INLABS configurada (sem ela não há o que registrar como falha).
+    if getattr(settings, 'CONFORMIDADE_INLABS_EMAIL', '') and getattr(settings, 'CONFORMIDADE_INLABS_SENHA', ''):
+        for dia in monitor.dias_a_coletar('DOU', hoje):
+            monitor.coletar_dou(dia)
     triar_publicacoes()
 
 

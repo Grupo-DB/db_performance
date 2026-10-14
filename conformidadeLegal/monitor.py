@@ -2,10 +2,13 @@
 Monitoramento de diários oficiais (fase 3): acha publicações novas que podem criar
 obrigação para a empresa e as deixa para a equipe avaliar.
 
-Fonte atual: Diário Oficial do Estado do RS (DOE-RS), pela API REST pública que o
-próprio site usa (Procergs) — sem login, JSON, texto nascido digital. A API não é
-documentada nem garantida: cada coleta grava uma ExecucaoMonitor, e a tela avisa
-quando a última falhou. O DOU (INLABS) entra depois, na mesma estrutura.
+Fontes:
+- Diário Oficial do Estado do RS (DOE-RS), pela API REST pública que o próprio site
+  usa (Procergs) — sem login, JSON, texto nascido digital;
+- Diário Oficial da União (DOU), Seção 1, pelo INLABS da Imprensa Nacional — cadastro
+  gratuito, um ZIP por seção e dia com um XML por ato.
+Nenhuma das duas tem contrato de estabilidade: cada coleta grava uma ExecucaoMonitor,
+e a tela avisa quando a última falhou.
 
 O filtro é em duas camadas, nesta ordem, e só a segunda custa alguma coisa:
   1. aqui: de quem é (órgão), que tipo de matéria é, e palavras-chave no texto;
@@ -13,6 +16,8 @@ O filtro é em duas camadas, nesta ordem, e só a segunda custa alguma coisa:
 """
 import html
 import io
+import xml.etree.ElementTree as ET
+import zipfile
 import logging
 import re
 import time
@@ -21,6 +26,7 @@ from datetime import date, timedelta
 from html.parser import HTMLParser
 
 import requests
+from django.conf import settings
 from django.db import IntegrityError
 from django.utils import timezone
 
@@ -84,6 +90,8 @@ PALAVRAS_CHAVE = [
     ('recursos hídricos', r'recursos hidricos|outorga'), ('PRAD', r'prad|recuperacao de areas? degradadas?'),
     ('potencial poluidor', r'potencial poluidor'), ('taxa ambiental', r'taxas? (de licenciamento|ambientais?)'),
     ('Resolução 372', r'372/2018'),
+    ('norma regulamentadora', r'normas? regulamentadoras?|nr-? ?\d{1,2}'),
+    ('segurança e saúde no trabalho', r'seguranca e saude no trabalho'),
 ]
 _PADROES = [(rotulo, re.compile(r'\b(' + padrao + r')\b')) for rotulo, padrao in PALAVRAS_CHAVE]
 
@@ -215,6 +223,140 @@ def coletar_doe_rs(dia: date, sessao=None) -> ExecucaoMonitor:
     return execucao
 
 
+# ── Diário Oficial da União (INLABS) ──────────────────────────────────────
+INLABS = 'https://inlabs.in.gov.br'
+# Cabeçalho exigido no download pelo script oficial da Imprensa Nacional
+# (github.com/Imprensa-Nacional/inlabs).
+INLABS_ORIGEM = {'origem': '736372697074'}
+
+_NORMATIVOS = {normalizar(t) for t in (
+    'Lei', 'Lei Complementar', 'Decreto', 'Medida Provisória', 'Resolução', 'Resolução Conjunta', 'Portaria',
+    'Portaria Conjunta', 'Instrução Normativa', 'Instrução Normativa Conjunta', 'Deliberação',
+)}
+_LEIS = {normalizar(t) for t in ('Lei', 'Lei Complementar', 'Decreto', 'Medida Provisória')}
+
+# O DOU publica ~400 atos por dia na Seção 1: o filtro é por ÓRGÃO (trecho do
+# artCategory, sem acento) e tipo de ato, e só depois por palavra-chave. Medido em
+# 06–14/10/2026: 2.276 atos → 3 candidatos (IBAMA, SQA/MMA e Resolução ANM 249).
+# O resto do diário (energia/ANP/ANEEL, Previc, Saúde, comércio exterior…) fica de fora.
+REGRAS_DOU = [
+    # (trecho do órgão, exige palavra-chave, tipos de ato aceitos)
+    ('agencia nacional de mineracao', False, _NORMATIVOS),
+    ('conselho nacional do meio ambiente', False, _NORMATIVOS),
+    ('ministerio do meio ambiente', True, _NORMATIVOS),      # inclui IBAMA, ICMBio, ANA
+    ('ministerio do trabalho', True, _NORMATIVOS),           # NRs entram pela palavra-chave
+    ('atos do poder executivo', True, _LEIS),
+    ('atos do poder legislativo', True, _LEIS),
+]
+
+
+def _regra_dou(categoria: str, tipo: str):
+    cat, tp = normalizar(categoria), normalizar(tipo)
+    return next((r for r in REGRAS_DOU if r[0] in cat and tp in r[2]), None)
+
+
+def _sessao_inlabs(sessao):
+    email = getattr(settings, 'CONFORMIDADE_INLABS_EMAIL', '')
+    senha = getattr(settings, 'CONFORMIDADE_INLABS_SENHA', '')
+    if not email or not senha:
+        raise FalhaFonte('INLABS sem credencial: defina CONFORMIDADE_INLABS_EMAIL e CONFORMIDADE_INLABS_SENHA.')
+    try:
+        sessao.post(f'{INLABS}/logar.php', data={'email': email, 'password': senha},
+                    headers={'User-Agent': CABECALHOS['User-Agent']}, timeout=60)
+    except requests.RequestException as e:
+        raise FalhaFonte(f'INLABS fora do ar: {e}'[:300])
+    # Senha errada: não vem o cookie e o site volta para a tela de acesso.
+    if 'inlabs_session_cookie' not in sessao.cookies.get_dict():
+        raise FalhaFonte('Login no INLABS recusado — confira o e-mail e a senha da conta.')
+
+
+def _zips_secao1(sessao, dia: date) -> list[str]:
+    """Arquivos da Seção 1 do dia (a normal e as extras), como o Ro-DOU: lendo a lista
+    da página, e não montando o nome — extra tem nome próprio."""
+    r = sessao.get(f'{INLABS}/index.php', params={'p': dia.isoformat()},
+                   headers={'User-Agent': CABECALHOS['User-Agent']}, timeout=60)
+    if 'acessar.php' in r.url:
+        raise FalhaFonte('Sessão do INLABS caiu antes da lista do dia.')
+    nomes = re.findall(r'dl=([^"&]+?\.zip)', html.unescape(r.text))
+    return sorted({n for n in nomes if re.search(r'-DO1[A-Z]?\.zip$', n)})
+
+
+def _atos_do_zip(conteudo: bytes):
+    with zipfile.ZipFile(io.BytesIO(conteudo)) as zf:
+        for nome in zf.namelist():
+            if not nome.lower().endswith('.xml'):
+                continue
+            try:
+                artigo = ET.fromstring(zf.read(nome).decode('utf-8-sig')).find('article')
+            except (ET.ParseError, UnicodeDecodeError):
+                continue
+            if artigo is not None:
+                yield artigo
+
+
+def coletar_dou(dia: date, sessao=None) -> ExecucaoMonitor:
+    """Seção 1 do DOU de um dia pelo INLABS. Idempotente, como a do DOE-RS."""
+    execucao = ExecucaoMonitor.objects.create(fonte='DOU', data_referencia=dia)
+    sessao = sessao or requests.Session()
+    try:
+        _sessao_inlabs(sessao)
+        ja = set(PublicacaoMonitorada.objects.filter(fonte='DOU', data_publicacao__gte=dia - timedelta(days=3))
+                 .values_list('id_externo', flat=True))
+        for arquivo in _zips_secao1(sessao, dia):
+            r = sessao.get(f'{INLABS}/index.php', params={'p': dia.isoformat(), 'dl': arquivo},
+                           headers={**INLABS_ORIGEM, 'User-Agent': CABECALHOS['User-Agent']}, timeout=300)
+            if r.status_code != 200 or r.content[:2] != b'PK':
+                raise FalhaFonte(f'{arquivo}: o INLABS não devolveu o ZIP (HTTP {r.status_code}).')
+            time.sleep(PAUSA)
+            for art in _atos_do_zip(r.content):
+                execucao.examinadas += 1
+                id_ext = art.get('idMateria') or art.get('id') or ''
+                if not id_ext or id_ext in ja:
+                    continue
+                regra = _regra_dou(art.get('artCategory', ''), art.get('artType', ''))
+                if not regra:
+                    continue
+                corpo = art.find('body')
+                ident = (corpo.findtext('Identifica') or '').strip() if corpo is not None else ''
+                ementa = (corpo.findtext('Ementa') or '').strip() if corpo is not None else ''
+                texto = texto_de_html(corpo.findtext('Texto') or '') if corpo is not None else ''
+                palavras = palavras_encontradas('\n'.join((ident, ementa, texto)))
+                if regra[1] and not palavras:
+                    continue
+                try:
+                    PublicacaoMonitorada.objects.create(
+                        fonte='DOU', id_externo=id_ext[:64],
+                        data_publicacao=_data_br(art.get('pubDate')) or dia,
+                        orgao=(art.get('artCategory') or '')[:255], tipo=(art.get('artType') or '')[:120],
+                        titulo=(ident or art.get('name') or '')[:500],
+                        texto=('\n'.join(t for t in (ementa, texto) if t))[:60000],
+                        link=html.unescape(art.get('pdfPage') or '')[:500], pagina=_int(art.get('numberPage')),
+                        palavras=palavras,
+                    )
+                    ja.add(id_ext)
+                    execucao.novas += 1
+                except IntegrityError:
+                    pass
+        execucao.ok = True
+    except FalhaFonte as e:
+        execucao.erro = str(e)
+        logger.warning('Monitor DOU %s falhou: %s', dia, e)
+    except Exception as e:  # noqa: BLE001
+        execucao.erro = f'{type(e).__name__}: {e}'[:2000]
+        logger.exception('Monitor DOU %s falhou', dia)
+    execucao.concluido_em = timezone.now()
+    execucao.save()
+    return execucao
+
+
+def _data_br(valor):
+    try:
+        d, m, a = str(valor).split('/')
+        return date(int(a), int(m), int(d))
+    except (TypeError, ValueError):
+        return None
+
+
 def dias_a_coletar(fonte: str, hoje: date) -> list[date]:
     """De depois da última coleta bem-sucedida até hoje (no máximo uma semana). Hoje sempre
     entra: rodar duas vezes no dia pega a 2ª edição e as extraordinárias."""
@@ -254,7 +396,18 @@ def dados_de_norma(pub: PublicacaoMonitorada) -> dict:
     if m:
         numero, ano = m.group(1).strip('.'), int(m.group(2))
     org = normalizar(pub.orgao)
-    if 'consema' in alvo:
+    if pub.fonte == 'DOU':
+        siglas = [('agencia nacional de mineracao', 'ANM'), ('conselho nacional do meio ambiente', 'CONAMA'),
+                  ('instituto brasileiro do meio ambiente', 'IBAMA'), ('agencia nacional de aguas', 'ANA'),
+                  ('ministerio do meio ambiente', 'MMA'), ('ministerio do trabalho', 'MTE')]
+        orgao = next((sg for trecho, sg in siglas if trecho in org), '')
+        # A sigla do título ("PORTARIA SQA/MMA Nº…") é mais precisa que a do órgão-pai.
+        m_sigla = re.search(r'\b(?:portaria|resolucao|instrucao normativa|deliberacao)\s+([a-z]{2,8}(?:/[a-z]{2,8})?)\s+n',
+                            normalizar(pub.titulo))
+        if m_sigla:
+            orgao = m_sigla.group(1).upper()
+        dados_esfera = 'FEDERAL'
+    elif 'consema' in alvo:
         orgao = 'CONSEMA'
     elif 'protecao ambiental' in org:
         orgao = 'FEPAM'
@@ -264,8 +417,10 @@ def dados_de_norma(pub: PublicacaoMonitorada) -> dict:
         orgao = 'RS'
     else:
         orgao = pub.orgao[:120]
+    if pub.fonte != 'DOU':
+        dados_esfera = 'ESTADUAL'
     return {
-        'tipo': tipo, 'numero': numero[:60], 'ano': ano, 'orgao': orgao, 'esfera': 'ESTADUAL',
+        'tipo': tipo, 'numero': numero[:60], 'ano': ano, 'orgao': orgao[:120], 'esfera': dados_esfera,
         'tema': pub.tema_sugerido or 'AMBIENTAL', 'ementa': pub.titulo or pub.texto[:300],
         'link': pub.link, 'data_publicacao': pub.data_publicacao, 'situacao': 'VIGENTE',
         'observacao': f'Cadastrada a partir do {pub.get_fonte_display()} de {pub.data_publicacao:%d/%m/%Y}'

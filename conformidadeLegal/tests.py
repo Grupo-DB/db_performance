@@ -547,3 +547,121 @@ class PalavrasChaveTests(SimpleTestCase):
         # "cal" solto e "fiscal" não disparam; "brita" sim.
         self.assertEqual(palavras_encontradas('Auditoria fiscal da Cal. Silva'), [])
         self.assertIn('britagem', palavras_encontradas('usina de brita'))
+
+
+def _xml_dou(id_materia, categoria, tipo, identifica, texto, ementa=''):
+    return (f'<xml><article id="{id_materia}" name="x" pubName="DO1" artType="{tipo}" pubDate="14/10/2026" '
+            f'artCategory="{categoria}" numberPage="40" '
+            f'pdfPage="http://pesquisa.in.gov.br/imprensa/jsp/visualiza/index.jsp?data=14/10/2026&amp;jornal=515&amp;pagina=40" '
+            f'idMateria="{id_materia}"><body><Identifica><![CDATA[{identifica}]]></Identifica>'
+            f'<Ementa><![CDATA[{ementa}]]></Ementa><Texto><![CDATA[<p>{texto}</p>]]></Texto></body></article></xml>')
+
+
+class _SessaoInlabsFalsa:
+    def __init__(self, zips, login_ok=True):
+        import requests
+        self.cookies = requests.cookies.RequestsCookieJar()
+        self.zips, self.login_ok, self.pedidos = zips, login_ok, []
+
+    def post(self, url, data=None, headers=None, timeout=None):
+        if self.login_ok:
+            self.cookies.set('inlabs_session_cookie', 'abc')
+        from types import SimpleNamespace
+        return SimpleNamespace(status_code=200, url='https://inlabs.in.gov.br/index.php?p=')
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        from types import SimpleNamespace
+        self.pedidos.append((params, headers))
+        if 'dl' not in (params or {}):
+            links = ''.join(f'<a href="?p=2026-10-14&amp;dl={n}">baixar</a>' for n in self.zips)
+            links += '<a href="?p=2026-10-14&amp;dl=2026-10-14-DO3.zip">s3</a>'  # seção 3 não interessa
+            return SimpleNamespace(status_code=200, url='https://inlabs.in.gov.br/index.php?p=2026-10-14', text=links)
+        return SimpleNamespace(status_code=200, content=self.zips[params['dl']])
+
+
+def _zip(*xmls):
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w') as zf:
+        for i, x in enumerate(xmls):
+            zf.writestr(f'{i}.xml', '﻿' + x)
+        zf.writestr('figura.jpg', b'jpg')
+    return buf.getvalue()
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE, CONFORMIDADE_INLABS_EMAIL='a@b.c', CONFORMIDADE_INLABS_SENHA='x#y')
+class MonitorDouTests(APITestCase):
+    def setUp(self):
+        from unittest.mock import patch
+        patch('conformidadeLegal.monitor.time.sleep').start()
+        self.addCleanup(patch.stopall)
+
+    def _sessao(self, **kw):
+        anm = 'Ministério de Minas e Energia/Agência Nacional de Mineração/Diretoria Colegiada'
+        mma = 'Ministério do Meio Ambiente e Mudança do Clima/Secretaria Nacional de Qualidade Ambiental'
+        return _SessaoInlabsFalsa({
+            '2026-10-14-DO1.zip': _zip(
+                _xml_dou('1', anm, 'Resolução', 'RESOLUÇÃO ANM Nº 249, DE 13 DE OUTUBRO DE 2026', 'Regimento da agência.'),
+                _xml_dou('2', 'Ministério de Minas e Energia/Agência Nacional de Energia Elétrica', 'Resolução',
+                         'RESOLUÇÃO AUTORIZATIVA Nº 16.791', 'Mineração de dados de energia.'),
+                _xml_dou('3', mma, 'Portaria', 'PORTARIA SQA/MMA Nº 1.800', 'Nomeia servidor.'),
+                _xml_dou('4', mma, 'Portaria', 'PORTARIA SQA/MMA Nº 1.801, DE 7 DE OUTUBRO DE 2026',
+                         'Resíduos sólidos da mineração.', ementa='Dispõe sobre resíduos sólidos.'),
+                _xml_dou('5', 'Ministério da Previdência Social/Previc', 'Portaria', 'Portaria Previc Nº 756',
+                         'Licenciamento de plano de benefícios.'),
+                _xml_dou('6', 'Ministério do Trabalho e Emprego/Gabinete do Ministro', 'Portaria', 'PORTARIA MTE Nº 9',
+                         'Altera a Norma Regulamentadora nº 22 (NR-22).'),
+                _xml_dou('7', anm, 'Despacho', 'DESPACHO', 'Alvará de pesquisa para empresa X.'),
+            ),
+            '2026-10-14-DO1E.zip': _zip(
+                _xml_dou('8', 'Atos do Poder Executivo', 'Decreto', 'DECRETO Nº 12.900', 'Licenciamento ambiental federal.'),
+            ),
+        }, **kw)
+
+    def test_coleta_dou_filtra_por_orgao_tipo_e_palavra(self):
+        from datetime import date
+        from . import monitor
+        from .models import PublicacaoMonitorada
+        sessao = self._sessao()
+        e = monitor.coletar_dou(date(2026, 10, 14), sessao=sessao)
+        self.assertTrue(e.ok, e.erro)
+        self.assertEqual(e.examinadas, 8)
+        pubs = {p.id_externo: p for p in PublicacaoMonitorada.objects.filter(fonte='DOU')}
+        # ANM entra sem palavra; MMA, MTE e decreto só com palavra; energia, Previc e despacho ficam fora.
+        self.assertEqual(set(pubs), {'1', '4', '6', '8'})
+        self.assertIn('norma regulamentadora', pubs['6'].palavras)
+        self.assertEqual(pubs['4'].texto.split('\n')[0], 'Dispõe sobre resíduos sólidos.')
+        self.assertEqual((pubs['4'].pagina, pubs['4'].data_publicacao), (40, date(2026, 10, 14)))
+        self.assertIn('pagina=40', pubs['4'].link)
+        # A seção 3 não é baixada, e o download leva o cabeçalho "origem" do script oficial.
+        baixados = [p['dl'] for p, h in sessao.pedidos if p and 'dl' in p]
+        self.assertEqual(sorted(baixados), ['2026-10-14-DO1.zip', '2026-10-14-DO1E.zip'])
+        self.assertTrue(all(h.get('origem') for p, h in sessao.pedidos if p and 'dl' in p))
+        self.assertEqual(monitor.coletar_dou(date(2026, 10, 14), sessao=self._sessao()).novas, 0)
+
+    def test_login_recusado_vira_falha_legivel(self):
+        from datetime import date
+        from . import monitor
+        e = monitor.coletar_dou(date(2026, 10, 14), sessao=self._sessao(login_ok=False))
+        self.assertFalse(e.ok)
+        self.assertIn('confira o e-mail e a senha', e.erro)
+
+    @override_settings(CONFORMIDADE_INLABS_SENHA='')
+    def test_sem_credencial(self):
+        from datetime import date
+        from . import monitor
+        e = monitor.coletar_dou(date(2026, 10, 14), sessao=self._sessao())
+        self.assertIn('sem credencial', e.erro)
+
+    def test_norma_federal_a_partir_do_dou(self):
+        from datetime import date
+        from . import monitor
+        from .models import PublicacaoMonitorada
+        pub = PublicacaoMonitorada(fonte='DOU', id_externo='4', data_publicacao=date(2026, 10, 14),
+                                   orgao='Ministério do Meio Ambiente e Mudança do Clima/Secretaria Nacional de Qualidade Ambiental',
+                                   titulo='PORTARIA SQA/MMA Nº 1.801, DE 7 DE OUTUBRO DE 2026', texto='Resíduos.')
+        d = monitor.dados_de_norma(pub)
+        self.assertEqual((d['tipo'], d['orgao'], d['numero'], d['ano'], d['esfera']),
+                         ('PORTARIA', 'SQA/MMA', '1.801', 2026, 'FEDERAL'))
+        self.assertEqual(Norma(**d).identificacao, 'Portaria SQA/MMA nº 1.801/2026')
