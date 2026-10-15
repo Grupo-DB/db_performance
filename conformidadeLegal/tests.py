@@ -15,6 +15,18 @@ from .models import EvidenciaAnexo, Norma, PalavraChaveMonitor, PlanoAcao, Requi
 MEDIA_TESTE = tempfile.mkdtemp(prefix='conformidade-testes-')
 
 
+def _filiais():
+    """Matriz e a filial de Almirante Tamandaré, como no cadastro de produção."""
+    from avaliacoes.management.models import Empresa, Filial
+    e = Empresa.objects.create(nome='Dagoberto Barcellos', cnpj='87.678.934/0001-65', endereco='BR 392',
+                               cidade='Caçapava do Sul', estado='RS', codigo='01')
+    comum = dict(empresa=e, endereco='x')
+    return (Filial.objects.create(nome='Matriz', cnpj='87.678.934/0001-65', cidade='Caçapava do Sul', estado='RS',
+                                  codigo='01', **comum),
+            Filial.objects.create(nome='F08 - UP ATM', cnpj='87.678.934/0008-31', cidade='Almirante Tamandaré',
+                                  estado='PR', codigo='08', **comum))
+
+
 def tearDownModule():
     shutil.rmtree(MEDIA_TESTE, ignore_errors=True)
 
@@ -42,29 +54,30 @@ class ConformidadeLegalTests(APITestCase):
         return Requisito.objects.get(pk=r.data['id'])
 
     def test_edicao_em_lote_muda_so_os_campos_enviados(self):
-        a = self._requisito(aplicabilidade='EM_ANALISE', unidade='Mina')
-        b = self._requisito(aplicabilidade='EM_ANALISE', unidade='Britagem')
+        matriz, atm = _filiais()
+        a = self._requisito(aplicabilidade='EM_ANALISE', unidade=matriz.id)
+        b = self._requisito(aplicabilidade='EM_ANALISE', unidade=atm.id)
         r = self.client.post('/conformidadeLegal/requisitos/editar-lote/', {
             'ids': [a.id, b.id],
             'campos': {'aplicabilidade': 'NAO_APLICAVEL', 'justificativa': 'Sem caldeira.', 'norma': 999},
         }, format='json')
         self.assertEqual(r.status_code, 200, r.data)
-        for req, unidade in ((a, 'Mina'), (b, 'Britagem')):
+        for req, unidade in ((a, matriz.id), (b, atm.id)):
             req.refresh_from_db()
             # `norma` não é campo de lote e é ignorado; a unidade de cada um fica.
-            self.assertEqual((req.aplicabilidade, req.justificativa, req.unidade, req.norma_id),
+            self.assertEqual((req.aplicabilidade, req.justificativa, req.unidade_id, req.norma_id),
                              ('NAO_APLICAVEL', 'Sem caldeira.', unidade, self.norma.id))
 
     def test_edicao_em_lote_e_tudo_ou_nada(self):
         a = self._requisito()
         r = self.client.post('/conformidadeLegal/requisitos/editar-lote/',
-                             {'ids': [a.id, 987654], 'campos': {'unidade': 'X'}}, format='json')
+                             {'ids': [a.id, 987654], 'campos': {'justificativa': 'X'}}, format='json')
         self.assertEqual(r.status_code, 400)
         r = self.client.post('/conformidadeLegal/requisitos/editar-lote/',
                              {'ids': [a.id], 'campos': {'aplicabilidade': 'TALVEZ'}}, format='json')
         self.assertEqual(r.status_code, 400)
         a.refresh_from_db()
-        self.assertEqual((a.unidade, a.aplicabilidade), ('', 'APLICAVEL'))
+        self.assertEqual((a.justificativa, a.aplicabilidade), ('', 'APLICAVEL'))
 
     def test_verificacao_em_lote_compartilha_o_anexo(self):
         import os
@@ -1008,9 +1021,10 @@ class AvisosTests(APITestCase):
                                           validade=self.hoje + timedelta(days=100))
         nr = Norma.objects.create(tipo='NR', orgao='MTE', numero='22', ementa='NR-22', tema='SST')
         R = lambda **kw: Requisito.objects.create(aplicabilidade='APLICAVEL', descricao='x', **kw)
-        self.r1 = R(norma=self.norma, tema='AMBIENTAL', responsavel=self.user, unidade='Fábrica',
+        self.matriz, self.atm = _filiais()
+        self.r1 = R(norma=self.norma, tema='AMBIENTAL', responsavel=self.user, unidade=self.matriz,
                     proxima_verificacao=self.hoje - timedelta(days=2))
-        self.r2 = R(norma=nr, tema='SST', responsavel=self.outro, unidade='Mina',
+        self.r2 = R(norma=nr, tema='SST', responsavel=self.outro, unidade=self.atm,
                     proxima_verificacao=self.hoje + timedelta(days=20))
         R(norma=nr, tema='SST', proxima_verificacao=self.hoje + timedelta(days=200))
         PlanoAcao.objects.create(requisito=self.r2, descricao='Treinar', responsavel=self.outro, prazo=self.hoje + timedelta(days=3))
@@ -1019,12 +1033,13 @@ class AvisosTests(APITestCase):
         url = '/conformidadeLegal/requisitos/resumo/'
         r = self.client.get(url).data
         self.assertEqual((r['aplicaveis'], r['verificacoes_vencidas'], r['verificacoes_a_vencer']), (3, 1, 1))
-        self.assertEqual(r['unidades'], ['Fábrica', 'Mina'])
+        self.assertEqual([u['nome'] for u in r['unidades']], ['Matriz', 'F08 - UP ATM'])
         self.assertEqual(len(r['validades']), 1)  # LO vence em 100 dias, dentro dos 180
         r = self.client.get(url, {'tema': 'SST'}).data
         self.assertEqual((r['aplicaveis'], r['verificacoes_vencidas'], r['planos_abertos'], len(r['validades'])), (2, 0, 1, 0))
-        r = self.client.get(url, {'unidade': 'fábrica'}).data
-        self.assertEqual(r['aplicaveis'], 1)
+        # Matriz: o requisito dela e o que vale para todas (sem unidade); o da ATM fica de fora.
+        r = self.client.get(url, {'unidade': self.matriz.id}).data
+        self.assertEqual(r['aplicaveis'], 2)
         r = self.client.get(url, {'responsavel': self.outro.id}).data
         self.assertEqual((r['aplicaveis'], r['planos_abertos'], len(r['planos_proximos'])), (1, 1, 1))
         # Prazo de aviso menor: a verificação de 20 dias e a LO de 100 dias saem da lista.
@@ -1207,7 +1222,7 @@ class RelatorioAnualTests(APITestCase):
         self.assertIsNone(itens['1.2']['anterior'])
         self.assertEqual((itens['9.9']['origem_resposta'], itens['9.9']['resposta']),
                          ('JUSTIFICATIVA', 'Não há captação de água.'))
-        self.assertEqual(dados['totais'], {'itens': 5, 'respondidos': 3, 'pendentes': 2, 'com_anterior': 1,
+        self.assertEqual(dados['totais'], {'itens': 5, 'fora': 0, 'respondidos': 3, 'pendentes': 2, 'com_anterior': 1,
                                            'fotos': 1, 'sem_legenda': 0})
         self.assertIn('dezembro de 2024 e novembro de 2025', dados['apresentacao'])
         del d
@@ -1258,7 +1273,7 @@ class RelatorioAnualTests(APITestCase):
         self.assertIn('Limpeza bimestral.', texto)
         self.assertIn('Figura 1: Canais de drenagem.', texto)
         self.assertIn('[Sem resposta registrada no período', texto)
-        self.assertEqual(len(doc.inline_shapes), 1)
+        self.assertEqual(len(doc.inline_shapes), 2)  # logo da capa + a foto
 
         r = self.client.get(base, {'inicio': self.INICIO, 'fim': self.FIM, 'formato': 'pdf'})
         self.assertEqual(r.status_code, 200)
@@ -1349,3 +1364,235 @@ class ChaveReferenciaTests(SimpleTestCase):
         refs = ['5.10', '5.2', '4.5-1.', '4.5-2.', 'Art. 3', '', '1.16', '5.13.2', '5.13']
         self.assertEqual(sorted(refs, key=chave_referencia),
                          ['1.16', 'Art. 3', '4.5-1.', '4.5-2.', '5.2', '5.10', '5.13', '5.13.2', ''])
+
+
+def _pdf_relatorio_modelo() -> bytes:
+    """
+    Relatório no formato do Word da equipe: condicionante em negrito, resposta normal,
+    foto com "Figura N: legenda" logo abaixo, cabeçalho e rodapé nas margens.
+    """
+    import io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+    saida = io.BytesIO()
+    c = canvas.Canvas(saida, pagesize=A4)
+    altura = A4[1]
+
+    def texto(y, t, negrito=False, x=57):
+        c.setFont('Helvetica-Bold' if negrito else 'Helvetica', 11)
+        c.drawString(x, y, t)
+
+    def margens(n):
+        c.setFont('Helvetica', 9)
+        c.drawString(530, altura - 40, str(n))
+        c.drawString(110, 30, 'Relatório Anual de Acompanhamento das Atividades – FEPAM – LO nº 9/2024')
+
+    texto(700, 'EXTRAÇÃO DE CALCÁRIO', True, 200)
+    texto(680, 'PROCESSO ANM 811.029/1970', True, 200)
+    texto(400, 'NOVEMBRO 2025', True, 250)
+    c.showPage()
+    margens(2)
+    texto(760, 'APRESENTAÇÃO', True)
+    texto(730, 'A empresa comprova o atendimento do item 14 e seus subitens, das condições e restrições da LO nº 9/2024.')
+    texto(690, 'ATENDIMENTO DAS CONDIÇÕES E RESTRIÇÕES DA LO Nº 9/2024', True)
+    texto(660, '1. Quanto ao Empreendimento:', True)
+    texto(630, '1.1- Manter as ARTs atualizadas;', True)
+    texto(610, 'ART nº 123, validade até 2028.')
+    texto(580, '1.2- A área deverá ser sinalizada e cercada;', True)
+    texto(560, 'Há guarita e placas de advertência.')
+    c.drawImage(ImageReader(io.BytesIO(_jpeg(300, 200))), 150, 330, width=300, height=200)
+    texto(315, 'Figura 1: Guarita na entrada.', x=220)
+    texto(285, '1.3- Os limites ficam restritos às poligonais:', True)
+    texto(255, '1.3-1. Poligonal útil: 38 ha;', True)
+    texto(235, 'O empreendedor respeita as poligonais.')
+    margens(2)
+    c.showPage()
+    c.save()
+    return saida.getvalue()
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class ImportarRelatorioTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('meioambiente', password='x')
+        self.user.groups.add(Group.objects.create(name='ConformidadeLegal'))
+        self.client.force_authenticate(self.user)
+        self.lo = Norma.objects.create(tipo='LICENCA', orgao='FEPAM', numero='9', ano=2024, tema='AMBIENTAL', ementa='LO.')
+        # Como a IA cadastrou: "Item 1.1", em análise, sem capítulo; e um item que o relatório não traz.
+        self.r11 = Requisito.objects.create(norma=self.lo, referencia='Item 1.1', descricao='Manter ARTs.',
+                                            trecho_fonte='Manter as ARTs atualizadas;', aplicabilidade='EM_ANALISE')
+        self.renov = Requisito.objects.create(norma=self.lo, referencia='Renovação', descricao='Renovar a LO.',
+                                              aplicabilidade='EM_ANALISE')
+        self.url = f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/importar/'
+
+    def _enviar(self, **extra):
+        pdf = SimpleUploadedFile('relatorio_2025.pdf', _pdf_relatorio_modelo(), content_type='application/pdf')
+        return self.client.post(self.url, {'arquivo': pdf, **extra}, format='multipart')
+
+    def test_leitura_separa_condicionante_resposta_e_figura(self):
+        from . import importar_relatorio as ir
+        lido = ir.ler(_pdf_relatorio_modelo())
+        itens = {i.referencia: i for i in lido['itens']}
+        self.assertEqual(list(itens), ['1.1', '1.2', '1.3', '1.3-1'])
+        self.assertEqual(itens['1.1'].texto_condicao, 'Manter as ARTs atualizadas;')
+        self.assertEqual(itens['1.1'].texto_resposta, 'ART nº 123, validade até 2028.')
+        self.assertEqual(itens['1.2'].secao, 'Quanto ao Empreendimento')
+        self.assertEqual([(f.numero, f.legenda) for f in itens['1.2'].figuras], [(1, 'Guarita na entrada.')])
+        self.assertTrue(itens['1.2'].figuras[0].imagem.startswith(b'\xff\xd8'))  # o JPEG original
+        self.assertEqual(itens['1.3'].texto_resposta, '')
+        self.assertEqual(itens['1.3-1'].texto_condicao, 'Poligonal útil: 38 ha;')
+        self.assertEqual(lido['data'], date(2025, 11, 30))
+        self.assertEqual((lido['capa']['item'], lido['capa']['licenca'], lido['capa']['atividade']),
+                         ('14', 'LO nº 9/2024', 'Extração de Calcário'))
+
+    def test_previa_nao_grava(self):
+        r = self._enviar()
+        self.assertEqual(r.status_code, 200, r.data)
+        t = r.data['totais']
+        self.assertEqual((t['condicionantes'], t['casadas'], t['novas'], t['figuras'], t['ausentes'], t['viram_aplicavel']),
+                         (4, 1, 3, 1, 1, 1))
+        self.assertEqual(Verificacao.objects.count(), 0)
+        self.assertEqual(Requisito.objects.filter(norma=self.lo).count(), 2)
+
+    def test_aplicar_grava_respostas_fotos_e_e_idempotente(self):
+        r = self._enviar(aplicar='1')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual((r.data['respondidos'], r.data['fotos'], r.data['criados'], r.data['fora']), (3, 1, 3, 1))
+        self.assertEqual(r.data['data'], '2025-11-30')
+        self.r11.refresh_from_db()
+        self.assertEqual((self.r11.aplicabilidade, self.r11.secao, self.r11.situacao),
+                         ('APLICAVEL', 'Quanto ao Empreendimento', 'ATENDIDO'))
+        vcl = self.r11.verificacoes.get()
+        self.assertEqual((vcl.data, vcl.evidencia), (date(2025, 11, 30), 'ART nº 123, validade até 2028.'))
+        r12 = Requisito.objects.get(norma=self.lo, referencia='1.2')
+        self.assertEqual((r12.origem, r12.trecho_fonte), ('RELATORIO', 'A área deverá ser sinalizada e cercada;'))
+        foto = EvidenciaAnexo.objects.get(verificacao__requisito=r12)
+        self.assertEqual(foto.legenda, 'Guarita na entrada.')
+        self.lo.refresh_from_db()
+        r13 = Requisito.objects.get(norma=self.lo, referencia='1.3')
+        self.assertEqual(self.lo.relatorio_anual['sem_resposta'], [r13.id])  # respondida no 1.3-1
+        self.assertEqual(self.lo.relatorio_anual['fora'], [self.renov.id])
+        self.assertEqual((self.lo.relatorio_anual['item'], self.lo.relatorio_anual['licenca']), ('14', 'LO nº 9/2024'))
+        # O relatório do período da importação sai completo.
+        rel = self.client.get(f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/',
+                              {'inicio': '2024-12-01', 'fim': '2025-11-30'}).data
+        self.assertEqual((rel['totais']['pendentes'], rel['totais']['fora'], rel['totais']['fotos']), (0, 1, 1))
+        # De novo, mesmo PDF e mesma data: nada duplica.
+        r = self._enviar(aplicar='1')
+        self.assertEqual((r.data['respondidos'], r.data['repetidos'], r.data['criados']), (0, 3, 0))
+        self.assertEqual(Verificacao.objects.count(), 3)
+
+    def test_pdf_sem_texto_e_recusado(self):
+        r = self.client.post(self.url, {'arquivo': SimpleUploadedFile('x.pdf', b'nao e pdf')}, format='multipart')
+        self.assertEqual(r.status_code, 400)
+
+    def test_comando_de_gestao(self):
+        import os
+        from io import StringIO
+        from django.core.management import call_command
+        caminho = os.path.join(MEDIA_TESTE, 'rel.pdf')
+        with open(caminho, 'wb') as f:
+            f.write(_pdf_relatorio_modelo())
+        saida = StringIO()
+        call_command('importar_relatorio_anual', norma=self.lo.id, pdf=caminho, stdout=saida)
+        self.assertIn('Prévia apenas', saida.getvalue())
+        self.assertEqual(Verificacao.objects.count(), 0)
+        call_command('importar_relatorio_anual', norma=self.lo.id, pdf=caminho, aplicar=True, stdout=saida)
+        self.assertIn('3 respostas, 1 fotos, 3 condicionantes criadas', saida.getvalue())
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class UnidadeTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('sgi', password='x')
+        self.user.groups.add(Group.objects.create(name='ConformidadeLegal'))
+        self.client.force_authenticate(self.user)
+        self.matriz, self.atm = _filiais()
+        self.lo_matriz = Norma.objects.create(tipo='LICENCA', numero='893', ementa='LO matriz', unidade=self.matriz)
+        self.lo_atm = Norma.objects.create(tipo='LICENCA', numero='77', ementa='LO ATM', unidade=self.atm)
+        self.lei = Norma.objects.create(tipo='LEI', numero='12305', ementa='PNRS')
+
+    def test_lista_de_unidades_com_matriz_primeiro(self):
+        r = self.client.get('/conformidadeLegal/unidades/')
+        self.assertEqual([u['nome'] for u in r.data], ['Matriz', 'F08 - UP ATM'])
+
+    def test_normas_da_unidade_mais_as_gerais(self):
+        r = self.client.get('/conformidadeLegal/normas/', {'unidade': self.atm.id})
+        self.assertEqual(sorted(n['ementa'] for n in r.data), ['LO ATM', 'PNRS'])
+        self.assertEqual(len(self.client.get('/conformidadeLegal/normas/').data), 3)
+
+    def test_requisito_herda_a_unidade_da_licenca(self):
+        r = self.client.post('/conformidadeLegal/requisitos/', {
+            'norma': self.lo_atm.id, 'descricao': 'Monitorar.', 'unidade': self.matriz.id}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual((r.data['unidade'], r.data['unidade_nome']), (self.atm.id, 'F08 - UP ATM'))
+        # Lei geral: a obrigação pode ser só de uma unidade.
+        r = self.client.post('/conformidadeLegal/requisitos/', {
+            'norma': self.lei.id, 'descricao': 'PGRS.', 'unidade': self.matriz.id}, format='json')
+        self.assertEqual(r.data['unidade'], self.matriz.id)
+        ids = {x['descricao'] for x in self.client.get('/conformidadeLegal/requisitos/', {'unidade': self.atm.id}).data}
+        self.assertEqual(ids, {'Monitorar.'})
+
+    def test_trocar_a_unidade_da_licenca_leva_as_condicionantes(self):
+        req = Requisito.objects.create(norma=self.lei, descricao='x')
+        self.assertIsNone(req.unidade_id)
+        r = self.client.patch(f'/conformidadeLegal/normas/{self.lei.id}/', {'unidade': self.atm.id}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        req.refresh_from_db()
+        self.assertEqual(req.unidade_id, self.atm.id)
+
+    def test_terceiros_e_planos_por_unidade(self):
+        from .models import Terceiro
+        Terceiro.objects.create(razao_social='Coleta Matriz', unidade=self.matriz)
+        Terceiro.objects.create(razao_social='Coleta Geral')
+        nomes = [t['razao_social'] for t in self.client.get('/conformidadeLegal/terceiros/', {'unidade': self.atm.id}).data]
+        self.assertEqual(nomes, ['Coleta Geral'])
+        req = Requisito.objects.create(norma=self.lo_matriz, descricao='x', aplicabilidade='APLICAVEL')
+        PlanoAcao.objects.create(requisito=req, descricao='Plano matriz')
+        self.assertEqual(len(self.client.get('/conformidadeLegal/planos-acao/', {'unidade': self.atm.id}).data), 0)
+        self.assertEqual(len(self.client.get('/conformidadeLegal/planos-acao/', {'unidade': self.matriz.id}).data), 1)
+
+    def test_municipio_da_capa_vem_da_unidade(self):
+        r = self.client.get(f'/conformidadeLegal/normas/{self.lo_atm.id}/relatorio-anual/')
+        self.assertEqual(r.data['config']['municipio'], 'Almirante Tamandaré – PR')
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class RelatorioForaELogoTests(RelatorioAnualTests):
+    """Checkbox "vai para o relatório", número sem o "Item" e logo da capa."""
+
+    def test_fora_do_relatorio_nao_sai_no_documento(self):
+        import io
+        from docx import Document
+        dentro = self._req('Item 1.1', 'Quanto ao Empreendimento')
+        fora = self._req('Disposições finais')
+        self._vcl(dentro, '2025-04-01', 'Em conformidade.')
+        url = f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/?inicio={self.INICIO}&fim={self.FIM}'
+        r = self.client.patch(url, {'fora': [fora.id]}, format='json')
+        itens = {i['requisito']: i for s in r.data['secoes'] for i in s['itens']}
+        self.assertEqual((itens[fora.id]['no_relatorio'], itens[fora.id]['pendente']), (False, False))
+        self.assertEqual(itens[dentro.id]['referencia'], '1.1')
+        self.assertEqual((r.data['totais']['itens'], r.data['totais']['fora'], r.data['totais']['pendentes']), (1, 1, 0))
+        arq = self.client.get(f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/arquivo/',
+                              {'inicio': self.INICIO, 'fim': self.FIM, 'formato': 'docx'})
+        texto = '\n'.join(p.text for p in Document(io.BytesIO(arq.content)).paragraphs)
+        self.assertIn('1.1-\tTexto literal da condicionante Item 1.1.', texto)
+        self.assertNotIn('Disposições finais', texto)
+
+    def test_logo_proprio_padrao_e_sem_logo(self):
+        import io
+        from docx import Document
+        base = f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/'
+        arquivo = lambda: self.client.get(base + 'arquivo/', {'formato': 'docx'})  # noqa: E731
+        self.assertEqual(len(Document(io.BytesIO(arquivo().content)).inline_shapes), 1)  # logo do grupo
+        r = self.client.post(base + 'logo/', {'arquivo': SimpleUploadedFile('logo.png', _jpeg(), content_type='image/png')},
+                             format='multipart')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertTrue(r.data['logo_proprio'])
+        self.assertEqual(len(Document(io.BytesIO(arquivo().content)).inline_shapes), 1)
+        self.assertTrue(self.client.get(base + 'arquivo/', {'formato': 'pdf'}).content.startswith(b'%PDF'))
+        r = self.client.delete(base + 'logo/')
+        self.assertIsNone(r.data['logo_proprio'])
+        self.client.patch(base, {'logo': 'nao'}, format='json')
+        self.assertEqual(len(Document(io.BytesIO(arquivo().content)).inline_shapes), 0)

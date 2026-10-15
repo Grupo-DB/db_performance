@@ -29,6 +29,20 @@ PLANO_ABERTO = Q(concluido_em__isnull=True) & (Q(tarefa__isnull=True) | Q(tarefa
 FILTROS = ('tema', 'responsavel', 'unidade', 'norma', 'terceiro')
 
 
+def da_unidade(qs, unidade, campo: str = 'unidade'):
+    """
+    Só o que é da unidade escolhida — mais o que vale para todas (vazio): lei federal,
+    terceiro que atende as duas. `unidade` é o id da filial (management.Filial).
+    """
+    if unidade in (None, '', 'null'):
+        return qs
+    try:
+        unidade = int(unidade)
+    except (TypeError, ValueError):
+        return qs.none()
+    return qs.filter(Q(**{campo: unidade}) | Q(**{f'{campo}__isnull': True}))
+
+
 def ler_filtros(params) -> dict:
     """Filtros do painel vindos da query string (só os conhecidos e preenchidos)."""
     return {k: params.get(k) for k in FILTROS if params.get(k) not in (None, '')}
@@ -42,7 +56,7 @@ def filtrar_requisitos(qs, filtros: dict, prefixo: str = ''):
         if f.get(chave):
             qs = qs.filter(**{f'{prefixo}{campo}': f[chave]})
     if f.get('unidade'):
-        qs = qs.filter(**{f'{prefixo}unidade__iexact': f['unidade']})
+        qs = da_unidade(qs, f['unidade'], f'{prefixo}unidade')
     return qs
 
 
@@ -88,11 +102,12 @@ def pendencias(filtros=None, hoje=None) -> dict:
         licencas = licencas.filter(pk=filtros['norma'])
     if filtros.get('tema'):
         licencas = licencas.filter(tema=filtros['tema'])
+    licencas = da_unidade(licencas, filtros.get('unidade'))
     licencas = dentro_do_aviso(licencas.order_by('validade'), 'validade', cfg.dias_licenca, hoje)
 
     documentos = []
-    if not (filtros.get('responsavel') or filtros.get('norma') or filtros.get('tema') or filtros.get('unidade')):
-        terceiros = Terceiro.objects.filter(ativo=True).prefetch_related('documentos')
+    if not (filtros.get('responsavel') or filtros.get('norma') or filtros.get('tema')):
+        terceiros = da_unidade(Terceiro.objects.filter(ativo=True), filtros.get('unidade')).prefetch_related('documentos')
         if filtros.get('terceiro'):
             terceiros = terceiros.filter(pk=filtros['terceiro'])
         for t in terceiros:

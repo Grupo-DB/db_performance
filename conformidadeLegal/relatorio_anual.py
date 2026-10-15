@@ -37,7 +37,10 @@ EXTENSOES_IMAGEM = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.
 LADO_MAXIMO_FOTO = 1600
 
 CAMPOS_CONFIG = ('titulo', 'empresa', 'cnpj', 'municipio', 'atividade', 'processos', 'licenca', 'item',
-                 'apresentacao', 'cabecalho', 'data_capa')
+                 'apresentacao', 'cabecalho', 'data_capa', 'logo')
+# Listas de ids de requisito guardadas junto da configuração.
+LISTAS_CONFIG = ('sem_resposta', 'fora')
+LOGO_PADRAO = os.path.join(os.path.dirname(__file__), 'recursos', 'logo_relatorio.png')
 
 APRESENTACAO_PADRAO = (
     '{empresa}, empresa inscrita no CNPJ sob nº {cnpj}, vem apresentar o Relatório Técnico Anual comprovando o '
@@ -55,7 +58,7 @@ def configuracao_padrao(norma) -> dict:
         'titulo': 'Relatório Anual de Acompanhamento das Atividades',
         'empresa': 'Dagoberto Barcellos S/A',
         'cnpj': '87.678.934/0001-65',
-        'municipio': 'Caçapava do Sul – RS',
+        'municipio': _municipio(norma) or 'Caçapava do Sul – RS',
         'atividade': '',
         'processos': '',
         'licenca': licenca,
@@ -63,7 +66,21 @@ def configuracao_padrao(norma) -> dict:
         'apresentacao': APRESENTACAO_PADRAO,
         'cabecalho': '{titulo} – ' + (f'{norma.orgao} – ' if norma.orgao else '') + '{licenca}',
         'data_capa': '',
+        'logo': 'sim',
     }
+
+
+def _municipio(norma) -> str:
+    """Cidade da unidade da licença (o cadastro de filiais tem cidade e UF)."""
+    u = getattr(norma, 'unidade', None)
+    if u and u.cidade:
+        return f'{u.cidade} – {u.estado}' if u.estado else u.cidade
+    return ''
+
+
+def referencia_curta(ref: str) -> str:
+    """'Item 1.4' / 'Condicionante 2.2' → '1.4': no relatório o número fala sozinho."""
+    return re.sub(r'^\s*(?:item|condicionante|cond\.|condi[çc][ãa]o)\s+', '', ref or '', flags=re.IGNORECASE).strip()
 
 
 def configuracao(norma) -> dict:
@@ -78,19 +95,37 @@ def configuracao(norma) -> dict:
 
 
 def limpar_configuracao(dados: dict) -> dict:
-    """Só os campos conhecidos, como texto (e a lista de subitens sem resposta própria)."""
+    """Só os campos conhecidos, como texto (e as listas de ids: sem resposta própria, fora do relatório)."""
     limpo = {c: str(dados.get(c) or '').strip()[:4000] for c in CAMPOS_CONFIG if c in dados}
-    if 'sem_resposta' in dados:
-        try:
-            limpo['sem_resposta'] = sorted({int(i) for i in (dados.get('sem_resposta') or [])})
-        except (TypeError, ValueError):
-            limpo['sem_resposta'] = []
+    for lista in LISTAS_CONFIG:
+        if lista in dados:
+            try:
+                limpo[lista] = sorted({int(i) for i in (dados.get(lista) or [])})
+            except (TypeError, ValueError):
+                limpo[lista] = []
     return limpo
 
 
-def sem_resposta_propria(norma) -> list[int]:
-    valor = (norma.relatorio_anual or {}).get('sem_resposta') or []
+def lista_ids(norma, nome: str) -> list[int]:
+    valor = (norma.relatorio_anual or {}).get(nome) or []
     return [i for i in valor if isinstance(i, int)]
+
+
+def sem_resposta_propria(norma) -> list[int]:
+    return lista_ids(norma, 'sem_resposta')
+
+
+def caminho_logo(norma, cfg: dict) -> str | None:
+    """Logo próprio da licença, senão o do grupo; None quando a capa vai sem logo."""
+    if cfg.get('logo') == 'nao':
+        return None
+    if norma.relatorio_logo:
+        try:
+            if os.path.exists(norma.relatorio_logo.path):
+                return norma.relatorio_logo.path
+        except (ValueError, NotImplementedError):
+            pass
+    return LOGO_PADRAO if os.path.exists(LOGO_PADRAO) else None
 
 
 class _Molde(dict):
@@ -169,10 +204,12 @@ class Item:
     # Subitem respondido junto no item seguinte (3.1.1…3.1.4 → resposta no 3.1.5): sai
     # só com o texto, sem o aviso de "preencher".
     sem_resposta_propria: bool = False
+    # Desmarcado na tela: a condicionante não sai no documento (ex.: "Disposições finais").
+    no_relatorio: bool = True
 
     @property
     def pendente(self) -> bool:
-        return not self.resposta.strip() and not self.sem_resposta_propria
+        return self.no_relatorio and not self.resposta.strip() and not self.sem_resposta_propria
 
 
 @dataclass
@@ -207,14 +244,16 @@ def montar(norma, inicio: date, fim: date, url_de=None) -> dict:
     )
 
     sem_resposta = set(sem_resposta_propria(norma))
+    fora = set(lista_ids(norma, 'fora'))
     secoes: list[Secao] = []
     atual: Secao | None = None
     figura = 0
     for req in requisitos:
         item = Item(
-            requisito_id=req.id, referencia=req.referencia,
+            requisito_id=req.id, referencia=referencia_curta(req.referencia),
             texto=(req.trecho_fonte or '').strip() or req.descricao.strip(),
             aplicabilidade=req.aplicabilidade, sem_resposta_propria=req.id in sem_resposta,
+            no_relatorio=req.id not in fora,
         )
         no_periodo = next((v for v in req.verificacoes.all() if inicio <= v.data <= fim), None)
         if no_periodo:
@@ -239,9 +278,10 @@ def montar(norma, inicio: date, fim: date, url_de=None) -> dict:
                     'evidencia': antes.evidencia.strip(), 'fotos': sum(1 for a in antes.anexos.all()
                                                                        if _e_imagem(a.nome or a.arquivo.name)),
                 }
-        for foto in item.fotos:
-            figura += 1
-            foto.numero = figura
+        if item.no_relatorio:
+            for foto in item.fotos:
+                figura += 1
+                foto.numero = figura
 
         secao = (req.secao or '').strip()
         if atual is None or (secao and secao.lower() != atual.chave):
@@ -249,7 +289,8 @@ def montar(norma, inicio: date, fim: date, url_de=None) -> dict:
             secoes.append(atual)
         atual.itens.append(item)
 
-    itens = [i for s in secoes for i in s.itens]
+    todos = [i for s in secoes for i in s.itens]
+    itens = [i for i in todos if i.no_relatorio]
     cfg = configuracao(norma)
     valores = {**cfg, 'inicio': mes_ano(inicio), 'fim': mes_ano(fim)}
     return {
@@ -261,8 +302,10 @@ def montar(norma, inicio: date, fim: date, url_de=None) -> dict:
         'cabecalho': preencher(cfg['cabecalho'], valores),
         'data_capa': cfg['data_capa'] or f'{MESES[date.today().month - 1]} {date.today().year}'.upper(),
         'secoes': secoes,
+        'logo': caminho_logo(norma, cfg),
         'totais': {
             'itens': len(itens),
+            'fora': len(todos) - len(itens),
             'respondidos': sum(1 for i in itens if i.resposta.strip()),
             'pendentes': sum(1 for i in itens if i.pendente),
             'com_anterior': sum(1 for i in itens if i.pendente and i.anterior),
@@ -282,6 +325,7 @@ def para_json(dados: dict) -> dict:
         'fim': dados['fim'].isoformat(),
         'config': dados['config'],
         'padrao': configuracao_padrao(dados['norma']),
+        'logo_proprio': dados['norma'].relatorio_logo.url if dados['norma'].relatorio_logo else None,
         'apresentacao': dados['apresentacao'],
         'cabecalho': dados['cabecalho'],
         'data_capa': dados['data_capa'],
@@ -293,11 +337,21 @@ def para_json(dados: dict) -> dict:
                 'aplicabilidade': i.aplicabilidade, 'resposta': i.resposta, 'origem_resposta': i.origem_resposta,
                 'resultado': i.resultado, 'data_resposta': i.data_resposta.isoformat() if i.data_resposta else None,
                 'verificacao': i.verificacao_id, 'pendente': i.pendente, 'anterior': i.anterior,
-                'sem_resposta_propria': i.sem_resposta_propria,
+                'sem_resposta_propria': i.sem_resposta_propria, 'no_relatorio': i.no_relatorio,
                 'fotos': [foto(f) for f in i.fotos], 'documentos': [foto(f) for f in i.documentos],
             } for i in s.itens],
         } for s in dados['secoes']],
     }
+
+
+def secoes_do_documento(dados: dict) -> list:
+    """Capítulos com só as condicionantes marcadas para o relatório (capítulo vazio some)."""
+    saida = []
+    for s in dados['secoes']:
+        itens = [i for i in s.itens if i.no_relatorio]
+        if itens:
+            saida.append(Secao(titulo=s.titulo, chave=s.chave, itens=itens))
+    return saida
 
 
 def nome_arquivo(dados: dict, extensao: str) -> str:
@@ -327,6 +381,25 @@ def _foto_jpeg(f: Foto) -> tuple[io.BytesIO, int, int] | None:
             return saida, img.width, img.height
     except Exception:  # noqa: BLE001 — uma foto corrompida não pode derrubar o relatório
         logger.warning('Relatório anual: não foi possível ler a foto %s', f.caminho, exc_info=True)
+        return None
+
+
+def _logo(caminho: str | None) -> tuple[io.BytesIO, int, int] | None:
+    """Logo em PNG (mantém o fundo transparente), reduzido; None se não houver ou não abrir."""
+    if not caminho or not os.path.exists(caminho):
+        return None
+    try:
+        from PIL import Image
+        with Image.open(caminho) as img:
+            img.thumbnail((1200, 1200))
+            if img.mode not in ('RGB', 'RGBA', 'L', 'LA'):
+                img = img.convert('RGBA')
+            saida = io.BytesIO()
+            img.save(saida, format='PNG')
+            saida.seek(0)
+            return saida, img.width, img.height
+    except Exception:  # noqa: BLE001
+        logger.warning('Relatório anual: logo %s não abriu', caminho, exc_info=True)
         return None
 
 
@@ -399,7 +472,13 @@ def gerar_docx(dados: dict) -> bytes:
 
     # Capa
     centro = WD_ALIGN_PARAGRAPH.CENTER
-    par(antes=90)
+    logo = _logo(dados.get('logo'))
+    if logo:
+        conteudo, larg, alt = logo
+        w, hh = _medidas(larg, alt, 6, 4)
+        par(alinhamento=centro, antes=24, depois=30).add_run().add_picture(conteudo, width=Cm(w), height=Cm(hh))
+    else:
+        par(antes=90)
     par(cfg['titulo'].upper(), negrito=True, tamanho=16, alinhamento=centro, depois=60)
     par(cfg['empresa'].upper(), negrito=True, tamanho=14, alinhamento=centro)
     par(cfg['municipio'].upper(), negrito=True, tamanho=12, alinhamento=centro, depois=60)
@@ -421,7 +500,7 @@ def gerar_docx(dados: dict) -> bytes:
     titulo = f'ATENDIMENTO DAS CONDIÇÕES E RESTRIÇÕES DA {cfg["licenca"].upper()}'
     par(titulo, negrito=True, antes=18, depois=12, alinhamento=WD_ALIGN_PARAGRAPH.LEFT, manter=True)
 
-    for s in dados['secoes']:
+    for s in secoes_do_documento(dados):
         if s.titulo:
             par(s.titulo + ':', negrito=True, antes=12, alinhamento=WD_ALIGN_PARAGRAPH.LEFT, manter=True)
         for item in s.itens:
@@ -579,8 +658,14 @@ def gerar_pdf(dados: dict) -> bytes:
     largura_util = A4[0] - 5 * cm
     h = []
 
-    h += [Spacer(1, 4 * cm),
-          Paragraph(_xml(cfg['titulo'].upper()), ParagraphStyle('capa1', parent=capa, fontSize=16, leading=22)),
+    logo = _logo(dados.get('logo'))
+    if logo:
+        conteudo, larg, alt = logo
+        w, hh = _medidas(larg, alt, 6 * cm, 4 * cm)
+        h += [Spacer(1, 0.5 * cm), Image(conteudo, width=w, height=hh, mask='auto'), Spacer(1, 1.2 * cm)]
+    else:
+        h.append(Spacer(1, 4 * cm))
+    h += [Paragraph(_xml(cfg['titulo'].upper()), ParagraphStyle('capa1', parent=capa, fontSize=16, leading=22)),
           Spacer(1, 2 * cm),
           Paragraph(_xml(cfg['empresa'].upper()), ParagraphStyle('capa2', parent=capa, fontSize=14, leading=19)),
           Paragraph(_xml(cfg['municipio'].upper()), capa), Spacer(1, 2 * cm)]
@@ -596,7 +681,7 @@ def gerar_pdf(dados: dict) -> bytes:
     h.append(Paragraph(_xml(f'ATENDIMENTO DAS CONDIÇÕES E RESTRIÇÕES DA {cfg["licenca"].upper()}'),
                        ParagraphStyle('t2', parent=titulo, spaceBefore=16)))
 
-    for s in dados['secoes']:
+    for s in secoes_do_documento(dados):
         bloco_secao = [Paragraph(_xml(s.titulo + ':'), titulo)] if s.titulo else []
         for n, item in enumerate(s.itens):
             ref = f'{_xml(item.referencia)}-' if item.referencia else None

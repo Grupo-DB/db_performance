@@ -69,6 +69,13 @@ class Norma(models.Model):
     # apresentação. JSON porque é um formulário de texto livre que muda por órgão; null
     # (e não default) porque MySQL antigo não aceita default em coluna JSON.
     relatorio_anual = models.JSONField(null=True, blank=True)
+    # Logo da capa do relatório anual; vazio = o logo do grupo que vem com o sistema.
+    relatorio_logo = models.ImageField(upload_to='conformidade/logos/', blank=True, null=True)
+    # Unidade (matriz, filial ATM…) a que o documento pertence. Licença é de uma unidade;
+    # lei vale para todas (vazio). Reaproveita o cadastro de filiais da Gestão de Pessoas.
+    unidade = models.ForeignKey(
+        'management.Filial', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+        help_text='Vazio = vale para todas as unidades.')
     criado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
     )
@@ -110,7 +117,7 @@ class Requisito(models.Model):
         ('PARCIAL', 'Atendido parcialmente'),
         ('NAO_ATENDIDO', 'Não atendido'),
     ]
-    ORIGENS = [('MANUAL', 'Cadastro manual'), ('IA', 'Sugerido pela IA')]
+    ORIGENS = [('MANUAL', 'Cadastro manual'), ('IA', 'Sugerido pela IA'), ('RELATORIO', 'Importado do relatório anual')]
 
     # PROTECT: apagar a norma levaria junto o histórico de verificações, que é
     # justamente a evidência pedida em auditoria. Revogar é o caminho.
@@ -124,7 +131,10 @@ class Requisito(models.Model):
     tema = models.CharField(max_length=15, choices=TEMAS, default='AMBIENTAL')
     aplicabilidade = models.CharField(max_length=15, choices=APLICABILIDADES, default='EM_ANALISE')
     justificativa = models.TextField(blank=True, default='', help_text='Por que se aplica (ou não) à empresa.')
-    unidade = models.CharField(max_length=120, blank=True, default='', help_text='Unidade, filial ou setor onde se aplica.')
+    # Herda a da norma quando ela tem uma (licença); em lei geral, a obrigação pode ser só de uma unidade.
+    unidade = models.ForeignKey(
+        'management.Filial', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+        help_text='Vazio = todas as unidades.')
     responsavel = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='requisitos_legais'
     )
@@ -165,6 +175,11 @@ class Requisito(models.Model):
     def __str__(self):
         ref = f' {self.referencia}' if self.referencia else ''
         return f'{self.norma}{ref}'
+
+    def save(self, *args, **kwargs):
+        if self.norma_id and self.norma.unidade_id:
+            self.unidade_id = self.norma.unidade_id
+        super().save(*args, **kwargs)
 
     def recalcular_situacao(self):
         """Repõe o estado a partir da verificação mais recente (ou do zero)."""
@@ -573,7 +588,9 @@ class Terceiro(models.Model):
     cnpj = models.CharField(max_length=18, blank=True, default='', help_text='Só números ou com máscara.')
     categoria = models.CharField(max_length=15, choices=CATEGORIAS, default='OUTRO')
     servico = models.TextField(blank=True, default='', help_text='O que o terceiro faz para a empresa.')
-    unidade = models.CharField(max_length=120, blank=True, default='', help_text='Unidade/setor atendido.')
+    unidade = models.ForeignKey(
+        'management.Filial', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+        help_text='Vazio = atende todas as unidades.')
     contato_nome = models.CharField(max_length=120, blank=True, default='')
     telefone = models.CharField(max_length=40, blank=True, default='')
     email = models.EmailField(blank=True, default='')

@@ -15,7 +15,7 @@ from rest_framework.views import APIView
 
 from kanban.models import KanbanColumn, KanbanTask
 
-from . import avisos, ia, normas_tecnicas, relatorio_anual
+from . import avisos, ia, importar_relatorio, normas_tecnicas, relatorio_anual
 from .models import (
     TEMAS, ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor,
     PlanoAcao, PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao, ConfiguracaoAvisos,
@@ -94,8 +94,9 @@ class NormaViewSet(viewsets.ModelViewSet):
     serializer_class = NormaSerializer
 
     def get_queryset(self):
-        qs = Norma.objects.annotate(total_requisitos=Count('requisitos', filter=Q(requisitos__ativo=True)))
+        qs = Norma.objects.select_related('unidade').annotate(total_requisitos=Count('requisitos', filter=Q(requisitos__ativo=True)))
         p = self.request.query_params
+        qs = avisos.da_unidade(qs, p.get('unidade'))
         for campo in ('tema', 'esfera', 'situacao', 'tipo'):
             if p.get(campo):
                 qs = qs.filter(**{campo: p[campo]})
@@ -106,6 +107,12 @@ class NormaViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(criado_por=self.request.user)
+
+    def perform_update(self, serializer):
+        norma = serializer.save()
+        # Licença passou a ser de uma unidade: as condicionantes dela vão junto.
+        if 'unidade' in serializer.validated_data and norma.unidade_id:
+            Requisito.objects.filter(norma=norma).exclude(unidade=norma.unidade_id).update(unidade=norma.unidade_id)
 
     def destroy(self, request, *args, **kwargs):
         try:
@@ -306,6 +313,56 @@ class NormaViewSet(viewsets.ModelViewSet):
             a.save(update_fields=['legenda'])
         return Response({'salvas': len(ids)})
 
+    @action(detail=True, methods=['post', 'delete'], url_path='relatorio-anual/logo')
+    def relatorio_anual_logo(self, request, pk=None):
+        """POST (multipart `arquivo`): logo próprio na capa. DELETE: volta ao logo do grupo."""
+        norma = self.get_object()
+        if request.method == 'DELETE':
+            if norma.relatorio_logo:
+                norma.relatorio_logo.delete(save=False)
+            norma.relatorio_logo = None
+        else:
+            arquivo = request.FILES.get('arquivo')
+            if not arquivo:
+                raise ValidationError({'arquivo': 'Envie a imagem do logo.'})
+            if not arquivo.name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')):
+                raise ValidationError({'arquivo': 'Use uma imagem PNG ou JPG.'})
+            if norma.relatorio_logo:
+                norma.relatorio_logo.delete(save=False)
+            norma.relatorio_logo = arquivo
+        norma.save(update_fields=['relatorio_logo', 'atualizado_em'])
+        return Response(relatorio_anual.para_json(self._montar_relatorio(norma, request)))
+
+    @action(detail=True, methods=['post'], url_path='relatorio-anual/importar')
+    def relatorio_anual_importar(self, request, pk=None):
+        """
+        Importa as respostas de um relatório anual já entregue (PDF do Word). Multipart:
+        `arquivo`; `aplicar=1` grava (sem ele, só a prévia); `data` das verificações
+        (padrão: o mês da capa); `criar_faltantes`, `tirar_ausentes` (padrão 1).
+        """
+        norma = self.get_object()
+        arquivo = request.FILES.get('arquivo')
+        if not arquivo:
+            raise ValidationError({'arquivo': 'Envie o PDF do relatório.'})
+        try:
+            lido = importar_relatorio.ler(arquivo.read())
+        except importar_relatorio.PdfIlegivel as e:
+            raise ValidationError({'arquivo': str(e)})
+        planejado = importar_relatorio.planejar(norma, lido)
+        if request.data.get('aplicar') not in ('1', 'true', True):
+            return Response(importar_relatorio.resumo_json(norma, lido, planejado))
+
+        data_vcl = _data(request.data.get('data'), 'data') or lido['data'] or date.today()
+        if data_vcl > date.today():
+            raise ValidationError({'data': 'A data das verificações não pode ser futura.'})
+        sim = lambda campo: request.data.get(campo, '1') not in ('0', 'false', False)  # noqa: E731
+        resultado = importar_relatorio.aplicar(
+            norma, lido, request.user, data_vcl, criar_faltantes=sim('criar_faltantes'),
+            tirar_ausentes=sim('tirar_ausentes'), nome_pdf=arquivo.name)
+        norma.refresh_from_db()
+        return Response({**resultado, 'data': data_vcl.isoformat(),
+                         'relatorio': relatorio_anual.para_json(self._montar_relatorio(norma, request))})
+
 
 def _preencher_nbrs_pela_regex(extracao):
     """Leitura feita antes das NBRs existirem: acha as citações no texto do PDF, sem gastar IA."""
@@ -398,7 +455,7 @@ class RequisitoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = (Requisito.objects
-              .select_related('norma', 'responsavel__colaborador', 'terceiro')
+              .select_related('norma', 'responsavel__colaborador', 'terceiro', 'unidade')
               .annotate(planos_abertos=Count('planos', filter=Q(planos__concluido_em__isnull=True)
                                              & (Q(planos__tarefa__isnull=True) | Q(planos__tarefa__concluido_em__isnull=True)))))
         p = self.request.query_params
@@ -407,13 +464,14 @@ class RequisitoViewSet(viewsets.ModelViewSet):
         for campo in ('norma', 'tema', 'aplicabilidade', 'situacao', 'responsavel', 'origem', 'terceiro'):
             if p.get(campo):
                 qs = qs.filter(**{campo: p[campo]})
+        qs = avisos.da_unidade(qs, p.get('unidade'))
         if p.get('vencidos') == '1':
             qs = qs.filter(aplicabilidade='APLICAVEL', proxima_verificacao__lt=date.today())
         if p.get('q'):
             termo = p['q'].strip()
             qs = qs.filter(Q(descricao__icontains=termo) | Q(referencia__icontains=termo)
                            | Q(norma__ementa__icontains=termo) | Q(norma__numero__icontains=termo)
-                           | Q(unidade__icontains=termo))
+                           | Q(unidade__nome__icontains=termo) | Q(secao__icontains=termo))
         return qs.order_by('norma__tema', 'norma_id', 'id')
 
     def perform_create(self, serializer):
@@ -458,7 +516,7 @@ class RequisitoViewSet(viewsets.ModelViewSet):
         planos = avisos.planos_abertos(filtros)
         pend = avisos.pendencias(filtros, hoje)
         a_vencer = sum(1 for r in pend['verificacoes'] if r.proxima_verificacao >= hoje)
-        terceiros = _resumo_terceiros(hoje)
+        terceiros = _resumo_terceiros(hoje, filtros.get('unidade'))
         if filtros.get('terceiro'):
             terceiros['alertas'] = [a for a in terceiros['alertas'] if str(a['terceiro']) == str(filtros['terceiro'])]
 
@@ -491,8 +549,7 @@ class RequisitoViewSet(viewsets.ModelViewSet):
             'proximas': RequisitoSerializer(pend['verificacoes'][:15], many=True, context={'request': request}).data,
             'planos_proximos': PlanoAcaoSerializer(pend['planos'][:15], many=True, context={'request': request}).data,
             'terceiros': terceiros,
-            'unidades': sorted({u for u in Requisito.objects.filter(ativo=True).exclude(unidade='')
-                                .values_list('unidade', flat=True)}, key=str.lower),
+            'unidades': unidades_ativas(),
         })
 
     @action(detail=True, methods=['post'])
@@ -670,7 +727,7 @@ class PlanoAcaoViewSet(viewsets.ModelViewSet):
             qs = qs.filter(terceiro=p['terceiro'])
         if p.get('abertos') == '1':
             qs = qs.filter(PLANO_ABERTO)
-        return qs
+        return avisos.da_unidade(qs, p.get('unidade'), 'requisito__unidade')
 
     def perform_create(self, serializer):
         serializer.save(criado_por=self.request.user)
@@ -689,6 +746,22 @@ class PlanoAcaoViewSet(viewsets.ModelViewSet):
         plano.concluido_em = None if request.data.get('reabrir') else timezone.now()
         plano.save(update_fields=['concluido_em'])
         return Response(self.get_serializer(plano).data)
+
+
+def unidades_ativas() -> list:
+    """Filiais ativas do cadastro da Gestão de Pessoas — a Matriz primeiro."""
+    from avaliacoes.management.models import Filial
+    lista = [{'id': f.id, 'nome': f.nome, 'cidade': f.cidade, 'estado': f.estado}
+             for f in Filial.objects.filter(ativa=True)]
+    return sorted(lista, key=lambda u: (u['nome'].lower() != 'matriz', u['nome'].lower()))
+
+
+class UnidadesView(APIView):
+    """Unidades para o seletor do módulo (matriz, filiais)."""
+    permission_classes = [IsConformidade]
+
+    def get(self, request):
+        return Response(unidades_ativas())
 
 
 class ResponsaveisView(APIView):
@@ -898,9 +971,9 @@ class TestarPalavrasView(APIView):
 
 
 # ── Terceiros ─────────────────────────────────────────────────────────────
-def _resumo_terceiros(hoje):
+def _resumo_terceiros(hoje, unidade=None):
     """Painel: terceiros ativos irregulares/a vencer e os documentos exigidos que pedem atenção."""
-    terceiros = list(Terceiro.objects.filter(ativo=True).prefetch_related('documentos'))
+    terceiros = list(avisos.da_unidade(Terceiro.objects.filter(ativo=True), unidade).prefetch_related('documentos'))
     alertas = []
     for t in terceiros:
         for d in t.documentos_vigentes():
@@ -937,6 +1010,7 @@ class TerceiroViewSet(viewsets.ModelViewSet):
             qs = qs.filter(ativo=True)
         if p.get('categoria'):
             qs = qs.filter(categoria=p['categoria'])
+        qs = avisos.da_unidade(qs, p.get('unidade'))
         if p.get('q'):
             termo = p['q'].strip()
             qs = qs.filter(Q(razao_social__icontains=termo) | Q(nome_fantasia__icontains=termo)

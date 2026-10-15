@@ -24,6 +24,7 @@ def nome_usuario(u):
 
 class NormaSerializer(serializers.ModelSerializer):
     identificacao = serializers.CharField(read_only=True)
+    unidade_nome = serializers.CharField(source='unidade.nome', read_only=True, default=None)
     total_requisitos = serializers.IntegerField(read_only=True, default=0)
     arquivo_url = serializers.SerializerMethodField()
 
@@ -32,7 +33,7 @@ class NormaSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'tipo', 'numero', 'ano', 'orgao', 'esfera', 'tema', 'ementa', 'link',
             'data_publicacao', 'validade', 'dias_aviso', 'situacao', 'arquivo', 'arquivo_url', 'observacao',
-            'identificacao', 'total_requisitos', 'criado_em', 'atualizado_em',
+            'unidade', 'unidade_nome', 'identificacao', 'total_requisitos', 'criado_em', 'atualizado_em',
         ]
         read_only_fields = ['criado_em', 'atualizado_em']
         extra_kwargs = {'arquivo': {'write_only': True, 'required': False}}
@@ -51,12 +52,13 @@ class RequisitoSerializer(serializers.ModelSerializer):
     responsavel = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), allow_null=True, required=False)
     planos_abertos = serializers.IntegerField(read_only=True, default=0)
     terceiro_nome = serializers.CharField(source='terceiro.__str__', read_only=True, default=None)
+    unidade_nome = serializers.CharField(source='unidade.nome', read_only=True, default=None)
 
     class Meta:
         model = Requisito
         fields = [
             'id', 'norma', 'norma_identificacao', 'norma_ementa', 'referencia', 'secao', 'descricao', 'tema',
-            'aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'responsavel_nome', 'terceiro', 'terceiro_nome',
+            'aplicabilidade', 'justificativa', 'unidade', 'unidade_nome', 'responsavel', 'responsavel_nome', 'terceiro', 'terceiro_nome',
             'periodicidade_meses', 'prazo_legal', 'dias_aviso', 'situacao', 'ultima_verificacao', 'proxima_verificacao',
             'origem', 'trecho_fonte', 'pagina_fonte', 'ativo', 'planos_abertos', 'criado_em', 'atualizado_em',
         ]
@@ -280,10 +282,11 @@ class TerceiroSerializer(serializers.ModelSerializer):
     documentos = serializers.SerializerMethodField()
     total_requisitos = serializers.IntegerField(read_only=True, default=0)
     planos_abertos = serializers.IntegerField(read_only=True, default=0)
+    unidade_nome = serializers.CharField(source='unidade.nome', read_only=True, default=None)
 
     class Meta:
         model = Terceiro
-        fields = ['id', 'razao_social', 'nome_fantasia', 'cnpj', 'categoria', 'categoria_rotulo', 'servico', 'unidade',
+        fields = ['id', 'razao_social', 'nome_fantasia', 'cnpj', 'categoria', 'categoria_rotulo', 'servico', 'unidade', 'unidade_nome',
                   'contato_nome', 'telefone', 'email', 'contrato_fim', 'ativo', 'observacao', 'situacao_documental',
                   'documentos', 'total_requisitos', 'planos_abertos', 'criado_em', 'atualizado_em']
         read_only_fields = ['criado_em', 'atualizado_em']
