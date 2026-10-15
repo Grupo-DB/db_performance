@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import Count, ProtectedError, Q
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -14,7 +15,7 @@ from rest_framework.views import APIView
 
 from kanban.models import KanbanColumn, KanbanTask
 
-from . import avisos, ia, normas_tecnicas
+from . import avisos, ia, normas_tecnicas, relatorio_anual
 from .models import (
     TEMAS, ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor,
     PlanoAcao, PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao, ConfiguracaoAvisos,
@@ -193,6 +194,118 @@ class NormaViewSet(viewsets.ModelViewSet):
         return Response({'criadas': criadas, 'reativadas': reativadas,
                          'extracao': ExtracaoIASerializer(ultima).data if ultima else None})
 
+    # ── Relatório Anual de Acompanhamento ───────────────────────────────
+
+    def _periodo_relatorio(self, request):
+        inicio_padrao, fim_padrao = relatorio_anual.periodo_padrao()
+        inicio = _data(request.query_params.get('inicio'), 'inicio') or inicio_padrao
+        fim = _data(request.query_params.get('fim'), 'fim') or fim_padrao
+        if inicio > fim:
+            raise ValidationError({'inicio': 'O início do período é depois do fim.'})
+        return inicio, fim
+
+    def _montar_relatorio(self, norma, request):
+        inicio, fim = self._periodo_relatorio(request)
+        return relatorio_anual.montar(norma, inicio, fim, url_de=lambda a: request.build_absolute_uri(a.arquivo.url))
+
+    @action(detail=True, methods=['get', 'patch'], url_path='relatorio-anual')
+    def relatorio_anual_previa(self, request, pk=None):
+        """
+        GET ?inicio=&fim=: prévia do relatório (condicionantes na ordem, resposta do
+        período, fotos, o que falta). PATCH: salva capa/apresentação da licença.
+        """
+        norma = self.get_object()
+        if request.method == 'PATCH':
+            norma.relatorio_anual = {**(norma.relatorio_anual or {}),
+                                     **relatorio_anual.limpar_configuracao(request.data)}
+            norma.save(update_fields=['relatorio_anual', 'atualizado_em'])
+        return Response(relatorio_anual.para_json(self._montar_relatorio(norma, request)))
+
+    @action(detail=True, methods=['get'], url_path='relatorio-anual/arquivo')
+    def relatorio_anual_arquivo(self, request, pk=None):
+        """O documento: ?formato=docx (padrão) ou pdf, com o mesmo período da prévia."""
+        norma = self.get_object()
+        formato = (request.query_params.get('formato') or 'docx').lower()
+        if formato not in ('docx', 'pdf'):
+            raise ValidationError({'formato': 'Use docx ou pdf.'})
+        dados = self._montar_relatorio(norma, request)
+        if formato == 'pdf':
+            conteudo, tipo = relatorio_anual.gerar_pdf(dados), 'application/pdf'
+        else:
+            conteudo = relatorio_anual.gerar_docx(dados)
+            tipo = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        resposta = HttpResponse(conteudo, content_type=tipo)
+        resposta['Content-Disposition'] = f'attachment; filename="{relatorio_anual.nome_arquivo(dados, formato)}"'
+        resposta['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return resposta
+
+    @action(detail=True, methods=['post'], url_path='relatorio-anual/repetir')
+    def relatorio_anual_repetir(self, request, pk=None):
+        """
+        "Nada mudou desde o ano passado": registra de novo a última resposta (atendida)
+        das condicionantes escolhidas, com data dentro do período. A verificação nova é
+        uma VCL de verdade — quem repetiu e quando ficam gravados, e a observação diz de
+        onde o texto veio. ``{"requisitos": [ids], "data": "AAAA-MM-DD", "fotos": bool}``.
+        Fotos do ano anterior só vão junto se pedido: foto velha como evidência de hoje
+        é justamente o que a fiscalização questiona.
+        """
+        norma = self.get_object()
+        inicio, fim = self._periodo_relatorio(request)
+        data_vcl = _data(request.data.get('data'), 'data') or min(fim, date.today())
+        if not (inicio <= data_vcl <= fim):
+            raise ValidationError({'data': 'A data precisa estar dentro do período do relatório.'})
+        if data_vcl > date.today():
+            raise ValidationError({'data': 'A verificação não pode ter data futura.'})
+        ids = request.data.get('requisitos') or []
+        if not isinstance(ids, list) or not ids:
+            raise ValidationError({'requisitos': 'Nenhuma condicionante escolhida.'})
+        levar_fotos = bool(request.data.get('fotos'))
+
+        repetidas, ignoradas = 0, []
+        with transaction.atomic():
+            for req in Requisito.objects.filter(norma=norma, pk__in=ids, ativo=True):
+                ultima = req.verificacoes.order_by('-data', '-id').first()
+                motivo = None
+                if req.aplicabilidade != 'APLICAVEL':
+                    motivo = 'não está como aplicável'
+                elif ultima is None or not ultima.evidencia.strip():
+                    motivo = 'não tem resposta anterior'
+                elif ultima.data >= inicio:
+                    motivo = 'já tem resposta no período'
+                elif ultima.resultado != 'ATENDIDO':
+                    motivo = 'a última verificação não foi "Atendido"'
+                if motivo:
+                    ignoradas.append({'requisito': req.pk, 'referencia': req.referencia, 'motivo': motivo})
+                    continue
+                anexos = list(ultima.anexos.all()) if levar_fotos else []
+                _registrar_vcl(req, {
+                    'evidencia': ultima.evidencia,
+                    'observacao': f'Resposta repetida da verificação de {ultima.data:%d/%m/%Y} (relatório anual).',
+                }, 'ATENDIDO', data_vcl, request.user, anexos)
+                repetidas += 1
+
+        dados = relatorio_anual.para_json(self._montar_relatorio(norma, request))
+        return Response({'repetidas': repetidas, 'ignoradas': ignoradas, 'relatorio': dados})
+
+    @action(detail=True, methods=['post'], url_path='relatorio-anual/legendas')
+    def relatorio_anual_legendas(self, request, pk=None):
+        """Legenda das fotos ("Figura N: …"): ``{"legendas": {"<anexo id>": "texto"}}``."""
+        norma = self.get_object()
+        legendas = request.data.get('legendas') or {}
+        if not isinstance(legendas, dict) or not legendas:
+            raise ValidationError({'legendas': 'Nada para salvar.'})
+        try:
+            ids = {int(k): str(v or '').strip()[:300] for k, v in legendas.items()}
+        except (TypeError, ValueError):
+            raise ValidationError({'legendas': 'Identificador de foto inválido.'})
+        anexos = EvidenciaAnexo.objects.filter(pk__in=ids, verificacao__requisito__norma=norma)
+        if anexos.count() != len(ids):
+            raise ValidationError({'legendas': 'Alguma foto não pertence a esta licença.'})
+        for a in anexos:
+            a.legenda = ids[a.pk]
+            a.save(update_fields=['legenda'])
+        return Response({'salvas': len(ids)})
+
 
 def _preencher_nbrs_pela_regex(extracao):
     """Leitura feita antes das NBRs existirem: acha as citações no texto do PDF, sem gastar IA."""
@@ -212,7 +325,7 @@ def _preencher_nbrs_pela_regex(extracao):
 
 LIMITE_LOTE = 500
 # O que a edição em lote pode mudar. Norma, descrição e referência são de cada requisito.
-CAMPOS_LOTE = ('aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'periodicidade_meses', 'tema', 'ativo', 'terceiro',
+CAMPOS_LOTE = ('secao', 'aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'periodicidade_meses', 'tema', 'ativo', 'terceiro',
                'dias_aviso')
 
 
@@ -242,7 +355,7 @@ def _registrar_vcl(req, d, resultado, data_vcl, usuario, anexos):
     for a in anexos:
         if isinstance(a, EvidenciaAnexo):
             gravados.append(EvidenciaAnexo.objects.create(verificacao=vcl, arquivo=a.arquivo.name, nome=a.nome,
-                                                          tamanho=a.tamanho))
+                                                          tamanho=a.tamanho, legenda=a.legenda))
         else:
             gravados.append(EvidenciaAnexo.objects.create(verificacao=vcl, arquivo=a, nome=a.name))
     req.recalcular_situacao()

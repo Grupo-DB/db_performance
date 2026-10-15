@@ -1136,3 +1136,216 @@ class AntecedenciaPorItemTests(APITestCase):
         self.assertEqual(n.data['dias_aviso'], 150)
         r = self.client.post('/conformidadeLegal/requisitos/', {'norma': n.data['id'], 'descricao': 'x', 'dias_aviso': 15}, format='json')
         self.assertEqual(r.data['dias_aviso'], 15)
+
+
+def _jpeg(largura=40, altura=20, cor=(200, 30, 30)) -> bytes:
+    import io
+    from PIL import Image
+    saida = io.BytesIO()
+    Image.new('RGB', (largura, altura), cor).save(saida, format='JPEG')
+    return saida.getvalue()
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class RelatorioAnualTests(APITestCase):
+    """Relatório Anual de Acompanhamento da licença (prévia, Word, PDF, repetir, legendas)."""
+
+    INICIO, FIM = '2024-12-01', '2025-11-30'
+
+    def setUp(self):
+        self.user = User.objects.create_user('meioambiente', password='x')
+        self.user.groups.add(Group.objects.create(name='ConformidadeLegal'))
+        self.client.force_authenticate(self.user)
+        self.lo = Norma.objects.create(tipo='LICENCA', orgao='FEPAM', numero='00893', ano=2024, esfera='ESTADUAL',
+                                       tema='AMBIENTAL', ementa='LO da lavra de calcário.')
+
+    def _req(self, ref, secao='', **extra):
+        return Requisito.objects.create(norma=self.lo, referencia=ref, secao=secao, descricao=f'Cumprir {ref}.',
+                                        trecho_fonte=f'Texto literal da condicionante {ref}.', tema='AMBIENTAL',
+                                        aplicabilidade=extra.pop('aplicabilidade', 'APLICAVEL'), **extra)
+
+    def _vcl(self, req, data, evidencia, resultado='ATENDIDO', fotos=()):
+        vcl = Verificacao.objects.create(requisito=req, data=date.fromisoformat(data), resultado=resultado,
+                                         evidencia=evidencia, verificado_por=self.user)
+        for nome, legenda in fotos:
+            EvidenciaAnexo.objects.create(verificacao=vcl, nome=nome, legenda=legenda,
+                                          arquivo=SimpleUploadedFile(nome, _jpeg() if nome.endswith('.jpg') else b'%PDF-1.4'))
+        return vcl
+
+    def _previa(self, **params):
+        r = self.client.get(f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/',
+                            {'inicio': self.INICIO, 'fim': self.FIM, **params})
+        self.assertEqual(r.status_code, 200, getattr(r, 'data', r))
+        return r.data
+
+    def test_ordem_numerica_secoes_e_resposta_do_periodo(self):
+        a = self._req('5.10', 'Quanto à Atividade')
+        b = self._req('5.2', 'Quanto à Atividade')
+        c = self._req('1.1', 'Quanto ao Empreendimento')
+        d = self._req('1.2')  # sem seção: fica no capítulo anterior
+        self._vcl(b, '2025-03-10', 'Antiga do período.')
+        self._vcl(b, '2025-06-10', 'Operação dentro das poligonais.', fotos=[('frente.jpg', 'Frente de lavra'),
+                                                                            ('laudo.pdf', '')])
+        self._vcl(a, '2024-05-01', 'Resposta do ano passado.')  # fora do período
+        self._vcl(c, '2025-01-05', 'Em conformidade.')
+        self._req('9.9', aplicabilidade='NAO_APLICAVEL', justificativa='Não há captação de água.')
+
+        dados = self._previa()
+        titulos = [s['titulo'] for s in dados['secoes']]
+        self.assertEqual(titulos, ['1. Quanto ao Empreendimento', '5. Quanto à Atividade'])
+        refs = [i['referencia'] for s in dados['secoes'] for i in s['itens']]
+        self.assertEqual(refs, ['1.1', '1.2', '5.2', '5.10', '9.9'])
+
+        itens = {i['referencia']: i for s in dados['secoes'] for i in s['itens']}
+        self.assertEqual(itens['5.2']['resposta'], 'Operação dentro das poligonais.')
+        self.assertEqual([f['numero'] for f in itens['5.2']['fotos']], [1])
+        self.assertEqual([x['nome'] for x in itens['5.2']['documentos']], ['laudo.pdf'])
+        self.assertEqual(itens['5.2']['texto'], 'Texto literal da condicionante 5.2.')
+        self.assertTrue(itens['5.10']['pendente'])
+        self.assertEqual(itens['5.10']['anterior']['evidencia'], 'Resposta do ano passado.')
+        self.assertTrue(itens['1.2']['pendente'])
+        self.assertIsNone(itens['1.2']['anterior'])
+        self.assertEqual((itens['9.9']['origem_resposta'], itens['9.9']['resposta']),
+                         ('JUSTIFICATIVA', 'Não há captação de água.'))
+        self.assertEqual(dados['totais'], {'itens': 5, 'respondidos': 3, 'pendentes': 2, 'com_anterior': 1,
+                                           'fotos': 1, 'sem_legenda': 0})
+        self.assertIn('dezembro de 2024 e novembro de 2025', dados['apresentacao'])
+        del d
+
+    def test_configuracao_salva_e_vazio_volta_ao_padrao(self):
+        url = f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/?inicio={self.INICIO}&fim={self.FIM}'
+        r = self.client.patch(url, {'item': '14', 'licenca': 'LO nº 00893/2024', 'atividade': 'Extração de Calcário',
+                                    'desconhecido': 'x'}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.lo.refresh_from_db()
+        self.assertNotIn('desconhecido', self.lo.relatorio_anual)
+        self.assertIn('atendimento do item 14 e seus subitens, das condições e restrições da LO nº 00893/2024',
+                      r.data['apresentacao'])
+        self.assertEqual(r.data['cabecalho'], 'Relatório Anual de Acompanhamento das Atividades – FEPAM – LO nº 00893/2024')
+        r = self.client.patch(url, {'licenca': ''}, format='json')
+        self.assertEqual(r.data['config']['licenca'], 'Licença de Operação nº 00893/2024')
+
+    def test_subitem_sem_resposta_propria_nao_fica_pendente(self):
+        sub = self._req('3.1.1', 'Quanto à Localização')
+        self._req('3.1.5')
+        url = f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/?inicio={self.INICIO}&fim={self.FIM}'
+        r = self.client.patch(url, {'sem_resposta': [sub.id, 'x']}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.lo.refresh_from_db()
+        self.assertEqual(self.lo.relatorio_anual['sem_resposta'], [])  # lista inválida não grava lixo
+        r = self.client.patch(url, {'sem_resposta': [sub.id]}, format='json')
+        itens = {i['referencia']: i for s in r.data['secoes'] for i in s['itens']}
+        self.assertEqual((itens['3.1.1']['pendente'], itens['3.1.1']['sem_resposta_propria']), (False, True))
+        self.assertTrue(itens['3.1.5']['pendente'])
+        self.assertEqual(r.data['totais']['pendentes'], 1)
+
+    def test_word_e_pdf_com_foto_e_pendencia(self):
+        import io
+        from docx import Document
+        req = self._req('1.10', 'Quanto ao Empreendimento')
+        self._vcl(req, '2025-04-01', 'Canaletas levam a água às bacias.\nLimpeza bimestral.',
+                  fotos=[('canal.jpg', 'Canais de drenagem')])
+        self._req('1.11')
+        base = f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/arquivo/'
+
+        r = self.client.get(base, {'inicio': self.INICIO, 'fim': self.FIM, 'formato': 'docx'})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('Relatorio_Anual_Licen', r['Content-Disposition'])
+        doc = Document(io.BytesIO(r.content))
+        texto = '\n'.join(p.text for p in doc.paragraphs)
+        self.assertIn('1. Quanto ao Empreendimento:', texto)
+        self.assertIn('1.10-\tTexto literal da condicionante 1.10.', texto)
+        self.assertIn('Limpeza bimestral.', texto)
+        self.assertIn('Figura 1: Canais de drenagem.', texto)
+        self.assertIn('[Sem resposta registrada no período', texto)
+        self.assertEqual(len(doc.inline_shapes), 1)
+
+        r = self.client.get(base, {'inicio': self.INICIO, 'fim': self.FIM, 'formato': 'pdf'})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.content.startswith(b'%PDF'))
+        from pypdf import PdfReader
+        paginas = PdfReader(io.BytesIO(r.content)).pages
+        corpo = ' '.join(p.extract_text() for p in paginas)
+        self.assertIn('Figura 1: Canais de drenagem.', corpo)
+        self.assertIn('RELATÓRIO ANUAL', paginas[0].extract_text())
+
+        r = self.client.get(base, {'formato': 'odt'})
+        self.assertEqual(r.status_code, 400)
+
+    def test_foto_sumida_do_disco_nao_derruba_o_relatorio(self):
+        import os
+        req = self._req('2.1')
+        vcl = self._vcl(req, '2025-04-01', 'Ok.', fotos=[('placa.jpg', 'Placa')])
+        os.remove(vcl.anexos.first().arquivo.path)
+        for formato in ('docx', 'pdf'):
+            r = self.client.get(f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/arquivo/',
+                                {'inicio': self.INICIO, 'fim': self.FIM, 'formato': formato})
+            self.assertEqual(r.status_code, 200)
+
+    def test_repetir_resposta_do_ano_anterior(self):
+        sim = self._req('1.7')
+        com_foto = self._req('1.11')
+        nao_atendido = self._req('4.9')
+        ja_respondido = self._req('1.1')
+        nunca = self._req('1.2')
+        self._vcl(sim, '2024-10-01', 'O Empreendedor está ciente dessa obrigatoriedade.')
+        self._vcl(com_foto, '2024-10-01', 'Guarita na entrada.', fotos=[('guarita.jpg', 'Guarita')])
+        self._vcl(nao_atendido, '2024-10-01', 'Falta plano de monitoramento.', resultado='PARCIAL')
+        self._vcl(ja_respondido, '2025-02-01', 'Em conformidade.')
+
+        r = self.client.post(f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/repetir/'
+                             f'?inicio={self.INICIO}&fim={self.FIM}',
+                             {'requisitos': [sim.id, com_foto.id, nao_atendido.id, ja_respondido.id, nunca.id],
+                              'data': '2025-11-20', 'fotos': True}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['repetidas'], 2)
+        self.assertEqual(sorted(i['referencia'] for i in r.data['ignoradas']), ['1.1', '1.2', '4.9'])
+        nova = com_foto.verificacoes.order_by('-data').first()
+        self.assertEqual((nova.data, nova.resultado, nova.evidencia), (date(2025, 11, 20), 'ATENDIDO', 'Guarita na entrada.'))
+        self.assertIn('repetida da verificação de 01/10/2024', nova.observacao)
+        self.assertEqual([a.legenda for a in nova.anexos.all()], ['Guarita'])
+        sim.refresh_from_db()
+        self.assertEqual(sim.ultima_verificacao, date(2025, 11, 20))
+        self.assertEqual(r.data['relatorio']['totais']['pendentes'], 2)
+
+        r = self.client.post(f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/repetir/'
+                             f'?inicio={self.INICIO}&fim={self.FIM}',
+                             {'requisitos': [nunca.id], 'data': '2026-01-10'}, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_legendas_so_das_fotos_desta_licenca(self):
+        req = self._req('1.11')
+        vcl = self._vcl(req, '2025-04-01', 'Placas.', fotos=[('placa.jpg', '')])
+        outra = Norma.objects.create(tipo='LICENCA', numero='1', ementa='Outra.')
+        alheio = Requisito.objects.create(norma=outra, descricao='x', aplicabilidade='APLICAVEL')
+        foto_alheia = EvidenciaAnexo.objects.create(
+            verificacao=Verificacao.objects.create(requisito=alheio, resultado='ATENDIDO'),
+            nome='y.jpg', arquivo=SimpleUploadedFile('y.jpg', _jpeg()))
+        foto = vcl.anexos.first()
+        url = f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/legendas/'
+        r = self.client.post(url, {'legendas': {str(foto.id): 'Placa de advertência', str(foto_alheia.id): 'x'}},
+                             format='json')
+        self.assertEqual(r.status_code, 400)
+        r = self.client.post(url, {'legendas': {str(foto.id): 'Placa de advertência'}}, format='json')
+        self.assertEqual(r.status_code, 200)
+        foto.refresh_from_db()
+        self.assertEqual(foto.legenda, 'Placa de advertência')
+
+    def test_secao_entra_no_lote_e_na_leitura_da_ia(self):
+        from . import ia
+        req = self._req('5.1')
+        r = self.client.post('/conformidadeLegal/requisitos/editar-lote/',
+                             {'ids': [req.id], 'campos': {'secao': 'Quanto à Atividade'}}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data[0]['secao'], 'Quanto à Atividade')
+        item = ia._normalizar({'referencia': '5.1', 'secao': 'Quanto à Atividade:', 'descricao': 'x'})
+        self.assertEqual(item['secao'], 'Quanto à Atividade')
+        self.assertIn('TODAS as condicionantes numeradas', ia._instrucao(self.lo, []))
+
+
+class ChaveReferenciaTests(SimpleTestCase):
+    def test_ordem(self):
+        from .relatorio_anual import chave_referencia
+        refs = ['5.10', '5.2', '4.5-1.', '4.5-2.', 'Art. 3', '', '1.16', '5.13.2', '5.13']
+        self.assertEqual(sorted(refs, key=chave_referencia),
+                         ['1.16', 'Art. 3', '4.5-1.', '4.5-2.', '5.2', '5.10', '5.13', '5.13.2', ''])

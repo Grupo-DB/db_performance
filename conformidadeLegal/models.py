@@ -64,6 +64,11 @@ class Norma(models.Model):
     situacao = models.CharField(max_length=10, choices=SITUACOES, default='VIGENTE')
     arquivo = models.FileField(upload_to='conformidade/normas/%Y/', blank=True, null=True)
     observacao = models.TextField(blank=True, default='')
+    # Capa e apresentação do Relatório Anual de Acompanhamento (licenças): empresa, CNPJ,
+    # município, atividade, processos ANM, item da licença que pede o relatório, texto da
+    # apresentação. JSON porque é um formulário de texto livre que muda por órgão; null
+    # (e não default) porque MySQL antigo não aceita default em coluna JSON.
+    relatorio_anual = models.JSONField(null=True, blank=True)
     criado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
     )
@@ -111,6 +116,10 @@ class Requisito(models.Model):
     # justamente a evidência pedida em auditoria. Revogar é o caminho.
     norma = models.ForeignKey(Norma, on_delete=models.PROTECT, related_name='requisitos')
     referencia = models.CharField(max_length=120, blank=True, default='', help_text='Ex.: Art. 16, § 2º / Condicionante 7.')
+    # Capítulo da licença onde a condicionante está ("Quanto à Atividade") — é o título
+    # de grupo do relatório anual. db_default: a coluna nasce antes do código novo.
+    secao = models.CharField(max_length=200, blank=True, default='', db_default='',
+                             help_text='Capítulo do documento. Ex.: "Quanto à Atividade".')
     descricao = models.TextField(help_text='O que precisa ser feito, em linguagem de quem executa.')
     tema = models.CharField(max_length=15, choices=TEMAS, default='AMBIENTAL')
     aplicabilidade = models.CharField(max_length=15, choices=APLICABILIDADES, default='EM_ANALISE')
@@ -207,6 +216,8 @@ class EvidenciaAnexo(models.Model):
     verificacao = models.ForeignKey(Verificacao, on_delete=models.CASCADE, related_name='anexos')
     nome = models.CharField(max_length=255, blank=True, default='')
     arquivo = models.FileField(upload_to='conformidade/evidencias/%Y/%m/')
+    # "Vista da bacia de sedimentação…" — vira "Figura N: <legenda>" no relatório anual.
+    legenda = models.CharField(max_length=300, blank=True, default='', db_default='')
     tamanho = models.PositiveIntegerField(null=True, blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
 

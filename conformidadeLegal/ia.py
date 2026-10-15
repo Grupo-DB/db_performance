@@ -46,6 +46,7 @@ ESQUEMA = {
                 'type': 'object',
                 'properties': {
                     'referencia': {'type': 'string', 'description': 'Artigo, parágrafo, item ou nº da condicionante. Ex.: "Art. 16, § 2º", "Condicionante 7".'},
+                    'secao': {'type': 'string', 'description': 'Título do capítulo onde o item está, como escrito no documento, sem o número. Ex.: "Quanto à Atividade", "Capítulo IV — Das Obrigações". String vazia se não houver.'},
                     'descricao': {'type': 'string', 'description': 'A obrigação em linguagem de quem executa: o que fazer, com que frequência, para quem entregar.'},
                     'tema': {'type': 'string', 'enum': [t for t, _ in TEMAS]},
                     'periodicidade_meses': {'type': 'integer', 'enum': PERIODICIDADES, 'description': '0 = obrigação única; senão, de quantos em quantos meses verificar.'},
@@ -54,7 +55,7 @@ ESQUEMA = {
                     'pagina': {'type': 'integer', 'description': 'Página do PDF onde está o trecho (1 = primeira).'},
                     'observacao': {'type': 'string', 'description': 'Dúvida de aplicabilidade ou ressalva; string vazia se não houver.'},
                 },
-                'required': ['referencia', 'descricao', 'tema', 'periodicidade_meses', 'prazo_legal', 'trecho', 'pagina', 'observacao'],
+                'required': ['referencia', 'secao', 'descricao', 'tema', 'periodicidade_meses', 'prazo_legal', 'trecho', 'pagina', 'observacao'],
                 'additionalProperties': False,
             },
         },
@@ -208,6 +209,17 @@ def _instrucao(norma, ja_cadastrados: list[str], paginas: list[int] | None = Non
     if ja_cadastrados:
         lista = '\n'.join(f'- {r}' for r in ja_cadastrados[:80])
         partes.append(f'Já cadastrados para este documento (não repita):\n{lista}')
+    if norma.tipo in ('LICENCA', 'OUTORGA', 'TAC'):
+        # O relatório anual ao órgão responde a licença item a item, inclusive as
+        # condicionantes declaratórias ("período de validade", "está ciente") que a
+        # regra geral mandaria ignorar — sem elas o relatório sai com buracos.
+        partes.append(
+            'Este documento é uma licença/autorização: liste TODAS as condicionantes numeradas, uma por item, '
+            'inclusive as declaratórias (validade, o que a licença autoriza, ciência de obrigações, poligonais). '
+            'Em "referencia" use exatamente o número do documento (ex.: "5.13.2", "4.5-1"), sem a palavra '
+            '"Condicionante". Em "trecho", copie o texto integral da condicionante. Condicionante só descritiva '
+            'vai com periodicidade 12 e a observação "declaratória".'
+        )
     partes.append('Liste as obrigações deste documento.')
     return '\n\n'.join(partes)
 
@@ -275,6 +287,7 @@ def _normalizar(item: dict) -> dict:
         prazo = ''
     return {
         'referencia': (item.get('referencia') or '').strip()[:120],
+        'secao': (item.get('secao') or '').strip().rstrip(':')[:200],
         'descricao': item['descricao'].strip(),
         'tema': item.get('tema') if item.get('tema') in dict(TEMAS) else 'OUTRO',
         'periodicidade_meses': item.get('periodicidade_meses') if item.get('periodicidade_meses') in PERIODICIDADES else 12,

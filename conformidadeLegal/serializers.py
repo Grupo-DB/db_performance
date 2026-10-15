@@ -55,7 +55,7 @@ class RequisitoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Requisito
         fields = [
-            'id', 'norma', 'norma_identificacao', 'norma_ementa', 'referencia', 'descricao', 'tema',
+            'id', 'norma', 'norma_identificacao', 'norma_ementa', 'referencia', 'secao', 'descricao', 'tema',
             'aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'responsavel_nome', 'terceiro', 'terceiro_nome',
             'periodicidade_meses', 'prazo_legal', 'dias_aviso', 'situacao', 'ultima_verificacao', 'proxima_verificacao',
             'origem', 'trecho_fonte', 'pagina_fonte', 'ativo', 'planos_abertos', 'criado_em', 'atualizado_em',
@@ -72,7 +72,7 @@ class EvidenciaAnexoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = EvidenciaAnexo
-        fields = ['id', 'nome', 'tamanho', 'url', 'criado_em']
+        fields = ['id', 'nome', 'legenda', 'tamanho', 'url', 'criado_em']
 
     def get_url(self, obj):
         request = self.context.get('request')
