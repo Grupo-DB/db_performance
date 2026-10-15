@@ -51,14 +51,15 @@ class RequisitoSerializer(serializers.ModelSerializer):
     responsavel_nome = serializers.SerializerMethodField()
     responsavel = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), allow_null=True, required=False)
     planos_abertos = serializers.IntegerField(read_only=True, default=0)
-    terceiro_nome = serializers.CharField(source='terceiro.__str__', read_only=True, default=None)
+    terceiros = serializers.PrimaryKeyRelatedField(many=True, required=False, queryset=Terceiro.objects.all())
+    terceiros_nomes = serializers.SerializerMethodField()
     unidade_nome = serializers.CharField(source='unidade.nome', read_only=True, default=None)
 
     class Meta:
         model = Requisito
         fields = [
             'id', 'norma', 'norma_identificacao', 'norma_ementa', 'referencia', 'secao', 'descricao', 'tema',
-            'aplicabilidade', 'justificativa', 'unidade', 'unidade_nome', 'responsavel', 'responsavel_nome', 'terceiro', 'terceiro_nome',
+            'aplicabilidade', 'justificativa', 'unidade', 'unidade_nome', 'responsavel', 'responsavel_nome', 'terceiros', 'terceiros_nomes',
             'periodicidade_meses', 'prazo_legal', 'dias_aviso', 'situacao', 'ultima_verificacao', 'proxima_verificacao',
             'origem', 'trecho_fonte', 'pagina_fonte', 'ativo', 'planos_abertos', 'criado_em', 'atualizado_em',
         ]
@@ -67,6 +68,9 @@ class RequisitoSerializer(serializers.ModelSerializer):
 
     def get_responsavel_nome(self, obj):
         return nome_usuario(obj.responsavel)
+
+    def get_terceiros_nomes(self, obj):
+        return [str(t) for t in obj.terceiros.all()]
 
 
 class EvidenciaAnexoSerializer(serializers.ModelSerializer):

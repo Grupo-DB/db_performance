@@ -382,7 +382,7 @@ def _preencher_nbrs_pela_regex(extracao):
 
 LIMITE_LOTE = 500
 # O que a edição em lote pode mudar. Norma, descrição e referência são de cada requisito.
-CAMPOS_LOTE = ('secao', 'aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'periodicidade_meses', 'tema', 'ativo', 'terceiro',
+CAMPOS_LOTE = ('secao', 'aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'periodicidade_meses', 'tema', 'ativo', 'terceiros',
                'dias_aviso')
 
 
@@ -425,8 +425,14 @@ def _abrir_plano(req, vcl, d, usuario):
         responsavel=_usuario(d.get('plano_responsavel'), 'plano_responsavel') or req.responsavel,
         prazo=_data(d.get('plano_prazo'), 'plano_prazo'), criado_por=usuario,
         # Sem escolha na tela, o plano fica com o prestador do requisito.
-        terceiro=_terceiro(d.get('plano_terceiro')) or req.terceiro,
+        terceiro=_terceiro(d.get('plano_terceiro')) or _terceiro_unico(req),
     )
+
+
+def _terceiro_unico(req):
+    """Sem escolha na tela, o plano fica com o prestador do requisito — se for um só."""
+    terceiros = list(req.terceiros.all()[:2])
+    return terceiros[0] if len(terceiros) == 1 else None
 
 
 def _terceiro(valor):
@@ -455,15 +461,18 @@ class RequisitoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = (Requisito.objects
-              .select_related('norma', 'responsavel__colaborador', 'terceiro', 'unidade')
+              .select_related('norma', 'responsavel__colaborador', 'unidade')
+              .prefetch_related('terceiros')
               .annotate(planos_abertos=Count('planos', filter=Q(planos__concluido_em__isnull=True)
                                              & (Q(planos__tarefa__isnull=True) | Q(planos__tarefa__concluido_em__isnull=True)))))
         p = self.request.query_params
         if p.get('ativo', '1') != 'todos':
             qs = qs.filter(ativo=True)
-        for campo in ('norma', 'tema', 'aplicabilidade', 'situacao', 'responsavel', 'origem', 'terceiro'):
+        for campo in ('norma', 'tema', 'aplicabilidade', 'situacao', 'responsavel', 'origem'):
             if p.get(campo):
                 qs = qs.filter(**{campo: p[campo]})
+        if p.get('terceiro'):
+            qs = qs.filter(terceiros=p['terceiro'])
         qs = avisos.da_unidade(qs, p.get('unidade'))
         if p.get('vencidos') == '1':
             qs = qs.filter(aplicabilidade='APLICAVEL', proxima_verificacao__lt=date.today())

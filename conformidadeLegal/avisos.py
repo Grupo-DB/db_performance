@@ -51,7 +51,7 @@ def ler_filtros(params) -> dict:
 def filtrar_requisitos(qs, filtros: dict, prefixo: str = ''):
     """Aplica os filtros a um queryset de Requisito (ou de algo ligado a ele, via `prefixo`)."""
     f = filtros or {}
-    mapa = {'tema': 'tema', 'responsavel': 'responsavel', 'norma': 'norma', 'terceiro': 'terceiro'}
+    mapa = {'tema': 'tema', 'responsavel': 'responsavel', 'norma': 'norma', 'terceiro': 'terceiros'}
     for chave, campo in mapa.items():
         if f.get(chave):
             qs = qs.filter(**{f'{prefixo}{campo}': f[chave]})

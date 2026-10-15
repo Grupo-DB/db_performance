@@ -156,7 +156,8 @@ class Requisito(models.Model):
     trecho_fonte = models.TextField(blank=True, default='')
     pagina_fonte = models.PositiveIntegerField(null=True, blank=True)
     # Prestador ligado à obrigação (ex.: transportador de resíduos para a condicionante da LO).
-    terceiro = models.ForeignKey('Terceiro', null=True, blank=True, on_delete=models.SET_NULL, related_name='requisitos')
+    # Prestadores ligados à obrigação — pode ser mais de um (coleta de resíduo + laboratório, por exemplo).
+    terceiros = models.ManyToManyField('Terceiro', blank=True, related_name='requisitos')
 
     ativo = models.BooleanField(default=True)
     criado_por = models.ForeignKey(

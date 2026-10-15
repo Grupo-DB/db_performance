@@ -976,8 +976,8 @@ class TerceirosTests(APITestCase):
         norma = Norma.objects.create(tipo='LICENCA', orgao='FEPAM', ementa='LO')
         r = self.client.post('/conformidadeLegal/requisitos/', {
             'norma': norma.id, 'descricao': 'Destinar resíduos Classe I só com transportador licenciado',
-            'aplicabilidade': 'APLICAVEL', 'terceiro': t}, format='json')
-        self.assertEqual((r.data['terceiro'], r.data['terceiro_nome']), (t, 'Transportes Pampa Ltda'))
+            'aplicabilidade': 'APLICAVEL', 'terceiros': [t]}, format='json')
+        self.assertEqual((r.data['terceiros'], r.data['terceiros_nomes']), ([t], ['Transportes Pampa Ltda']))
         req = r.data['id']
         # Plano aberto na verificação herda o terceiro do requisito.
         v = self.client.post(f'/conformidadeLegal/requisitos/{req}/verificar/', {
@@ -990,6 +990,30 @@ class TerceirosTests(APITestCase):
         self.assertEqual((terceiro['total_requisitos'], terceiro['planos_abertos']), (1, 1))
         # Com ligação não se exclui: inativa.
         self.assertEqual(self.client.delete(f'{self.url}{t}/').status_code, 400)
+
+    def test_requisito_com_varios_terceiros(self):
+        from .models import Terceiro
+        a = self._terceiro()['id']
+        b = Terceiro.objects.create(razao_social='Laboratório Sul').id
+        norma = Norma.objects.create(tipo='LICENCA', orgao='FEPAM', ementa='LO')
+        r = self.client.post('/conformidadeLegal/requisitos/', {
+            'norma': norma.id, 'descricao': 'Monitorar efluente', 'aplicabilidade': 'APLICAVEL', 'terceiros': [a, b]}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        req = r.data['id']
+        self.assertEqual(sorted(r.data['terceiros_nomes']), ['Laboratório Sul', 'Transportes Pampa Ltda'])
+        # Aparece no filtro de cada um, uma vez só.
+        for t in (a, b):
+            self.assertEqual([x['id'] for x in self.client.get('/conformidadeLegal/requisitos/', {'terceiro': t}).data], [req])
+        self.assertEqual(self.client.get('/conformidadeLegal/requisitos/resumo/', {'terceiro': b}).data['aplicaveis'], 1)
+        # Com dois terceiros, o plano não adivinha qual: fica sem, até alguém escolher.
+        v = self.client.post(f'/conformidadeLegal/requisitos/{req}/verificar/', {
+            'resultado': 'NAO_ATENDIDO', 'data': '2026-10-14', 'plano_descricao': 'Trocar o laboratório'}, format='multipart')
+        self.assertIsNone(v.data['plano']['terceiro'])
+        # Lote troca a lista; lista vazia tira todos.
+        self.client.post('/conformidadeLegal/requisitos/editar-lote/', {'ids': [req], 'campos': {'terceiros': [b]}}, format='json')
+        self.assertEqual(self.client.get(f'/conformidadeLegal/requisitos/{req}/').data['terceiros'], [b])
+        r = self.client.patch(f'/conformidadeLegal/requisitos/{req}/', {'terceiros': []}, format='json')
+        self.assertEqual(r.data['terceiros'], [])
 
     def test_painel_conta_terceiros_e_alertas(self):
         t = self._terceiro()['id']
