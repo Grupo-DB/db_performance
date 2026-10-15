@@ -295,6 +295,8 @@ INLABS = 'https://inlabs.in.gov.br'
 # Cabeçalho exigido no download pelo script oficial da Imprensa Nacional
 # (github.com/Imprensa-Nacional/inlabs).
 INLABS_ORIGEM = {'origem': '736372697074'}
+LOGIN_INLABS_TENTATIVAS = 3
+LOGIN_INLABS_ESPERA = 20    # segundos; a 2ª tentativa espera 20, a 3ª, 40
 
 _NORMATIVOS = {normalizar(t) for t in (
     'Lei', 'Lei Complementar', 'Decreto', 'Medida Provisória', 'Resolução', 'Resolução Conjunta', 'Portaria',
@@ -338,14 +340,26 @@ def _sessao_inlabs(sessao):
     senha = getattr(settings, 'CONFORMIDADE_INLABS_SENHA', '')
     if not email or not senha:
         raise FalhaFonte('INLABS sem credencial: defina CONFORMIDADE_INLABS_EMAIL e CONFORMIDADE_INLABS_SENHA.')
-    try:
-        sessao.post(f'{INLABS}/logar.php', data={'email': email, 'password': senha},
-                    headers={'User-Agent': CABECALHOS['User-Agent']}, timeout=60)
-    except requests.RequestException as e:
-        raise FalhaFonte(f'INLABS fora do ar: {e}'[:300])
-    # Senha errada: não vem o cookie e o site volta para a tela de acesso.
-    if 'inlabs_session_cookie' not in sessao.cookies.get_dict():
-        raise FalhaFonte('Login no INLABS recusado — confira o e-mail e a senha da conta.')
+    # O INLABS oscila (manutenção, firewall do site barrando por um tempo): sem o cookie
+    # nem sempre é senha errada. Tenta de novo antes de registrar a falha, e só culpa a
+    # senha quando o site devolve a tela de acesso.
+    for tentativa in range(LOGIN_INLABS_TENTATIVAS):
+        if tentativa:
+            time.sleep(LOGIN_INLABS_ESPERA * tentativa)
+        try:
+            r = sessao.post(f'{INLABS}/logar.php', data={'email': email, 'password': senha},
+                            headers={'User-Agent': CABECALHOS['User-Agent']}, timeout=60)
+        except requests.RequestException as e:
+            falha = f'INLABS fora do ar: {e}'[:300]
+            continue
+        if 'inlabs_session_cookie' in sessao.cookies.get_dict():
+            return
+        if 'acessar.php' in (getattr(r, 'url', '') or ''):
+            falha = 'Login no INLABS recusado — confira o e-mail e a senha da conta.'
+        else:
+            falha = (f'INLABS não respondeu como esperado ao login (HTTP {getattr(r, "status_code", "?")}) '
+                     '— instabilidade do site; a próxima coleta tenta de novo.')
+    raise FalhaFonte(f'{falha} ({LOGIN_INLABS_TENTATIVAS} tentativas)')
 
 
 def _zips_secao1(sessao, dia: date) -> list[str]:

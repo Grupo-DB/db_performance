@@ -559,15 +559,21 @@ def _xml_dou(id_materia, categoria, tipo, identifica, texto, ementa=''):
 
 
 class _SessaoInlabsFalsa:
-    def __init__(self, zips, login_ok=True):
+    def __init__(self, zips, login_ok=True, falhas_antes=0):
+        # login_ok=False: senha errada (volta para acessar.php). falhas_antes: quantos
+        # logins o site "instável" responde sem cookie (HTTP 503) antes de aceitar.
         import requests
         self.cookies = requests.cookies.RequestsCookieJar()
-        self.zips, self.login_ok, self.pedidos = zips, login_ok, []
+        self.zips, self.login_ok, self.falhas_antes, self.pedidos, self.logins = zips, login_ok, falhas_antes, [], 0
 
     def post(self, url, data=None, headers=None, timeout=None):
-        if self.login_ok:
-            self.cookies.set('inlabs_session_cookie', 'abc')
         from types import SimpleNamespace
+        self.logins += 1
+        if not self.login_ok:
+            return SimpleNamespace(status_code=200, url='https://inlabs.in.gov.br/acessar.php')
+        if self.logins <= self.falhas_antes:
+            return SimpleNamespace(status_code=503, url='https://inlabs.in.gov.br/logar.php')
+        self.cookies.set('inlabs_session_cookie', 'abc')
         return SimpleNamespace(status_code=200, url='https://inlabs.in.gov.br/index.php?p=')
 
     def get(self, url, params=None, headers=None, timeout=None):
@@ -647,6 +653,24 @@ class MonitorDouTests(APITestCase):
         e = monitor.coletar_dou(date(2026, 10, 14), sessao=self._sessao(login_ok=False))
         self.assertFalse(e.ok)
         self.assertIn('confira o e-mail e a senha', e.erro)
+
+    def test_login_instavel_tenta_de_novo(self):
+        from datetime import date
+        from . import monitor
+        sessao = self._sessao(falhas_antes=2)
+        e = monitor.coletar_dou(date(2026, 10, 14), sessao=sessao)
+        self.assertTrue(e.ok, e.erro)
+        self.assertEqual(sessao.logins, 3)
+
+    def test_site_fora_nao_culpa_a_senha(self):
+        from datetime import date
+        from . import monitor
+        sessao = self._sessao(falhas_antes=99)
+        e = monitor.coletar_dou(date(2026, 10, 14), sessao=sessao)
+        self.assertFalse(e.ok)
+        self.assertNotIn('senha', e.erro)
+        self.assertIn('HTTP 503', e.erro)
+        self.assertEqual(sessao.logins, monitor.LOGIN_INLABS_TENTATIVAS)
 
     @override_settings(CONFORMIDADE_INLABS_SENHA='')
     def test_sem_credencial(self):
