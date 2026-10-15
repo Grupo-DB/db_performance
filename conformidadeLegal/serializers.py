@@ -3,7 +3,7 @@ from rest_framework import serializers
 
 from .models import (
     ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor, PlanoAcao,
-    PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao,
+    PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao, ConfiguracaoAvisos,
 )
 
 
@@ -311,3 +311,30 @@ def cnpj_valido(d: str) -> bool:
         if int(d[tamanho]) != digito:
             return False
     return True
+
+
+class ConfiguracaoAvisosSerializer(serializers.ModelSerializer):
+    atualizado_por_nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ConfiguracaoAvisos
+        fields = ['dias_verificacao', 'dias_plano', 'dias_licenca', 'dias_documento', 'email_ativo', 'email_responsaveis',
+                  'email_destinatarios', 'email_frequencia', 'email_dia_semana', 'ultimo_envio', 'ultimo_envio_resumo',
+                  'atualizado_por_nome', 'atualizado_em']
+        read_only_fields = ['ultimo_envio', 'ultimo_envio_resumo', 'atualizado_em']
+        extra_kwargs = {f: {'min_value': 1, 'max_value': 730}
+                        for f in ('dias_verificacao', 'dias_plano', 'dias_licenca', 'dias_documento')}
+
+    def get_atualizado_por_nome(self, obj):
+        return nome_usuario(obj.atualizado_por)
+
+    def validate_email_destinatarios(self, valor):
+        from django.core.validators import validate_email
+        from django.core.exceptions import ValidationError as ErroDjango
+        lista = ConfiguracaoAvisos(email_destinatarios=valor or '').lista_destinatarios()
+        for e in lista:
+            try:
+                validate_email(e)
+            except ErroDjango:
+                raise serializers.ValidationError(f'E-mail inválido: {e}')
+        return '\n'.join(lista)

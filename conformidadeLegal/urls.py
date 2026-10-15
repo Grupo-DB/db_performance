@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ConfiguracaoMonitorView, ExecucoesMonitorView, NormaViewSet, OrgaoMonitorViewSet, PalavraChaveViewSet,
     PlanoAcaoViewSet, PublicacaoViewSet, RequisitoViewSet, ResponsaveisView, TestarPalavrasView, VerificacaoViewSet,
-    TerceiroViewSet, DocumentoTerceiroViewSet,
+    TerceiroViewSet, DocumentoTerceiroViewSet, AvisosView, AvisosTesteView, AvisosDestinatariosView,
 )
 
 router = DefaultRouter()
@@ -19,6 +19,9 @@ router.register(r'monitor/palavras', PalavraChaveViewSet, basename='conformidade
 router.register(r'monitor/orgaos', OrgaoMonitorViewSet, basename='conformidade-monitor-orgao')
 
 urlpatterns = [
+    path('avisos/', AvisosView.as_view(), name='conformidade-avisos'),
+    path('avisos/testar/', AvisosTesteView.as_view(), name='conformidade-avisos-testar'),
+    path('avisos/destinatarios/', AvisosDestinatariosView.as_view(), name='conformidade-avisos-destinatarios'),
     path('responsaveis/', ResponsaveisView.as_view(), name='conformidade-responsaveis'),
     path('monitor/configuracao/', ConfiguracaoMonitorView.as_view(), name='conformidade-monitor-configuracao'),
     path('monitor/execucoes/', ExecucoesMonitorView.as_view(), name='conformidade-monitor-execucoes'),

@@ -76,3 +76,10 @@ def triar_publicacoes(limite: int = 40):
         pub.relevancia, pub.analise, pub.tema_sugerido = r['relevancia'], r['motivo'], r['tema']
         pub.analisada_em = timezone.now()
         pub.save(update_fields=['relevancia', 'analise', 'tema_sugerido', 'analisada_em'])
+
+
+@shared_task
+def enviar_avisos():
+    """E-mail de avisos da conformidade (CELERY_BEAT_SCHEDULE, dias úteis de manhã). Frequência na tela."""
+    from . import avisos
+    return avisos.enviar_avisos()

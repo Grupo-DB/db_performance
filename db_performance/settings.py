@@ -331,6 +331,12 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'conformidadeLegal.tasks.monitorar_diarios',
         'schedule': crontab(hour='10,16', minute=30),
     },
+    # Conformidade Legal: e-mail de avisos — 07:15 de Brasília, dias úteis. Se é todo dia ou
+    # semanal, e para quem, fica na tela (Painel → Avisos e e-mails).
+    'conformidade-enviar-avisos': {
+        'task': 'conformidadeLegal.tasks.enviar_avisos',
+        'schedule': crontab(hour=10, minute=15, day_of_week='mon-fri'),
+    },
 }
 
 CSRF_TRUSTED_ORIGINS = ["https://managerdb.com.br"]

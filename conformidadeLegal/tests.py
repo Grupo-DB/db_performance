@@ -968,3 +968,107 @@ class TerceirosTests(APITestCase):
         r = self.client.post(self.docs, {'terceiro': t, 'tipo': 'PPCI', 'emissao': '2026-05-01', 'validade': '2026-04-01'},
                              format='multipart')
         self.assertIn('validade', r.data)
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class AvisosTests(APITestCase):
+    def setUp(self):
+        from datetime import date, timedelta
+        from .models import PlanoAcao, Requisito
+        self.hoje = date.today()
+        self.user = User.objects.create_user('sgi', password='x', email='sgi@grupodb.com.br', first_name='Ana', last_name='Souza')
+        self.user.groups.add(Group.objects.create(name='ConformidadeLegal'))
+        self.outro = User.objects.create_user('carlos', password='x', email='carlos@grupodb.com.br', first_name='Carlos')
+        self.client.force_authenticate(self.user)
+        self.norma = Norma.objects.create(tipo='LICENCA', orgao='FEPAM', numero='1', ementa='LO', tema='AMBIENTAL',
+                                          validade=self.hoje + timedelta(days=100))
+        nr = Norma.objects.create(tipo='NR', orgao='MTE', numero='22', ementa='NR-22', tema='SST')
+        R = lambda **kw: Requisito.objects.create(aplicabilidade='APLICAVEL', descricao='x', **kw)
+        self.r1 = R(norma=self.norma, tema='AMBIENTAL', responsavel=self.user, unidade='Fábrica',
+                    proxima_verificacao=self.hoje - timedelta(days=2))
+        self.r2 = R(norma=nr, tema='SST', responsavel=self.outro, unidade='Mina',
+                    proxima_verificacao=self.hoje + timedelta(days=20))
+        R(norma=nr, tema='SST', proxima_verificacao=self.hoje + timedelta(days=200))
+        PlanoAcao.objects.create(requisito=self.r2, descricao='Treinar', responsavel=self.outro, prazo=self.hoje + timedelta(days=3))
+
+    def test_resumo_filtra_e_usa_os_prazos(self):
+        url = '/conformidadeLegal/requisitos/resumo/'
+        r = self.client.get(url).data
+        self.assertEqual((r['aplicaveis'], r['verificacoes_vencidas'], r['verificacoes_a_vencer']), (3, 1, 1))
+        self.assertEqual(r['unidades'], ['Fábrica', 'Mina'])
+        self.assertEqual(len(r['validades']), 1)  # LO vence em 100 dias, dentro dos 180
+        r = self.client.get(url, {'tema': 'SST'}).data
+        self.assertEqual((r['aplicaveis'], r['verificacoes_vencidas'], r['planos_abertos'], len(r['validades'])), (2, 0, 1, 0))
+        r = self.client.get(url, {'unidade': 'fábrica'}).data
+        self.assertEqual(r['aplicaveis'], 1)
+        r = self.client.get(url, {'responsavel': self.outro.id}).data
+        self.assertEqual((r['aplicaveis'], r['planos_abertos'], len(r['planos_proximos'])), (1, 1, 1))
+        # Prazo de aviso menor: a verificação de 20 dias e a LO de 100 dias saem da lista.
+        self.assertEqual(self.client.patch('/conformidadeLegal/avisos/', {'dias_verificacao': 10, 'dias_licenca': 90},
+                                           format='json').status_code, 200)
+        r = self.client.get(url).data
+        self.assertEqual((r['verificacoes_a_vencer'], len(r['validades']), r['prazos']['verificacao']), (0, 0, 10))
+
+    def test_configuracao_valida_emails_e_prazos(self):
+        r = self.client.patch('/conformidadeLegal/avisos/', {'email_destinatarios': 'sgi@grupodb.com.br; nao-e-email'}, format='json')
+        self.assertIn('email_destinatarios', r.data)
+        r = self.client.patch('/conformidadeLegal/avisos/', {'dias_plano': 0}, format='json')
+        self.assertIn('dias_plano', r.data)
+        r = self.client.patch('/conformidadeLegal/avisos/', {'email_destinatarios': 'a@b.com, c@d.com'}, format='json')
+        self.assertEqual(r.data['email_destinatarios'], 'a@b.com\nc@d.com')
+
+    def test_email_completo_para_equipe_e_so_o_seu_para_cada_responsavel(self):
+        from django.core import mail
+        from . import avisos
+        from .models import ConfiguracaoAvisos
+        cfg = ConfiguracaoAvisos.atual()
+        cfg.email_ativo, cfg.email_destinatarios, cfg.email_frequencia = True, 'meio.ambiente@grupodb.com.br', 'DIARIA'
+        cfg.save()
+        r = avisos.enviar_avisos(forcar=True)
+        self.assertEqual(r['enviados'], 3)
+        para = {m.to[0]: m for m in mail.outbox}
+        self.assertEqual(set(para), {'meio.ambiente@grupodb.com.br', 'sgi@grupodb.com.br', 'carlos@grupodb.com.br'})
+        self.assertIn('LO', para['meio.ambiente@grupodb.com.br'].body)          # licença só no completo
+        self.assertNotIn('Licenças', para['carlos@grupodb.com.br'].body)
+        self.assertIn('Treinar', para['carlos@grupodb.com.br'].body)
+        self.assertNotIn('Treinar', para['sgi@grupodb.com.br'].body)            # o plano é do Carlos
+        self.assertIn('2 item(ns)', para['carlos@grupodb.com.br'].subject)
+        # Mesmo dia: não manda de novo.
+        self.assertTrue(avisos.enviar_avisos().get('pulado'))
+        self.assertEqual(len(mail.outbox), 3)
+
+    def test_frequencia_semanal_e_fim_de_semana(self):
+        from datetime import datetime
+        from django.utils import timezone as tz
+        from . import avisos
+        from .models import ConfiguracaoAvisos
+        cfg = ConfiguracaoAvisos(email_frequencia='SEMANAL', email_dia_semana=2)
+        quarta = tz.make_aware(datetime(2026, 10, 14, 8, 0))
+        self.assertTrue(avisos.dia_de_enviar(cfg, quarta))
+        self.assertFalse(avisos.dia_de_enviar(cfg, tz.make_aware(datetime(2026, 10, 15, 8, 0))))
+        cfg.email_frequencia = 'DIARIA'
+        self.assertFalse(avisos.dia_de_enviar(cfg, tz.make_aware(datetime(2026, 10, 17, 8, 0))))  # sábado
+
+    def test_desligado_nao_envia_e_teste_manda_para_mim(self):
+        from django.core import mail
+        from . import avisos
+        self.assertTrue(avisos.enviar_avisos().get('pulado'))
+        r = self.client.post('/conformidadeLegal/avisos/testar/', {}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual([m.to for m in mail.outbox], [['sgi@grupodb.com.br']])
+        prev = self.client.get('/conformidadeLegal/avisos/destinatarios/').data
+        self.assertEqual({d['email']: d['itens'] for d in prev['destinatarios']},
+                         {'sgi@grupodb.com.br': 1, 'carlos@grupodb.com.br': 2})
+
+    def test_prazo_do_documento_de_terceiro_e_configuravel(self):
+        from datetime import timedelta
+        from .models import ConfiguracaoAvisos, DocumentoTerceiro, Terceiro, limpar_cache_avisos
+        t = Terceiro.objects.create(razao_social='X')
+        d = DocumentoTerceiro.objects.create(terceiro=t, tipo='PPCI', validade=self.hoje + timedelta(days=45),
+                                             arquivo=SimpleUploadedFile('a.pdf', b'%PDF'))
+        self.assertEqual(d.situacao, 'EM_DIA')
+        cfg = ConfiguracaoAvisos.atual()
+        cfg.dias_documento = 60
+        cfg.save()
+        limpar_cache_avisos()
+        self.assertEqual(d.situacao, 'A_VENCER')

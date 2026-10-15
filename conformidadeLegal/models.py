@@ -468,8 +468,68 @@ class ConfiguracaoMonitor(models.Model):
         return obj
 
 
+class ConfiguracaoAvisos(models.Model):
+    """
+    Registro único (pk=1): com quanta antecedência cada coisa entra em "atenção"
+    no painel e nos e-mails, e quem recebe o e-mail de avisos.
+    """
+
+    FREQUENCIAS = [('DIARIA', 'Todo dia útil'), ('SEMANAL', 'Uma vez por semana')]
+    DIAS_SEMANA = [(0, 'Segunda'), (1, 'Terça'), (2, 'Quarta'), (3, 'Quinta'), (4, 'Sexta')]
+
+    dias_verificacao = models.PositiveSmallIntegerField(default=30, help_text='Verificação de requisito a vencer.')
+    dias_plano = models.PositiveSmallIntegerField(default=7, help_text='Prazo de plano de ação.')
+    dias_licenca = models.PositiveSmallIntegerField(default=180, help_text='Validade de licença, outorga ou TAC.')
+    dias_documento = models.PositiveSmallIntegerField(default=30, help_text='Validade de documento de terceiro.')
+
+    email_ativo = models.BooleanField(default=False)
+    # Cada responsável recebe só o que é dele (requisitos e planos).
+    email_responsaveis = models.BooleanField(default=True)
+    # Recebem o resumo completo (inclui licenças e terceiros). Um e-mail por linha.
+    email_destinatarios = models.TextField(blank=True, default='')
+    email_frequencia = models.CharField(max_length=8, choices=FREQUENCIAS, default='SEMANAL')
+    email_dia_semana = models.PositiveSmallIntegerField(choices=DIAS_SEMANA, default=0)
+    ultimo_envio = models.DateTimeField(null=True, blank=True)
+    ultimo_envio_resumo = models.CharField(max_length=255, blank=True, default='')
+
+    atualizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
+    )
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Configuração de avisos'
+        verbose_name_plural = 'Configuração de avisos'
+
+    @classmethod
+    def atual(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def lista_destinatarios(self) -> list[str]:
+        return [e.strip() for e in self.email_destinatarios.replace(',', '\n').replace(';', '\n').split('\n') if e.strip()]
+
+
+_CACHE_AVISOS = {'em': 0.0, 'cfg': None}
+
+
+def configuracao_avisos():
+    """ConfiguracaoAvisos com cache de 60 s (a situação dos documentos é lida em lista)."""
+    import time
+    agora = time.monotonic()
+    if _CACHE_AVISOS['cfg'] is None or agora - _CACHE_AVISOS['em'] > 60:
+        _CACHE_AVISOS['cfg'] = ConfiguracaoAvisos.objects.filter(pk=1).first() or ConfiguracaoAvisos()
+        _CACHE_AVISOS['em'] = agora
+    return _CACHE_AVISOS['cfg']
+
+
+def limpar_cache_avisos():
+    _CACHE_AVISOS['cfg'] = None
+
+
 # ── Terceiros: prestadores de serviço e seus documentos ──────────────────
-DIAS_AVISO_DOCUMENTO = 30
+def dias_aviso_documento() -> int:
+    return configuracao_avisos().dias_documento
 
 
 class Terceiro(models.Model):
@@ -591,7 +651,7 @@ class DocumentoTerceiro(models.Model):
 
     @property
     def situacao(self) -> str:
-        """PENDENTE (sem arquivo), VENCIDO, A_VENCER (até 30 dias), EM_DIA ou SEM_VALIDADE."""
+        """PENDENTE (sem arquivo), VENCIDO, A_VENCER (prazo de aviso configurável), EM_DIA ou SEM_VALIDADE."""
         if not self.arquivo:
             return 'PENDENTE'
         dias = self.dias_para_vencer
@@ -599,6 +659,6 @@ class DocumentoTerceiro(models.Model):
             return 'SEM_VALIDADE'
         if dias < 0:
             return 'VENCIDO'
-        if dias <= DIAS_AVISO_DOCUMENTO:
+        if dias <= dias_aviso_documento():
             return 'A_VENCER'
         return 'EM_DIA'

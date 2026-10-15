@@ -14,15 +14,15 @@ from rest_framework.views import APIView
 
 from kanban.models import KanbanColumn, KanbanTask
 
-from . import ia, normas_tecnicas
+from . import avisos, ia, normas_tecnicas
 from .models import (
     TEMAS, ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor,
-    PlanoAcao, PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao,
+    PlanoAcao, PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao, ConfiguracaoAvisos,
 )
 from .permissions import IsConformidade
 from .serializers import nome_usuario
 from .serializers import (
-    TerceiroSerializer, DocumentoTerceiroSerializer,
+    TerceiroSerializer, DocumentoTerceiroSerializer, ConfiguracaoAvisosSerializer,
     ConfiguracaoMonitorSerializer, ExecucaoMonitorSerializer, ExtracaoIASerializer, NormaSerializer,
     OrgaoMonitorSerializer, PalavraChaveSerializer, PlanoAcaoSerializer, PublicacaoDetalheSerializer,
     PublicacaoSerializer, RequisitoSerializer, VerificacaoSerializer,
@@ -316,9 +316,15 @@ class RequisitoViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def resumo(self, request):
-        """Números do painel. Só requisitos ativos; situação conta só os aplicáveis."""
+        """
+        Números do painel. Só requisitos ativos; situação conta só os aplicáveis.
+        Filtros opcionais: tema, responsavel, unidade, norma, terceiro. A antecedência
+        de cada lista vem da configuração de avisos.
+        """
         hoje = date.today()
-        ativos = Requisito.objects.filter(ativo=True)
+        filtros = avisos.ler_filtros(request.query_params)
+        cfg = ConfiguracaoAvisos.atual()
+        ativos = avisos.filtrar_requisitos(Requisito.objects.filter(ativo=True), filtros)
         aplicaveis = ativos.filter(aplicabilidade='APLICAVEL')
 
         por_situacao = dict(aplicaveis.values_list('situacao').annotate(n=Count('id')))
@@ -335,19 +341,16 @@ class RequisitoViewSet(viewsets.ModelViewSet):
             linha['rotulo'] = rotulos_tema.get(linha['tema'], linha['tema'])
             por_tema.append(linha)
 
-        planos = PlanoAcao.objects.filter(PLANO_ABERTO)
-
-        validades = (Norma.objects
-                     .filter(tipo__in=TIPOS_COM_VALIDADE, validade__isnull=False,
-                             validade__lte=hoje + timedelta(days=180))
-                     .exclude(situacao='REVOGADA')
-                     .order_by('validade'))
-
-        proximas = (aplicaveis.filter(proxima_verificacao__isnull=False,
-                                      proxima_verificacao__lte=hoje + timedelta(days=30))
-                    .select_related('norma', 'responsavel__colaborador').order_by('proxima_verificacao')[:12])
+        planos = avisos.planos_abertos(filtros)
+        pend = avisos.pendencias(filtros, hoje)
+        terceiros = _resumo_terceiros(hoje)
+        if filtros.get('terceiro'):
+            terceiros['alertas'] = [a for a in terceiros['alertas'] if str(a['terceiro']) == str(filtros['terceiro'])]
 
         return Response({
+            'filtros': filtros,
+            'prazos': {'verificacao': cfg.dias_verificacao, 'plano': cfg.dias_plano,
+                       'licenca': cfg.dias_licenca, 'documento': cfg.dias_documento},
             'total': ativos.count(),
             'aplicaveis': aplicaveis.count(),
             'em_analise': ativos.filter(aplicabilidade='EM_ANALISE').count(),
@@ -358,18 +361,24 @@ class RequisitoViewSet(viewsets.ModelViewSet):
                 100 * (por_situacao.get('ATENDIDO', 0) + 0.5 * por_situacao.get('PARCIAL', 0)) / avaliados, 1
             ) if avaliados else None,
             'verificacoes_vencidas': aplicaveis.filter(proxima_verificacao__lt=hoje).count(),
+            'verificacoes_a_vencer': aplicaveis.filter(proxima_verificacao__gte=hoje,
+                                                       proxima_verificacao__lte=hoje + timedelta(days=cfg.dias_verificacao)).count(),
+            # Nome antigo, mantido para telas ainda não publicadas.
             'verificacoes_30_dias': aplicaveis.filter(proxima_verificacao__gte=hoje,
-                                                      proxima_verificacao__lte=hoje + timedelta(days=30)).count(),
+                                                      proxima_verificacao__lte=hoje + timedelta(days=cfg.dias_verificacao)).count(),
             'planos_abertos': planos.count(),
             'planos_atrasados': planos.filter(prazo__lt=hoje).count(),
             'por_tema': por_tema,
             'validades': [
                 {'id': n.id, 'identificacao': n.identificacao, 'ementa': n.ementa, 'validade': n.validade,
                  'dias': (n.validade - hoje).days}
-                for n in validades
+                for n in pend['licencas']
             ],
-            'proximas': RequisitoSerializer(proximas, many=True, context={'request': request}).data,
-            'terceiros': _resumo_terceiros(hoje),
+            'proximas': RequisitoSerializer(pend['verificacoes'][:15], many=True, context={'request': request}).data,
+            'planos_proximos': PlanoAcaoSerializer(pend['planos'][:15], many=True, context={'request': request}).data,
+            'terceiros': terceiros,
+            'unidades': sorted({u for u in Requisito.objects.filter(ativo=True).exclude(unidade='')
+                                .values_list('unidade', flat=True)}, key=str.lower),
         })
 
     @action(detail=True, methods=['post'])
@@ -895,3 +904,53 @@ class DocumentoTerceiroViewSet(viewsets.ModelViewSet):
             antigo.substituido_em = timezone.now()
             antigo.save(update_fields=['substituido_em'])
         return Response(self.get_serializer(novo).data, status=status.HTTP_201_CREATED)
+
+
+
+class AvisosView(APIView):
+    """Configuração dos avisos: prazos de antecedência e e-mail (GET / PATCH)."""
+    permission_classes = [IsConformidade]
+
+    def get(self, request):
+        return Response(ConfiguracaoAvisosSerializer(ConfiguracaoAvisos.atual()).data)
+
+    def patch(self, request):
+        cfg = ConfiguracaoAvisos.atual()
+        s = ConfiguracaoAvisosSerializer(cfg, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save(atualizado_por=request.user)
+        from .models import limpar_cache_avisos
+        limpar_cache_avisos()
+        return self.get(request)
+
+
+class AvisosTesteView(APIView):
+    """Manda agora o resumo completo para um endereço (o do usuário, se não vier ``email``)."""
+    permission_classes = [IsConformidade]
+
+    def post(self, request):
+        email = (request.data.get('email') or request.user.email or '').strip()
+        if not email:
+            raise ValidationError({'email': 'Seu usuário não tem e-mail cadastrado. Informe um endereço.'})
+        try:
+            r = avisos.enviar_avisos(so_para=email)
+        except Exception as e:  # noqa: BLE001 — SMTP fora do ar vira mensagem na tela
+            logger.warning('Teste de avisos para %s falhou: %s', email, e)
+            return Response({'detail': f'O servidor de e-mail recusou o envio: {e}'[:300]},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        if r['sem_pendencias']:
+            return Response({'detail': 'Nada pede atenção agora — o e-mail só sai quando há pendências.', 'email': email})
+        return Response({'detail': f'E-mail de teste enviado para {email}.', 'email': email})
+
+
+class AvisosDestinatariosView(APIView):
+    """Prévia: quem receberia o e-mail hoje e quantos itens cada um."""
+    permission_classes = [IsConformidade]
+
+    def get(self, request):
+        cfg = ConfiguracaoAvisos.atual()
+        lista = []
+        for email, nome, filtros, completo in avisos.destinatarios(cfg):
+            msg = avisos.montar_email(avisos.pendencias(filtros), nome, completo)
+            lista.append({'email': email, 'nome': nome, 'completo': completo, 'itens': msg[2] if msg else 0})
+        return Response({'dia_de_enviar': avisos.dia_de_enviar(cfg), 'destinatarios': lista})
