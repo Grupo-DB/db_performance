@@ -60,6 +60,7 @@ class Norma(models.Model):
     # Só faz sentido em licença/outorga/TAC: o fim da validade é ele próprio
     # um requisito (renovar com antecedência), e aparece no painel.
     validade = models.DateField(null=True, blank=True)
+    dias_aviso = models.PositiveSmallIntegerField(null=True, blank=True, help_text='Antecedência do aviso só para este item; vazio = a da configuração geral.')
     situacao = models.CharField(max_length=10, choices=SITUACOES, default='VIGENTE')
     arquivo = models.FileField(upload_to='conformidade/normas/%Y/', blank=True, null=True)
     observacao = models.TextField(blank=True, default='')
@@ -122,6 +123,7 @@ class Requisito(models.Model):
     periodicidade_meses = models.PositiveSmallIntegerField(default=12)
     # Prazo legal fixo, quando a norma dá uma data (ex.: entregar relatório até 31/03).
     prazo_legal = models.DateField(null=True, blank=True)
+    dias_aviso = models.PositiveSmallIntegerField(null=True, blank=True, help_text='Antecedência do aviso só para este item; vazio = a da configuração geral.')
 
     # Estado derivado da última verificação — gravado para filtrar e contar sem
     # subconsulta. Só `Verificacao.aplicar_no_requisito` escreve aqui.
@@ -231,6 +233,7 @@ class PlanoAcao(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='planos_acao_legais'
     )
     prazo = models.DateField(null=True, blank=True)
+    dias_aviso = models.PositiveSmallIntegerField(null=True, blank=True, help_text='Antecedência do aviso só para este item; vazio = a da configuração geral.')
     # Quem executa o plano, quando é um prestador de serviço.
     terceiro = models.ForeignKey('Terceiro', null=True, blank=True, on_delete=models.SET_NULL, related_name='planos')
     tarefa = models.ForeignKey(
@@ -628,6 +631,7 @@ class DocumentoTerceiro(models.Model):
     numero = models.CharField(max_length=80, blank=True, default='')
     emissao = models.DateField(null=True, blank=True)
     validade = models.DateField(null=True, blank=True, help_text='Vazio = sem vencimento.')
+    dias_aviso = models.PositiveSmallIntegerField(null=True, blank=True, help_text='Antecedência do aviso só para este item; vazio = a da configuração geral.')
     arquivo = models.FileField(upload_to='conformidade/terceiros/%Y/', blank=True, null=True)
     # Exigido do terceiro: sem arquivo ou vencido, o terceiro fica irregular.
     obrigatorio = models.BooleanField(default=True)
@@ -659,6 +663,6 @@ class DocumentoTerceiro(models.Model):
             return 'SEM_VALIDADE'
         if dias < 0:
             return 'VENCIDO'
-        if dias <= dias_aviso_documento():
+        if dias <= (self.dias_aviso or dias_aviso_documento()):
             return 'A_VENCER'
         return 'EM_DIA'

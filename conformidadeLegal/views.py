@@ -212,7 +212,8 @@ def _preencher_nbrs_pela_regex(extracao):
 
 LIMITE_LOTE = 500
 # O que a edição em lote pode mudar. Norma, descrição e referência são de cada requisito.
-CAMPOS_LOTE = ('aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'periodicidade_meses', 'tema', 'ativo', 'terceiro')
+CAMPOS_LOTE = ('aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'periodicidade_meses', 'tema', 'ativo', 'terceiro',
+               'dias_aviso')
 
 
 def _validar_vcl(d):
@@ -343,6 +344,7 @@ class RequisitoViewSet(viewsets.ModelViewSet):
 
         planos = avisos.planos_abertos(filtros)
         pend = avisos.pendencias(filtros, hoje)
+        a_vencer = sum(1 for r in pend['verificacoes'] if r.proxima_verificacao >= hoje)
         terceiros = _resumo_terceiros(hoje)
         if filtros.get('terceiro'):
             terceiros['alertas'] = [a for a in terceiros['alertas'] if str(a['terceiro']) == str(filtros['terceiro'])]
@@ -361,11 +363,10 @@ class RequisitoViewSet(viewsets.ModelViewSet):
                 100 * (por_situacao.get('ATENDIDO', 0) + 0.5 * por_situacao.get('PARCIAL', 0)) / avaliados, 1
             ) if avaliados else None,
             'verificacoes_vencidas': aplicaveis.filter(proxima_verificacao__lt=hoje).count(),
-            'verificacoes_a_vencer': aplicaveis.filter(proxima_verificacao__gte=hoje,
-                                                       proxima_verificacao__lte=hoje + timedelta(days=cfg.dias_verificacao)).count(),
+            # Dentro da antecedência de cada requisito (a dele ou a geral), ainda não vencidas.
+            'verificacoes_a_vencer': a_vencer,
             # Nome antigo, mantido para telas ainda não publicadas.
-            'verificacoes_30_dias': aplicaveis.filter(proxima_verificacao__gte=hoje,
-                                                      proxima_verificacao__lte=hoje + timedelta(days=cfg.dias_verificacao)).count(),
+            'verificacoes_30_dias': a_vencer,
             'planos_abertos': planos.count(),
             'planos_atrasados': planos.filter(prazo__lt=hoje).count(),
             'por_tema': por_tema,
@@ -892,7 +893,7 @@ class DocumentoTerceiroViewSet(viewsets.ModelViewSet):
         if not request.data.get('arquivo'):
             raise ValidationError({'arquivo': 'Anexe o documento renovado.'})
         dados = {
-            'terceiro': antigo.terceiro_id, 'tipo': antigo.tipo, 'obrigatorio': antigo.obrigatorio,
+            'terceiro': antigo.terceiro_id, 'tipo': antigo.tipo, 'obrigatorio': antigo.obrigatorio, 'dias_aviso': antigo.dias_aviso,
             'descricao': request.data.get('descricao', antigo.descricao), 'orgao': request.data.get('orgao', antigo.orgao),
             'numero': request.data.get('numero', antigo.numero), 'emissao': request.data.get('emissao') or None,
             'validade': request.data.get('validade') or None, 'arquivo': request.data.get('arquivo'),

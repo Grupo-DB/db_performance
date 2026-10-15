@@ -15,7 +15,7 @@ from html import escape
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from .models import ConfiguracaoAvisos, DocumentoTerceiro, Norma, PlanoAcao, Requisito, Terceiro
@@ -62,24 +62,33 @@ def planos_abertos(filtros=None):
     return filtrar_requisitos(qs, f, prefixo='requisito__')
 
 
+def dentro_do_aviso(qs, campo: str, padrao: int, hoje: date) -> list:
+    """
+    Itens cujo `campo` (data) cai dentro da antecedência de aviso — a do próprio item
+    (`dias_aviso`) ou, vazia, a `padrao` da configuração. Vencidos sempre entram.
+    """
+    maior = max(padrao, qs.aggregate(m=Max('dias_aviso'))['m'] or 0)
+    candidatos = qs.filter(**{f'{campo}__isnull': False, f'{campo}__lte': hoje + timedelta(days=maior)})
+    return [o for o in candidatos if (getattr(o, campo) - hoje).days <= (o.dias_aviso or padrao)]
+
+
 def pendencias(filtros=None, hoje=None) -> dict:
     """Listas do que pede atenção, já ordenadas — mesma regra no painel e no e-mail."""
     cfg = ConfiguracaoAvisos.atual()
     hoje = hoje or date.today()
     filtros = filtros or {}
     aplic = requisitos_aplicaveis(filtros)
-    verificacoes = list(aplic.filter(proxima_verificacao__isnull=False,
-                                     proxima_verificacao__lte=hoje + timedelta(days=cfg.dias_verificacao))
-                        .select_related('norma', 'responsavel__colaborador').order_by('proxima_verificacao'))
-    planos = list(planos_abertos(filtros).filter(prazo__isnull=False, prazo__lte=hoje + timedelta(days=cfg.dias_plano))
-                  .select_related('requisito__norma', 'responsavel__colaborador', 'terceiro').order_by('prazo'))
+    verificacoes = dentro_do_aviso(aplic.select_related('norma', 'responsavel__colaborador').order_by('proxima_verificacao'),
+                                   'proxima_verificacao', cfg.dias_verificacao, hoje)
+    planos = dentro_do_aviso(planos_abertos(filtros).select_related('requisito__norma', 'responsavel__colaborador', 'terceiro')
+                             .order_by('prazo'), 'prazo', cfg.dias_plano, hoje)
 
-    licencas = Norma.objects.filter(tipo__in=TIPOS_COM_VALIDADE, validade__isnull=False,
-                                    validade__lte=hoje + timedelta(days=cfg.dias_licenca)).exclude(situacao='REVOGADA')
+    licencas = Norma.objects.filter(tipo__in=TIPOS_COM_VALIDADE).exclude(situacao='REVOGADA')
     if filtros.get('norma'):
         licencas = licencas.filter(pk=filtros['norma'])
     if filtros.get('tema'):
         licencas = licencas.filter(tema=filtros['tema'])
+    licencas = dentro_do_aviso(licencas.order_by('validade'), 'validade', cfg.dias_licenca, hoje)
 
     documentos = []
     if not (filtros.get('responsavel') or filtros.get('norma') or filtros.get('tema') or filtros.get('unidade')):
@@ -94,7 +103,7 @@ def pendencias(filtros=None, hoje=None) -> dict:
         documentos.sort(key=lambda d: (ordem[d.situacao], d.dias_para_vencer if d.dias_para_vencer is not None else 0))
 
     return {'config': cfg, 'hoje': hoje, 'verificacoes': verificacoes, 'planos': planos,
-            'licencas': list(licencas.order_by('validade')), 'documentos': documentos}
+            'licencas': licencas, 'documentos': documentos}
 
 
 # ── E-mail ────────────────────────────────────────────────────────────────

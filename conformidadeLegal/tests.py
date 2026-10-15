@@ -1072,3 +1072,43 @@ class AvisosTests(APITestCase):
         cfg.save()
         limpar_cache_avisos()
         self.assertEqual(d.situacao, 'A_VENCER')
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class AntecedenciaPorItemTests(APITestCase):
+    def setUp(self):
+        from datetime import date
+        self.hoje = date.today()
+        self.user = User.objects.create_user('sgi', password='x')
+        self.user.groups.add(Group.objects.create(name='ConformidadeLegal'))
+        self.client.force_authenticate(self.user)
+
+    def test_item_com_antecedencia_propria_entra_antes(self):
+        from datetime import timedelta
+        from . import avisos
+        from .models import DocumentoTerceiro, Requisito, Terceiro
+        lo = Norma.objects.create(tipo='LICENCA', ementa='LO', validade=self.hoje + timedelta(days=200))
+        outra = Norma.objects.create(tipo='OUTORGA', ementa='Outorga', validade=self.hoje + timedelta(days=200), dias_aviso=240)
+        r_pad = Requisito.objects.create(norma=lo, descricao='a', aplicabilidade='APLICAVEL',
+                                         proxima_verificacao=self.hoje + timedelta(days=45))
+        r_prop = Requisito.objects.create(norma=lo, descricao='b', aplicabilidade='APLICAVEL', dias_aviso=60,
+                                          proxima_verificacao=self.hoje + timedelta(days=45))
+        p = avisos.pendencias()
+        self.assertEqual([n.id for n in p['licencas']], [outra.id])          # 200 dias: só a de 240 de aviso
+        self.assertEqual([r.id for r in p['verificacoes']], [r_prop.id])     # 45 dias: só a de 60 de aviso
+        r = self.client.get('/conformidadeLegal/requisitos/resumo/').data
+        self.assertEqual((r['verificacoes_a_vencer'], len(r['validades'])), (1, 1))
+        # Documento de terceiro: 45 dias, padrão 30 = em dia; com 60 próprios = a vencer.
+        t = Terceiro.objects.create(razao_social='X')
+        d = DocumentoTerceiro.objects.create(terceiro=t, tipo='PPCI', validade=self.hoje + timedelta(days=45),
+                                             arquivo=SimpleUploadedFile('a.pdf', b'%PDF'))
+        self.assertEqual(d.situacao, 'EM_DIA')
+        d.dias_aviso = 60
+        self.assertEqual(d.situacao, 'A_VENCER')
+        self.assertFalse(r_pad.id in [x.id for x in p['verificacoes']])
+
+    def test_campo_vai_pela_api(self):
+        n = self.client.post('/conformidadeLegal/normas/', {'ementa': 'LO', 'tipo': 'LICENCA', 'dias_aviso': 150}, format='json')
+        self.assertEqual(n.data['dias_aviso'], 150)
+        r = self.client.post('/conformidadeLegal/requisitos/', {'norma': n.data['id'], 'descricao': 'x', 'dias_aviso': 15}, format='json')
+        self.assertEqual(r.data['dias_aviso'], 15)

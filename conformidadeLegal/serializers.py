@@ -31,7 +31,7 @@ class NormaSerializer(serializers.ModelSerializer):
         model = Norma
         fields = [
             'id', 'tipo', 'numero', 'ano', 'orgao', 'esfera', 'tema', 'ementa', 'link',
-            'data_publicacao', 'validade', 'situacao', 'arquivo', 'arquivo_url', 'observacao',
+            'data_publicacao', 'validade', 'dias_aviso', 'situacao', 'arquivo', 'arquivo_url', 'observacao',
             'identificacao', 'total_requisitos', 'criado_em', 'atualizado_em',
         ]
         read_only_fields = ['criado_em', 'atualizado_em']
@@ -57,7 +57,7 @@ class RequisitoSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'norma', 'norma_identificacao', 'norma_ementa', 'referencia', 'descricao', 'tema',
             'aplicabilidade', 'justificativa', 'unidade', 'responsavel', 'responsavel_nome', 'terceiro', 'terceiro_nome',
-            'periodicidade_meses', 'prazo_legal', 'situacao', 'ultima_verificacao', 'proxima_verificacao',
+            'periodicidade_meses', 'prazo_legal', 'dias_aviso', 'situacao', 'ultima_verificacao', 'proxima_verificacao',
             'origem', 'trecho_fonte', 'pagina_fonte', 'ativo', 'planos_abertos', 'criado_em', 'atualizado_em',
         ]
         # O estado só muda registrando (ou apagando) uma verificação.
@@ -107,7 +107,7 @@ class PlanoAcaoSerializer(serializers.ModelSerializer):
         model = PlanoAcao
         fields = [
             'id', 'requisito', 'requisito_resumo', 'verificacao', 'descricao', 'responsavel', 'responsavel_nome',
-            'terceiro', 'terceiro_nome',
+            'terceiro', 'terceiro_nome', 'dias_aviso',
             'prazo', 'tarefa', 'tarefa_coluna', 'concluido_em', 'status', 'criado_em',
         ]
         read_only_fields = ['tarefa', 'concluido_em', 'criado_em']
@@ -248,7 +248,7 @@ class DocumentoTerceiroSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DocumentoTerceiro
-        fields = ['id', 'terceiro', 'tipo', 'tipo_rotulo', 'descricao', 'orgao', 'numero', 'emissao', 'validade',
+        fields = ['id', 'terceiro', 'tipo', 'tipo_rotulo', 'descricao', 'orgao', 'numero', 'emissao', 'validade', 'dias_aviso',
                   'arquivo', 'arquivo_url', 'arquivo_nome', 'obrigatorio', 'situacao', 'dias_para_vencer',
                   'substituido_em', 'enviado_por_nome', 'criado_em']
         read_only_fields = ['substituido_em', 'criado_em']
