@@ -129,6 +129,8 @@ INSTALLED_APPS = [
     'cockpitFinanceiro',
     'pedidosVenda',
     'sipat',
+    'aprendizes',
+    'uniformes',
     'conformidadeLegal',
 ]
 
