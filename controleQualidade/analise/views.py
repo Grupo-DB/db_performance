@@ -895,19 +895,16 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                 )
             analise.finalizada = False
             analise.finalizada_at = None
-            # Reabrir CANCELA a aprovação: o resultado vai ser mexido, então tem de
-            # passar pelo gestor de novo. Antes a OS voltava para a bancada ainda
-            # marcada como aprovada e, ao ser finalizada, já aparecia liberada sem
-            # ninguém ter aprovado a versão nova.
-            aprovacao_cancelada = bool(analise.aprovada)
-            analise.aprovada = False
-            analise.aprovada_at = None
+            # Reabrir MANTÉM a situação: aprovação (com a data) e laudo continuam
+            # gravados, e ao finalizar de novo a OS volta aprovada / no laudo como
+            # estava. Pedido do usuário em 16/10/2026 — até então reabrir cancelava a
+            # aprovação e a OS corrigida tinha de ser aprovada outra vez.
             analise.save()
             return Response({
                 "status": "Análise reaberta com sucesso.",
-                # O front mostra este texto no toast: reabrir uma OS aprovada tem
-                # consequência, e o técnico precisa saber que ela perdeu a aprovação.
-                "aprovacao_cancelada": aprovacao_cancelada,
+                # O toast do front diz que a situação foi preservada.
+                "situacao_mantida": {"aprovada": bool(analise.aprovada), "laudo": bool(analise.laudo)},
+                "aprovacao_cancelada": False,
             }, status=200)
         except Analise.DoesNotExist:
             return Response({"error": "Análise não encontrada."}, status=404)
