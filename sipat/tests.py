@@ -72,6 +72,33 @@ class SorteioSipatTests(APITestCase):
         r = self.client.post(f'/sipat/premios/{premio.id}/sortear/')
         self.assertEqual(r.status_code, 400)  # B continua fora e A é da manhã
 
+    def test_so_presentes_no_turno_do_sorteio(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        hoje = timezone.localdate()
+        self._importar([{'nome': 'Manhã'}, {'nome': 'Tarde'}, {'nome': 'Ontem'}])
+        manha, tarde, ontem = Participante.objects.order_by('id')
+        Presenca.objects.create(participante=manha, data=hoje, turno='M')
+        Presenca.objects.create(participante=tarde, data=hoje, turno='T')
+        Presenca.objects.create(participante=ontem, data=hoje - timedelta(days=1), turno='T')
+        premio = Premio.objects.create(evento=self.evento, descricao='Kit', regra='QUALQUER',
+                                       quantidade=2, so_presentes_no_turno=True)
+
+        self.assertEqual(self.client.get(f'/sipat/premios/{premio.id}/concorrentes/?turno=T').data['total'], 1)
+        self.assertEqual(self.client.get(f'/sipat/premios/{premio.id}/concorrentes/').data['total'], 0)
+        self.assertEqual(self.client.post(f'/sipat/premios/{premio.id}/sortear/').status_code, 400)
+
+        r = self.client.post(f'/sipat/premios/{premio.id}/sortear/', {'turno': 'T'}, format='json')
+        self.assertEqual(r.data['sorteio']['participante'], tarde.id)
+        r = self.client.post(f'/sipat/premios/{premio.id}/sortear/', {'turno': 'T'}, format='json')
+        self.assertEqual(r.status_code, 400)  # quem esteve só de manhã ou ontem não entra
+        self.assertIn('tarde', r.data['detail'])
+
+        # Desligado, volta a valer só a regra do prêmio.
+        premio.so_presentes_no_turno = False
+        premio.save()
+        self.assertEqual(self.client.get(f'/sipat/premios/{premio.id}/concorrentes/').data['total'], 2)
+
     def test_presenca_marca_desmarca_e_valida_dia(self):
         self._importar([{'nome': 'A'}])
         a = Participante.objects.get()

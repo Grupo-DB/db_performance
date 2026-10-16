@@ -85,6 +85,10 @@ class Premio(models.Model):
     quantidade = models.PositiveIntegerField(default=1)
     ordem = models.PositiveIntegerField(default=0)
     patrocinador = models.CharField(max_length=150, blank=True, default='')
+    # Além da regra: só concorre quem tem presença HOJE no turno em que o sorteio
+    # acontece (escolhido na tela do sorteio). Quem foi de manhã não leva prêmio
+    # sorteado à tarde sem estar lá. db_default: a coluna nasce antes do código novo.
+    so_presentes_no_turno = models.BooleanField(default=False, db_default=False)
 
     class Meta:
         ordering = ['ordem', 'id']

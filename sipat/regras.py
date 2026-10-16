@@ -38,8 +38,13 @@ def ids_semana_inteira(evento) -> set[int]:
     return {l['participante_id'] for l in linhas}
 
 
-def concorrentes(premio: Premio):
-    """Participantes que podem ser sorteados para o prêmio agora."""
+def concorrentes(premio: Premio, turno_sorteio: str = '', data_sorteio: date | None = None):
+    """Participantes que podem ser sorteados para o prêmio agora.
+
+    ``turno_sorteio``/``data_sorteio`` são o turno e o dia em que o sorteio está
+    acontecendo; só pesam nos prêmios com ``so_presentes_no_turno``. Sem turno
+    informado, esses prêmios ficam sem concorrente (a urna não adivinha o turno).
+    """
     evento = premio.evento
     qs = Participante.objects.filter(evento=evento, ativo=True).exclude(sorteios__evento=evento)
 
@@ -54,5 +59,13 @@ def concorrentes(premio: Premio):
         qs = qs.filter(filtro)
     else:
         qs = qs.filter(presencas__isnull=False)
+
+    if premio.so_presentes_no_turno:
+        if not turno_sorteio or not data_sorteio:
+            return qs.none()
+        presentes = Presenca.objects.filter(
+            participante__evento=evento, data=data_sorteio, turno=turno_sorteio,
+        ).values('participante_id')
+        qs = qs.filter(id__in=presentes)
 
     return qs.distinct()

@@ -179,11 +179,24 @@ class BoletimSemanalViewSet(viewsets.ViewSet):
                 continue
             serie = series[indicador.id]
             if not blocos or blocos[-1]['bloco'] != indicador.bloco:
-                blocos.append({'bloco': indicador.bloco, 'titulo': indicador.bloco_titulo, 'indicadores': []})
+                blocos.append({'bloco': indicador.bloco, 'titulo': indicador.bloco_titulo,
+                               'material': '', 'indicadores': []})
+            # Material do bloco: o do indicador ou, no ponderado (que não filtra
+            # material), o dos componentes — o PN ponderado é Calcário pelas fábricas.
+            if not blocos[-1]['material']:
+                blocos[-1]['material'] = indicador.material or next(
+                    (c.material for c in indicador.componentes.all() if c.material), '')
             blocos[-1]['indicadores'].append(
                 self._indicador_payload(serie, semana, inicio_periodo, fim_periodo)
                 if periodo else self._indicador_payload(serie, semana)
             )
+
+        # Calcário primeiro, depois cal, depois o resto — é a ordem de leitura do
+        # laboratório. Dentro do grupo segue a ordem do código do bloco.
+        def grupo_material(bloco):
+            m = (bloco['material'] or '').strip().lower()
+            return 0 if m.startswith('calc') else 1 if m.startswith('cal') else 2
+        blocos.sort(key=grupo_material)
 
         inicio, fim = services.intervalo_da_semana(ano, min(semana, services.total_de_semanas(ano)))
         return Response({

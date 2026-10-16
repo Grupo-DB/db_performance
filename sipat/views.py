@@ -4,6 +4,7 @@ import unicodedata
 
 from django.db import IntegrityError, transaction
 from django.db.models import Prefetch
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -188,10 +189,18 @@ class PremioViewSet(viewsets.ModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST)
         return super().destroy(request, *args, **kwargs)
 
+    @staticmethod
+    def _turno_do_sorteio(request) -> str:
+        """Turno em que o sorteio acontece, escolhido na tela (query ou corpo)."""
+        turno = str(request.query_params.get('turno') or request.data.get('turno') or '').upper()
+        return turno if turno in TURNOS_VALIDOS else ''
+
     @action(detail=True, methods=['get'])
     def concorrentes(self, request, pk=None):
         premio = self.get_object()
-        qs = concorrentes(premio)
+        # O dia é o do servidor (fuso de Brasília): o relógio do notebook do
+        # projetor não decide quem estava presente.
+        qs = concorrentes(premio, self._turno_do_sorteio(request), timezone.localdate())
         return Response({'total': qs.count()})
 
     @action(detail=True, methods=['post'])
@@ -203,10 +212,18 @@ class PremioViewSet(viewsets.ModelViewSet):
             if validos >= premio.quantidade:
                 return Response({'detail': 'Todas as unidades deste prêmio já foram sorteadas.'},
                                 status=status.HTTP_400_BAD_REQUEST)
-            urna = list(concorrentes(premio).values('id', 'nome'))
-            if not urna:
-                return Response({'detail': 'Ninguém concorre a este prêmio pela regra definida.'},
+            turno = self._turno_do_sorteio(request)
+            if premio.so_presentes_no_turno and not turno:
+                return Response({'detail': 'Escolha o turno do sorteio: este prêmio é só para quem está presente no turno.'},
                                 status=status.HTTP_400_BAD_REQUEST)
+            urna = list(concorrentes(premio, turno, timezone.localdate()).values('id', 'nome'))
+            if not urna:
+                detalhe = 'Ninguém concorre a este prêmio pela regra definida.'
+                if premio.so_presentes_no_turno:
+                    nome_turno = dict(TURNOS)[turno].lower()
+                    detalhe = (f'Ninguém concorre: o prêmio é só para quem tem presença hoje no turno da {nome_turno}. '
+                               'Confira a lista de presença do turno.')
+                return Response({'detail': detalhe}, status=status.HTTP_400_BAD_REQUEST)
             escolhido = secrets.choice(urna)
             try:
                 sorteio = Sorteio.objects.create(

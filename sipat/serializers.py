@@ -71,7 +71,7 @@ class PremioSerializer(serializers.ModelSerializer):
         model = Premio
         fields = [
             'id', 'evento', 'descricao', 'categoria', 'regra', 'data', 'turno',
-            'quantidade', 'ordem', 'patrocinador', 'ganhadores', 'restantes',
+            'quantidade', 'ordem', 'patrocinador', 'so_presentes_no_turno', 'ganhadores', 'restantes',
         ]
 
     def validate(self, attrs):
