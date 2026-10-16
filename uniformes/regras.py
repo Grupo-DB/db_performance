@@ -4,7 +4,7 @@ import unicodedata
 from datetime import date, datetime
 from decimal import Decimal
 
-from .models import ItemPedido, Peca, Pedido
+from .models import Peca, Pedido
 
 # Aba VALORES do Inverno/2026. "EX" na planilha de pedidos é o XG; EX1..EX5 são os EG.
 CATALOGO_PADRAO = [

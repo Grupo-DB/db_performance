@@ -103,3 +103,30 @@ class UniformesTests(APITestCase):
         r = self.client.post(f'/uniformes/campanhas/{self.campanha.id}/importar/', {'linhas': linhas}, format='json')
         self.assertEqual((r.data['criados'], r.data['atualizados']), (0, 3))
         self.assertEqual(ItemPedido.objects.count(), 7)
+
+
+class ComandoImportarUniformesTests(APITestCase):
+    def test_cria_campanha_e_importa(self):
+        import os
+        import tempfile
+        from datetime import datetime
+
+        import openpyxl
+        from django.core.management import call_command
+
+        wb = openpyxl.Workbook()
+        wb.active.title = 'MENU'
+        ws = wb.create_sheet('FEMININOSCOMPRA')
+        ws.append(['Menu'])
+        ws.append(['FUNCIONÁRIA', 'CPF', 'SETOR', 'JAQUETA', 'SUÉTER', 'CAMISA', 'SOFT', 'ZÍPER DO SOFT', 'ENTREGA', 'ENTREGA DA JAQUETA'])
+        ws.append(['Ana Paula', '032.988.450-60', 'RH', '1 (M)', '-', '-', '1 (PP )', 'Todo', datetime(2026, 7, 22), datetime(2026, 8, 12)])
+        caminho = os.path.join(tempfile.mkdtemp(), 'uni.xlsx')
+        wb.save(caminho)
+
+        call_command('importar_uniformes', caminho, stdout=open(os.devnull, 'w'))
+        campanha = Campanha.objects.get(nome='Inverno/2026')
+        self.assertEqual(campanha.pecas.count(), 5)
+        ana = Pedido.objects.get(nome='Ana Paula')
+        self.assertEqual(ana.itens.get(peca__nome='Jaqueta').entregue_em, date(2026, 8, 12))
+        call_command('importar_uniformes', caminho, stdout=open(os.devnull, 'w'))
+        self.assertEqual((Campanha.objects.count(), Pedido.objects.count()), (1, 1))

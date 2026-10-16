@@ -101,3 +101,34 @@ class AcompanhamentoTests(APITestCase):
     def test_sem_grupo_nao_acessa(self):
         self.client.force_authenticate(User.objects.create_user('x', password='x'))
         self.assertEqual(self.client.get('/aprendizes/acompanhamentos/').status_code, 403)
+
+
+class ComandoImportarTests(APITestCase):
+    """O comando lê o xlsx no servidor com as mesmas regras da tela."""
+
+    def test_le_abas_com_colunas_diferentes(self):
+        import os
+        import tempfile
+
+        import openpyxl
+        from django.core.management import call_command
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = '032025'
+        ws.append([None, 'NOME ', 'TIPO', 'VENCIMENTO ', 'SITUAÇÃO', 'PLANO DE SAÚDE'])
+        ws.append([None, 'EDER SILVA', '1º VENCIMENTO', datetime(2025, 3, 5), 'FEITO', 'INFORMADO'])
+        ws2 = wb.create_sheet('092026')
+        ws2.append([None, 3, 'TIPO', 'VENCIMENTO ', 'SITUAÇÃO', 'PENDÊNCIA'])  # cabeçalho sem "NOME"
+        ws2.append([None, 'RAÍ DE BARCELLOS', 'EFETIVAÇÃO', datetime(2026, 9, 5), 'PENDENTE', 'MANDAR BRINDE'])
+        caminho = os.path.join(tempfile.mkdtemp(), 'exp.xlsx')
+        wb.save(caminho)
+
+        call_command('importar_experiencia', caminho, '--simular', stdout=open(os.devnull, 'w'))
+        self.assertEqual(Etapa.objects.count(), 0)
+        call_command('importar_experiencia', caminho, stdout=open(os.devnull, 'w'))
+        eder = Etapa.objects.get(acompanhamento__nome='EDER SILVA')
+        self.assertTrue(eder.plano_saude_informado)
+        rai = Etapa.objects.get(acompanhamento__nome='RAÍ DE BARCELLOS')
+        self.assertEqual((rai.tipo, rai.situacao), (Etapa.EFETIVACAO, Etapa.PENDENTE))
+        self.assertFalse(rai.brinde_entregue)
