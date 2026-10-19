@@ -15,7 +15,7 @@ class Simulacao(Exception):
 
 
 class Command(BaseCommand):
-    help = 'Importa a planilha antiga do período de experiência para o Acompanhamento Aprendizes.'
+    help = 'Importa a planilha antiga do período de experiência para o Acompanhamento Período de Experiência.'
 
     def add_arguments(self, parser):
         parser.add_argument('arquivo')
