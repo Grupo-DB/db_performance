@@ -277,3 +277,27 @@ class IntegracaoTests(CombustivelBase):
         self.assertEqual(r.data['baixados'], 1)
         ab.refresh_from_db()
         self.assertEqual(ab.situacao, Abastecimento.BAIXADO)
+
+
+class TesteEDivisaoTests(CombustivelBase):
+    def test_saldo_dividido_entre_tanques_do_mesmo_produto(self):
+        Tanque.objects.create(nome='Tanque S-10 B', filial=0, produto=253, capacidade_l=Decimal('10000'))
+        self.client.force_authenticate(self.gestor)
+        t = {x['nome']: x for x in self.client.get('/combustivel/tanques/situacao/').data['tanques']}
+        # 5000 L no SGA, capacidades 30000 e 10000 → 3750 e 1250.
+        self.assertEqual(t['Tanque S-10']['saldo_l'], 3750)
+        self.assertEqual(t['Tanque S-10 B']['saldo_l'], 1250)
+        self.assertEqual(t['Tanque S-10']['tanques_no_saldo'], 2)
+        self.assertFalse(t['Tanque S-10']['acima_capacidade'])
+
+    def test_abastecimento_de_teste_nunca_sai_para_o_sga(self):
+        from django.core.management import call_command
+        call_command('gerar_abastecimentos_teste', quantidade=5, usuario='gestor', stdout=io.StringIO())
+        self.assertEqual(Abastecimento.objects.count(), 5)
+        self.assertTrue(all(a.bloqueado for a in Abastecimento.objects.all()))
+        self.client.force_authenticate(self.gestor)
+        self.assertEqual(self.client.post('/combustivel/lotes/', {'formato': 'CSV'}, format='json').status_code, 400)
+        t = self.client.get('/combustivel/tanques/situacao/').data['tanques'][0]
+        self.assertEqual(t['pendente_l'], 0)  # não desconta do saldo
+        call_command('gerar_abastecimentos_teste', apagar=True, stdout=io.StringIO())
+        self.assertEqual(Abastecimento.objects.count(), 0)

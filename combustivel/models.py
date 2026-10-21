@@ -38,6 +38,10 @@ PRODUTO_CHOICES = [(cod, p['nome']) for cod, p in PRODUTOS.items()]
 # (IABCODAB perto de 100 milhões em 2026) e dentro de um int de 32 bits.
 BASE_CODIGO_INTEGRACAO = 1_500_000_000
 
+# Abastecimentos falsos do comando gerar_abastecimentos_teste começam com isto na observação.
+# Nascem retidos (alerta de bloqueio), então nunca saem em arquivo nem pela API.
+MARCA_TESTE = '[TESTE] '
+
 
 def _caminho_foto(instancia, nome):
     agora = timezone.now()

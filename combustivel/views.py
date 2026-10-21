@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 
 from . import erp, integracao, regras
 from .models import (
-    BASE_CODIGO_INTEGRACAO, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, MedicaoTanque, Tanque,
+    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, MedicaoTanque, Tanque,
 )
 from .permissions import (
     AutenticacaoChave, LeituraOuGestao, LimiteIntegracao, LimiteRegistro, PodeGerir, PodeRegistrar, PodeVer, TemChave,
@@ -59,8 +59,9 @@ def _erp_ou_503(func, *args):
 
 
 def _pendentes_por_tanque() -> dict[int, float]:
-    """Litros registrados no Manager que o SGA ainda não baixou (saem do saldo do tanque)."""
-    linhas = (Abastecimento.objects.filter(situacao__in=SEM_BAIXA)
+    """Litros registrados no Manager que o SGA ainda não baixou (saem do saldo do tanque).
+    Os de teste (comando gerar_abastecimentos_teste) não contam: não existem de verdade."""
+    linhas = (Abastecimento.objects.filter(situacao__in=SEM_BAIXA).exclude(observacao__startswith=MARCA_TESTE)
               .values('tanque').annotate(litros=Sum('litros')))
     return {l['tanque']: float(l['litros'] or 0) for l in linhas}
 
@@ -76,13 +77,22 @@ def situacao_tanques(serie=None) -> tuple[list[dict], str | None]:
     for dia in serie or []:
         for item, litros in dia['por_item'].items():
             consumo_por_produto.setdefault(int(item), []).append({'litros': litros})
+    ativos = list(Tanque.objects.filter(ativo=True))
+    # O SGA tem UM saldo por produto e filial. Dois tanques de S-10 na matriz dividem esse saldo
+    # na proporção da capacidade (sem isso cada um mostrava o total e passava de 100%).
+    grupos = {}
+    for t in ativos:
+        grupos.setdefault((t.produto, t.filial), []).append(t)
     saida = []
-    for t in Tanque.objects.filter(ativo=True):
+    for t in ativos:
         sga = (estoque or {}).get((t.produto, t.filial))
-        saldo = None
-        if sga is not None:
-            saldo = sga['saldo'] - pendentes.get(t.id, 0.0)
+        irmaos = grupos[(t.produto, t.filial)]
         cap = float(t.capacidade_l)
+        cap_grupo = sum(float(x.capacidade_l) for x in irmaos) or cap
+        saldo = saldo_grupo = None
+        if sga is not None:
+            saldo_grupo = sga['saldo'] - sum(pendentes.get(x.id, 0.0) for x in irmaos)
+            saldo = sga['saldo'] * (cap / cap_grupo) - pendentes.get(t.id, 0.0)
         med = ultimas.get(t.id)
         saida.append({
             'id': t.id, 'nome': t.nome, 'produto': t.produto, 'produto_nome': t.produto_nome, 'filial': t.filial,
@@ -93,7 +103,12 @@ def situacao_tanques(serie=None) -> tuple[list[dict], str | None]:
             'custo_medio': sga['custo_medio'] if sga else None,
             'nivel': round(max(min(saldo / cap, 1.2), -0.2), 4) if saldo is not None and cap else None,
             'abaixo_minimo': saldo is not None and saldo < float(t.estoque_minimo_l),
-            'autonomia_dias': regras.autonomia(saldo, consumo_por_produto.get(t.produto, [])) if saldo else None,
+            # Saldo do sistema maior que o tanque: cadastro de capacidade errado, outro tanque do mesmo
+            # combustível não cadastrado ou estoque do SGA fora do físico (a régua mostra qual).
+            'acima_capacidade': saldo is not None and saldo > cap * 1.02,
+            'tanques_no_saldo': len(irmaos),
+            # Autonomia do conjunto: o consumo do SGA é do produto, não do tanque.
+            'autonomia_dias': regras.autonomia(saldo_grupo, consumo_por_produto.get(t.produto, [])) if saldo_grupo else None,
             'ultima_medicao': {
                 'medido_em': med.medido_em, 'litros': float(med.litros),
                 'diferenca_l': float(med.litros - med.saldo_sistema_l) if med.saldo_sistema_l is not None else None,
@@ -534,7 +549,7 @@ class PainelView(APIView):
         if ultima:
             horas_parada = round((datetime.now() - datetime.fromisoformat(ultima)).total_seconds() / 3600, 1)
 
-        locais = Abastecimento.objects.exclude(situacao=Abastecimento.CANCELADO)
+        locais = Abastecimento.objects.exclude(situacao=Abastecimento.CANCELADO).exclude(observacao__startswith=MARCA_TESTE)
         manager = {
             'registrados_periodo': locais.filter(abastecido_em__date__gte=inicio, abastecido_em__date__lte=fim).count(),
             'aguardando_sga': locais.filter(situacao__in=SEM_BAIXA).count(),
