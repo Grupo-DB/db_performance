@@ -867,6 +867,7 @@ class LubrificacaoPainelView(APIView):
             leituras = _leituras_horimetro(inicio - timedelta(days=15), fim)
             ccs = {b['centro_custo'] for b in baixas if b['centro_custo'] and not b['equipamento']}
             nomes_cc = erp.nomes_centro_custo(sorted(ccs))
+            fabrica = lubrificacao.fabrica(lubrificacao.estoque(), lubrificacao.transferencias(inicio, fim))
         except erp.ErpIndisponivel as exc:
             return Response({'detail': f'SGA indisponível no momento ({exc}).'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         campo = list(Lubrificacao.objects.filter(lubrificado_em__date__gte=inicio, lubrificado_em__date__lte=fim)
@@ -874,7 +875,7 @@ class LubrificacaoPainelView(APIView):
         dados = lubrificacao.painel(baixas, lubrificacao.horas_no_periodo(leituras, inicio, fim), equipamentos, campo)
         for c in dados['centros_custo']:
             c['nome'] = nomes_cc.get(c['centro_custo'], 'Sem centro de custo' if not c['centro_custo'] else f"CC {c['centro_custo']}")
-        return Response({'inicio': inicio, 'fim': fim, **dados})
+        return Response({'inicio': inicio, 'fim': fim, **dados, 'fabrica': fabrica})
 
 
 class PreventivasView(APIView):

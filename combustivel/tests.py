@@ -528,3 +528,12 @@ class LubrificacaoContasTests(APITestCase):
         self.assertEqual(d['totais']['pct_sem_os'], 33.3)
         self.assertEqual(d['equipamentos'][0]['oleo_l_1000h'], 100.0)
         self.assertEqual(d['totais']['custo_sem_equipamento'], 200.0)
+
+    def test_fabrica_vale_pelo_custo_medio_e_lista_so_o_que_tem_saldo_ou_movimento(self):
+        from .lubrificacao import fabrica
+        est = [{'cod': 1, 'nome': 'OLEO', 'grupo': 'x', 'categoria': 'OLEO', 'unidade': 'L', 'geral': 100.0, 'fabrica': 10.0, 'custo_medio': 20.0},
+               {'cod': 2, 'nome': 'GRAXA', 'grupo': 'x', 'categoria': 'GRAXA', 'unidade': 'kg', 'geral': 5.0, 'fabrica': 0.0, 'custo_medio': 30.0}]
+        f = fabrica(est, {1: {'para_fabrica': 50.0, 'da_fabrica': 40.0, 'movimentos': 6}})
+        self.assertEqual(f['totais']['valor_fabrica'], 200.0)
+        self.assertEqual(f['totais']['valor_para_fabrica'], 1000.0)
+        self.assertEqual([i['cod'] for i in f['itens']], [1])

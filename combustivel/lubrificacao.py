@@ -9,6 +9,12 @@ Onde está cada coisa (levantado em 21/10/2026):
   Pelo NOME não dá: "OLEO" pega óleo de soja e cilindro hidráulico, e "ADITIVO" pega a embalagem da
   argamassa. Unidade em ``ESPECIE`` (2 LT, 3 BD, 5 UN, 7 KG, 8 GL).
 * Saída: ``BAIXAESTOQUE`` (BESTSIT 8 ativa, 10 devolução), ``BESTMAN`` = OS de manutenção (0 = sem OS).
+* Dois "almoxarifados" por item: a referência de estoque (``QUANTESTOQUETIPOREF``, tipo 0) 0 = GERAL
+  e 100 = FABRICA. A nota entra em GERAL; o almoxarifado passa um lote para FABRICA (o lubrificante
+  vai para a oficina/lubrificador); no consumo, a quantidade usada VOLTA de FABRICA para GERAL e sai
+  a baixa de GERAL para o equipamento. Saldo em FABRICA = entregue e ainda sem baixa. As
+  transferências estão em ``MOVESTOQUE`` (MESTQREFTIPO 3, um par −/+ entre MESTQREF 0 e 100);
+  1 = nota de entrada, 2 = baixa. Só o automotivo (283/306) usa; o industrial baixa direto.
 * Preventivas: ``PLANOMANUTENCAO`` (PMANTPER 1 = horas, PMANPER = período) e
   ``MANUTENCAOPENDENTE``. Esta última é uma FOTO por rodada de cálculo: ``MPENCOD`` é o número da
   rodada (o mesmo para todos os equipamentos), então vale a linha de maior MPENCOD por
@@ -86,6 +92,76 @@ def baixas(inicio: date, fim: date) -> list[dict]:
             })
         return saida
     return _cacheado(f'comb:lub:baixas:{inicio}:{fim}', CACHE_MOVIMENTO, buscar)
+
+
+REF_GERAL, REF_FABRICA = 0, 100
+
+
+def estoque() -> list[dict]:
+    """Saldo de cada lubrificante em GERAL e em FABRICA (QUANTESTOQUE, empresa 1, tipo 0) e o custo médio."""
+    def buscar():
+        linhas = _rows("""
+            SELECT q.QESTQESTQ item, e.ESTQNOME nome, e.ESTQGALM grupo, e.ESTQESP esp, q.QESTQREF ref,
+                   SUM(q.QESTQESTOQUE) saldo,
+                   -- Linha de outra filial com saldo zero guarda custo velho (R$ 490/L no 15W-40): pondera pelo saldo.
+                   SUM(CASE WHEN q.QESTQESTOQUE > 0 THEN q.QESTQESTOQUE * q.QESTQCUSTO ELSE 0 END) valor,
+                   SUM(CASE WHEN q.QESTQESTOQUE > 0 THEN q.QESTQESTOQUE ELSE 0 END) positivo
+            FROM QUANTESTOQUE q JOIN ESTOQUE e ON e.ESTQCOD = q.QESTQESTQ
+            WHERE e.ESTQGALM IN :grupos AND q.QESTQEMP = 1 AND q.QESTQTIPO = 0 AND q.QESTQREF IN (0, 100)
+            GROUP BY q.QESTQESTQ, e.ESTQNOME, e.ESTQGALM, e.ESTQESP, q.QESTQREF""",
+            expandir=('grupos',), grupos=list(GRUPOS))
+        itens = {}
+        for l in linhas:
+            grupo = int(l['grupo'])
+            i = itens.setdefault(int(l['item']), {
+                'cod': int(l['item']), 'nome': _texto(l['nome']), 'grupo': GRUPOS.get(grupo, ''),
+                'categoria': categoria(l['nome'], grupo), 'unidade': UNIDADES.get(int(l['esp'] or 0), ''),
+                'geral': 0.0, 'fabrica': 0.0, '_valor': 0.0, '_positivo': 0.0})
+            i['fabrica' if int(l['ref']) == REF_FABRICA else 'geral'] += _num(l['saldo'])
+            i['_valor'] += _num(l['valor'])
+            i['_positivo'] += _num(l['positivo'])
+        for i in itens.values():
+            valor, positivo = i.pop('_valor'), i.pop('_positivo')
+            i['custo_medio'] = round(valor / positivo, 4) if positivo else 0.0
+        return list(itens.values())
+    return _cacheado('comb:lub:estoque:v2', CACHE_MOVIMENTO, buscar)
+
+
+def transferencias(inicio: date, fim: date) -> dict[int, dict]:
+    """Por item: quanto foi de GERAL para FABRICA e quanto voltou de FABRICA (para a baixa) no período."""
+    de, ate = _periodo(inicio, fim)
+
+    def buscar():
+        linhas = _rows("""
+            SELECT m.MESTQESTQ item,
+                   SUM(CASE WHEN m.MESTQQUANT > 0 THEN m.MESTQQUANT ELSE 0 END) entrou,
+                   SUM(CASE WHEN m.MESTQQUANT < 0 THEN -m.MESTQQUANT ELSE 0 END) saiu,
+                   COUNT(*) n
+            FROM MOVESTOQUE m JOIN ESTOQUE e ON e.ESTQCOD = m.MESTQESTQ
+            WHERE e.ESTQGALM IN :grupos AND m.MESTQREFTIPO = 3 AND m.MESTQTIPO = 0 AND m.MESTQREF = 100
+              AND m.MESTQDATA >= :de AND m.MESTQDATA < :ate
+            GROUP BY m.MESTQESTQ""", expandir=('grupos',), grupos=list(GRUPOS), de=de, ate=ate)
+        return {str(int(l['item'])): {'para_fabrica': _num(l['entrou']), 'da_fabrica': _num(l['saiu']), 'movimentos': int(l['n'])}
+                for l in linhas}
+    bruto = _cacheado(f'comb:lub:transf:{inicio}:{fim}', CACHE_MOVIMENTO, buscar)
+    return {int(k): v for k, v in bruto.items()}
+
+
+def fabrica(estoque_: list[dict], transf: dict[int, dict]) -> dict:
+    """O que está na FABRICA sem baixa (valor pelo custo médio) e o que entrou/voltou no período."""
+    itens = []
+    tot = {'valor_fabrica': 0.0, 'valor_para_fabrica': 0.0, 'valor_da_fabrica': 0.0, 'valor_geral': 0.0}
+    for e in estoque_:
+        t = transf.get(e['cod'], {'para_fabrica': 0.0, 'da_fabrica': 0.0, 'movimentos': 0})
+        c = e['custo_medio']
+        tot['valor_geral'] += max(e['geral'], 0) * c
+        tot['valor_fabrica'] += max(e['fabrica'], 0) * c
+        tot['valor_para_fabrica'] += t['para_fabrica'] * c
+        tot['valor_da_fabrica'] += t['da_fabrica'] * c
+        if e['fabrica'] > 0 or t['movimentos']:
+            itens.append({**e, **t, 'valor_fabrica': round(max(e['fabrica'], 0) * c, 2)})
+    itens.sort(key=lambda i: i['valor_fabrica'], reverse=True)
+    return {'totais': {k: round(v, 2) for k, v in tot.items()}, 'itens': itens}
 
 
 def pendentes() -> dict:
