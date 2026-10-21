@@ -359,8 +359,8 @@ class ComboioTests(CombustivelBase):
         self.comboio.envia_ao_sga = True
         self.comboio.save()
         self.client.force_authenticate(self.operador)
-        r = self.client.post('/combustivel/carregamentos/', {'comboio': self.comboio.id, 'origem': self.tanque.id,
-                                                             'litros': '800'}, format='json')
+        r = self.client.post('/combustivel/transferencias/', {'destino': self.comboio.id, 'origem': self.tanque.id,
+                                                               'litros': '800'}, format='json')
         self.assertEqual(r.status_code, 201, r.data)
         r = self._entrega()
         self.assertEqual(r.data['situacao'], 'REGISTRADO')
@@ -372,10 +372,45 @@ class ComboioTests(CombustivelBase):
         self.assertEqual(t['Tanque S-10']['saldo_l'], 5000 - (800 - 120.5))
         self.assertEqual(self.client.post('/combustivel/lotes/', {'formato': 'CSV'}, format='json').status_code, 201)
 
-    def test_carregamento_so_em_comboio(self):
+    def test_transferencia_so_para_comboio(self):
         self.client.force_authenticate(self.operador)
-        r = self.client.post('/combustivel/carregamentos/', {'comboio': self.tanque.id, 'litros': '10'}, format='json')
+        r = self.client.post('/combustivel/transferencias/', {'destino': self.tanque.id, 'litros': '10'}, format='json')
         self.assertEqual(r.status_code, 400)
+
+    def test_transferencia_vira_abastecimento_do_caminhao_e_nao_conta_em_dobro(self):
+        self.client.force_authenticate(self.operador)
+        # Sem quem operou a bomba o SGA recusaria: barra já aqui.
+        r = self.client.post('/combustivel/transferencias/', {'destino': self.comboio.id, 'origem': self.tanque.id,
+                                                               'litros': '300'}, format='json')
+        self.assertEqual(r.status_code, 400)
+        uid = str(uuid.uuid4())
+        dados = {'uuid': uid, 'destino': self.comboio.id, 'origem': self.tanque.id, 'litros': '300', 'funcionario': 194}
+        r = self.client.post('/combustivel/transferencias/', dados, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(self.client.post('/combustivel/transferencias/', dados, format='json').status_code, 200)  # reenvio
+        ab = Abastecimento.objects.get()
+        self.assertEqual((ab.equipamento, ab.tanque_id, ab.situacao), (519, self.tanque.id, Abastecimento.REGISTRADO))
+        self.client.force_authenticate(self.gestor)
+        sit = lambda: {x['nome']: x for x in self.client.get('/combustivel/tanques/situacao/').data['tanques']}
+        t = sit()
+        self.assertEqual(t['Comboio CS-02']['saldo_l'], 1000 + 300)     # SGA + transferência ainda sem baixa
+        self.assertEqual(t['Tanque S-10']['saldo_l'], 5000 - 300)       # saiu do fixo, aguardando baixa
+        # A baixa chegou ao SGA com o código do abastecimento: não soma duas vezes.
+        with patch('combustivel.erp.carregamentos_comboio', return_value=[{'litros': 1000.0}, {'litros': 300.0, 'iab': ab.codigo_integracao}]):
+            self.assertEqual(sit()['Comboio CS-02']['saldo_l'], 1300)
+        # Cancelar a transferência cancela o abastecimento que iria ao SGA.
+        r = self.client.post(f'/combustivel/transferencias/{uid}/cancelar/', {'motivo': 'lançado errado'})
+        self.assertEqual(r.data['situacao'], 'CANCELADA')
+        ab.refresh_from_db()
+        self.assertEqual(ab.situacao, Abastecimento.CANCELADO)
+        self.assertEqual(sit()['Comboio CS-02']['saldo_l'], 1000)
+
+    def test_posto_externo_so_entra_no_comboio(self):
+        self.client.force_authenticate(self.operador)
+        r = self.client.post('/combustivel/transferencias/', {'destino': self.comboio.id, 'litros': '200'}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['origem_nome'], 'Posto externo')
+        self.assertFalse(Abastecimento.objects.exists())
 
     def test_painel_passa_entrega_do_comboio_para_a_maquina(self):
         eqps = {531: EQUIPAMENTOS[0], 519: {'nome': 'COMBOIO', 'centro_custo': 5487, 'centro_custo_nome': 'Comboio', 'placa': ''}}

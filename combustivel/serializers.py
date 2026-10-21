@@ -4,7 +4,7 @@ from django.core.files.base import ContentFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from rest_framework import serializers
 
-from .models import Abastecimento, CarregamentoComboio, ChaveIntegracao, LoteIntegracao, MedicaoTanque, Tanque
+from .models import Abastecimento, ChaveIntegracao, Transferencia, LoteIntegracao, MedicaoTanque, Tanque
 
 FOTO_MAX_BYTES = 8 * 1024 * 1024
 FOTO_MAX_PIXELS = 40_000_000
@@ -149,27 +149,52 @@ class AbastecimentoSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class CarregamentoSerializer(serializers.ModelSerializer):
+class TransferenciaSerializer(serializers.ModelSerializer):
+    uuid = serializers.UUIDField(required=False)
+    foto_bomba = FotoSegura(required=False, allow_null=True, write_only=True)
+    tem_foto = serializers.SerializerMethodField()
     usuario_nome = serializers.SerializerMethodField()
-    comboio_nome = serializers.CharField(source='comboio.nome', read_only=True)
-    origem_nome = serializers.CharField(source='origem.nome', read_only=True, default='')
+    destino_nome = serializers.CharField(source='destino.nome', read_only=True)
+    origem_nome = serializers.SerializerMethodField()
+    abastecimento_situacao = serializers.CharField(source='abastecimento.get_situacao_display', read_only=True, default='')
+    abastecimento_uuid = serializers.UUIDField(source='abastecimento.uuid', read_only=True, default=None)
+    abastecimento_bloqueado = serializers.BooleanField(source='abastecimento.bloqueado', read_only=True, default=False)
+    abastecimento_alertas = serializers.JSONField(source='abastecimento.alertas', read_only=True, default=list)
 
     class Meta:
-        model = CarregamentoComboio
-        fields = ['id', 'comboio', 'comboio_nome', 'origem', 'origem_nome', 'carregado_em', 'litros', 'encerrante_inicial',
-                  'encerrante_final', 'observacao', 'usuario_nome', 'criado_em']
-        read_only_fields = ['criado_em']
+        model = Transferencia
+        fields = ['id', 'uuid', 'origem', 'origem_nome', 'destino', 'destino_nome', 'transferido_em', 'litros',
+                  'encerrante_inicial', 'encerrante_final', 'funcionario', 'funcionario_nome', 'foto_bomba', 'tem_foto',
+                  'observacao', 'situacao', 'motivo_cancelamento', 'usuario_nome', 'criado_em', 'abastecimento_uuid',
+                  'abastecimento_situacao', 'abastecimento_bloqueado', 'abastecimento_alertas']
+        read_only_fields = ['funcionario_nome', 'situacao', 'motivo_cancelamento', 'criado_em']
+
+    def get_tem_foto(self, obj):
+        return bool(obj.foto_bomba)
 
     def get_usuario_nome(self, obj):
         return (obj.usuario.get_full_name() or obj.usuario.username) if obj.usuario else ''
 
+    def get_origem_nome(self, obj):
+        return obj.origem.nome if obj.origem else 'Posto externo'
+
     def validate(self, attrs):
-        if attrs['comboio'].tipo != Tanque.COMBOIO:
-            raise serializers.ValidationError({'comboio': 'Escolha um comboio.'})
-        if attrs.get('origem') and attrs['origem'].tipo != Tanque.FIXO:
-            raise serializers.ValidationError({'origem': 'A origem é um tanque fixo.'})
+        destino, origem = attrs['destino'], attrs.get('origem')
+        if destino.tipo != Tanque.COMBOIO:
+            raise serializers.ValidationError({'destino': 'O destino é um comboio.'})
+        if origem:
+            if origem.tipo != Tanque.FIXO:
+                raise serializers.ValidationError({'origem': 'A origem é um tanque fixo.'})
+            if origem.produto != destino.produto:
+                raise serializers.ValidationError({'origem': 'Tanque e comboio com combustíveis diferentes.'})
+            if not destino.envia_ao_sga and destino.equipamento and not attrs.get('funcionario'):
+                # Vira abastecimento do caminhão no SGA, que recusa sem funcionário identificado.
+                raise serializers.ValidationError({'funcionario': 'Informe quem operou a bomba.'})
         if attrs['litros'] <= 0:
             raise serializers.ValidationError({'litros': 'Quantidade precisa ser maior que zero.'})
+        ini, fim = attrs.get('encerrante_inicial'), attrs.get('encerrante_final')
+        if ini is not None and fim is not None and fim < ini:
+            raise serializers.ValidationError({'encerrante_final': 'Encerrante final menor que o inicial.'})
         return attrs
 
 

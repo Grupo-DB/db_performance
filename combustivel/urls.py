@@ -6,7 +6,7 @@ from . import views
 router = DefaultRouter()
 router.register(r'tanques', views.TanqueViewSet, basename='CombustivelTanque')
 router.register(r'medicoes', views.MedicaoViewSet, basename='CombustivelMedicao')
-router.register(r'carregamentos', views.CarregamentoViewSet, basename='CombustivelCarregamento')
+router.register(r'transferencias', views.TransferenciaViewSet, basename='CombustivelTransferencia')
 router.register(r'abastecimentos', views.AbastecimentoViewSet, basename='CombustivelAbastecimento')
 router.register(r'lotes', views.LoteViewSet, basename='CombustivelLote')
 router.register(r'chaves', views.ChaveViewSet, basename='CombustivelChave')

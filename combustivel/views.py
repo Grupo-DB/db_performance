@@ -14,14 +14,14 @@ from rest_framework.views import APIView
 
 from . import erp, integracao, regras
 from .models import (
-    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, CarregamentoComboio, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, MedicaoTanque, Tanque,
+    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, Transferencia, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, MedicaoTanque, Tanque,
 )
 from .permissions import (
     AutenticacaoChave, LeituraOuGestao, LimiteIntegracao, LimiteRegistro, PodeGerir, PodeRegistrar, PodeVer, TemChave,
     TemChaveQueConfirma, eh_gestor, ip_do_pedido,
 )
 from .serializers import (
-    AbastecimentoSerializer, CarregamentoSerializer, ChaveSerializer, LoteSerializer, MedicaoSerializer, TanqueSerializer,
+    AbastecimentoSerializer, TransferenciaSerializer, ChaveSerializer, LoteSerializer, MedicaoSerializer, TanqueSerializer,
 )
 
 # Situações que ainda podem ir para o SGA.
@@ -69,18 +69,30 @@ def _pendentes_por_tanque() -> dict[int, float]:
 
 def _saldo_comboio(t: Tanque, medicao) -> dict:
     """
-    Saldo do caminhão, contado no Manager: última régua (ou zero no cadastro) + carregamentos
-    − entregas. No modo "já baixado no carregamento" os carregamentos são as baixas do SGA no
-    equipamento do comboio; no outro modo, os registrados no Manager.
+    Saldo do caminhão, contado no Manager: última régua (ou zero no cadastro) + entradas − entregas.
+
+    Entradas:
+    * baixas do SGA no equipamento do comboio (o carregamento que a bomba/CTA lança hoje), no modo
+      "já baixado no carregamento";
+    * transferências registradas no Manager. A que virou abastecimento do caminhão e já está no SGA
+      (o código dela aparece na baixa) não soma de novo.
     """
     desde = medicao.medido_em if medicao else t.criado_em
     base = float(medicao.litros) if medicao else 0.0
-    carregado, aviso = 0.0, None
+    carregado, aviso, codigos_sga = 0.0, None, set()
     if not t.envia_ao_sga and t.equipamento:
         linhas, aviso = _erp_ou_503(erp.carregamentos_comboio, t.equipamento, t.produto,
                                     timezone.make_naive(desde) if timezone.is_aware(desde) else desde)
-        carregado += sum(l['litros'] for l in (linhas or []))
-    carregado += float(t.carregamentos.filter(carregado_em__gte=desde).aggregate(s=Sum('litros'))['s'] or 0)
+        for l in linhas or []:
+            carregado += l['litros']
+            if l.get('iab'):
+                codigos_sga.add(l['iab'])
+    for tr in (Transferencia.objects.filter(destino=t, transferido_em__gte=desde, situacao=Transferencia.REGISTRADA)
+               .select_related('abastecimento')):
+        ab = tr.abastecimento
+        if ab and (ab.codigo_integracao in codigos_sga or ab.situacao in (Abastecimento.BAIXADO, Abastecimento.CANCELADO)):
+            continue  # já está nas baixas do SGA (ou foi cancelada)
+        carregado += float(tr.litros)
     entregue = float(Abastecimento.objects.filter(tanque=t, abastecido_em__gte=desde)
                      .exclude(situacao=Abastecimento.CANCELADO).exclude(observacao__startswith=MARCA_TESTE)
                      .aggregate(s=Sum('litros'))['s'] or 0)
@@ -230,20 +242,96 @@ class MedicaoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.Ge
         auditar(self.request, 'medicao.criar', m.tanque, litros=float(m.litros))
 
 
-class CarregamentoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
-    """Diesel que entrou no comboio, registrado no Manager (o do SGA é lido sozinho)."""
+class TransferenciaViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    """
+    Tanque → comboio (ou posto externo → comboio). No comboio "já baixado no carregamento" cria o
+    abastecimento do caminhão que vai ao SGA. Idempotente pelo uuid (o app manda offline).
+    """
     permission_classes = [PodeRegistrar]
-    serializer_class = CarregamentoSerializer
+    serializer_class = TransferenciaSerializer
+    throttle_classes = [LimiteRegistro]
+    lookup_field = 'uuid'
 
     def get_queryset(self):
-        qs = CarregamentoComboio.objects.select_related('usuario', 'comboio', 'origem')
-        if self.request.query_params.get('comboio'):
-            qs = qs.filter(comboio_id=self.request.query_params['comboio'])
-        return qs[:200]
+        qs = Transferencia.objects.select_related('usuario', 'destino', 'origem', 'abastecimento')
+        user = self.request.user
+        if not eh_gestor(user) and not user.groups.filter(name='CombustivelLeitura').exists() and not user.is_superuser:
+            qs = qs.filter(usuario=user)
+        if self.action == 'list':
+            inicio, fim = _periodo(self.request, dias=60)
+            qs = qs.filter(transferido_em__date__gte=inicio, transferido_em__date__lte=fim)
+            if self.request.query_params.get('destino'):
+                qs = qs.filter(destino_id=self.request.query_params['destino'])
+        return qs
 
+    def create(self, request, *args, **kwargs):
+        uid = request.data.get('uuid')
+        if uid:
+            existente = Transferencia.objects.filter(uuid=uid).first()
+            if existente:
+                if existente.usuario_id != request.user.pk:
+                    return Response({'detail': 'Identificador já usado.'}, status=status.HTTP_409_CONFLICT)
+                return Response(self.get_serializer(existente).data, status=status.HTTP_200_OK)
+        return super().create(request, *args, **kwargs)
+
+    @transaction.atomic
     def perform_create(self, serializer):
-        c = serializer.save(usuario=self.request.user)
-        auditar(self.request, 'comboio.carregar', c.comboio, litros=float(c.litros))
+        dados = serializer.validated_data
+        destino, origem = dados['destino'], dados.get('origem')
+        funcionarios, _ = _erp_ou_503(erp.funcionarios)
+        fun = next((f for f in (funcionarios or []) if f['cod'] == dados.get('funcionario')), None)
+        tr = serializer.save(usuario=self.request.user, funcionario_nome=(fun or {}).get('nome', ''))
+        if origem and not destino.envia_ao_sga and destino.equipamento:
+            # Como a bomba faz hoje: o carregamento é um abastecimento do caminhão, baixado no SGA.
+            base = {'equipamento': destino.equipamento, 'funcionario': tr.funcionario or 0,
+                    'abastecido_em': tr.transferido_em, 'litros': tr.litros,
+                    'encerrante_inicial': tr.encerrante_inicial, 'encerrante_final': tr.encerrante_final,
+                    'foto_bomba': tr.foto_bomba, 'foto_painel': True, 'horimetro': None, 'km': None}
+            eqp, fun2, alertas = _contexto_conferencia(base, origem)
+            # O caminhão não precisa de horímetro no carregamento (não é consumo dele).
+            alertas = [a for a in alertas if a['codigo'] not in ('SEM_HORIMETRO', 'SEM_KM', 'SEM_FOTO_PAINEL')]
+            ab = Abastecimento(
+                tanque=origem, abastecido_em=tr.transferido_em, equipamento=destino.equipamento,
+                equipamento_nome=(eqp or {}).get('nome', ''), placa=(eqp or {}).get('placa', '')[:10],
+                centro_custo=(eqp or {}).get('centro_custo'), funcionario=tr.funcionario or 0,
+                funcionario_nome=tr.funcionario_nome, litros=tr.litros, encerrante_inicial=tr.encerrante_inicial,
+                encerrante_final=tr.encerrante_final, observacao=f'Transferência para {destino.nome}'[:400],
+                alertas=alertas, bloqueado=regras.bloqueia(alertas), registrado_por=self.request.user)
+            if tr.foto_bomba:
+                ab.foto_bomba.name = tr.foto_bomba.name   # mesmo arquivo, sem copiar
+            ab.save()
+            tr.abastecimento = ab
+            tr.save(update_fields=['abastecimento'])
+        auditar(self.request, 'transferencia.criar', tr.uuid, litros=float(tr.litros),
+                origem=origem.id if origem else None, destino=destino.id)
+
+    @action(detail=True, methods=['post'], permission_classes=[PodeGerir])
+    @transaction.atomic
+    def cancelar(self, request, uuid=None):
+        tr = self.get_object()
+        motivo = (request.data.get('motivo') or '').strip()
+        if len(motivo) < 5:
+            return Response({'detail': 'Diga o motivo do cancelamento.'}, status=status.HTTP_400_BAD_REQUEST)
+        ab = tr.abastecimento
+        if ab and ab.situacao == Abastecimento.BAIXADO:
+            return Response({'detail': 'Já baixada no SGA: cancele (ou devolva) a baixa lá.'}, status=status.HTTP_400_BAD_REQUEST)
+        if ab:
+            ab.situacao, ab.motivo_cancelamento = Abastecimento.CANCELADO, f'Transferência cancelada: {motivo}'[:300]
+            ab.save(update_fields=['situacao', 'motivo_cancelamento', 'atualizado_em'])
+        tr.situacao, tr.motivo_cancelamento = Transferencia.CANCELADA, motivo[:300]
+        tr.save(update_fields=['situacao', 'motivo_cancelamento'])
+        auditar(request, 'transferencia.cancelar', tr.uuid, motivo=motivo)
+        return Response(self.get_serializer(tr).data)
+
+    @action(detail=True, methods=['get'], permission_classes=[PodeVer])
+    def foto(self, request, uuid=None):
+        tr = self.get_object()
+        if not tr.foto_bomba:
+            raise Http404
+        resp = FileResponse(tr.foto_bomba.open('rb'), content_type='image/jpeg')
+        resp['Cache-Control'] = 'private, max-age=3600'
+        resp['X-Content-Type-Options'] = 'nosniff'
+        return resp
 
 
 # ── Abastecimentos ───────────────────────────────────────────────────────────────

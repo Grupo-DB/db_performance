@@ -64,7 +64,7 @@ class Tanque(models.Model):
       carregamento no equipamento do comboio (VEC-CS-02 = 519). As entregas ficam só no Manager
       (situação INTERNO): mostram o consumo de cada máquina e o saldo do caminhão.
     * ``True`` — "baixa em cada entrega": cada entrega vai ao SGA no centro de custo da máquina;
-      o carregamento é registrado no Manager (CarregamentoComboio) e NÃO pode ser baixa no SGA.
+      o carregamento é registrado no Manager (Transferencia) e NÃO pode ser baixa no SGA.
     """
     FIXO, COMBOIO = 'FIXO', 'COMBOIO'
     TIPOS = [(FIXO, 'Tanque fixo'), (COMBOIO, 'Comboio')]
@@ -111,20 +111,38 @@ class MedicaoTanque(models.Model):
         ordering = ['-medido_em']
 
 
-class CarregamentoComboio(models.Model):
-    """Diesel que entrou no comboio registrado no Manager (o que veio do SGA é lido na hora)."""
-    comboio = models.ForeignKey(Tanque, on_delete=models.CASCADE, related_name='carregamentos')
-    origem = models.ForeignKey(Tanque, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
-    carregado_em = models.DateTimeField(default=timezone.now)
+class Transferencia(models.Model):
+    """
+    Diesel que sai de um tanque fixo (ou de um posto externo) e entra num comboio.
+
+    No comboio "já baixado no carregamento" a transferência É um abastecimento do caminhão no SGA
+    (como a bomba/CTA faz hoje no VEC-CS-02): o Manager cria esse Abastecimento (``abastecimento``)
+    e ele segue o caminho normal até a baixa. No comboio "baixa em cada entrega" ela é só movimento
+    interno. ``origem`` vazia = posto externo (entra no caminhão sem sair de tanque nosso).
+    """
+    REGISTRADA, CANCELADA = 'REGISTRADA', 'CANCELADA'
+    SITUACOES = [(REGISTRADA, 'Registrada'), (CANCELADA, 'Cancelada')]
+
+    uuid = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
+    origem = models.ForeignKey(Tanque, on_delete=models.PROTECT, null=True, blank=True, related_name='transferencias_saida')
+    destino = models.ForeignKey(Tanque, on_delete=models.PROTECT, related_name='transferencias_entrada')
+    transferido_em = models.DateTimeField(default=timezone.now)
     litros = models.DecimalField(max_digits=8, decimal_places=2)
     encerrante_inicial = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     encerrante_final = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    funcionario = models.PositiveIntegerField(null=True, blank=True, help_text='Quem operou a bomba (FUNCOD)')
+    funcionario_nome = models.CharField(max_length=120, blank=True, default='')
+    foto_bomba = models.ImageField(upload_to=_caminho_foto, storage=PRIVADO, null=True, blank=True)
     observacao = models.CharField(max_length=300, blank=True, default='')
+    abastecimento = models.OneToOneField('Abastecimento', on_delete=models.SET_NULL, null=True, blank=True,
+                                         related_name='transferencia')
+    situacao = models.CharField(max_length=10, choices=SITUACOES, default=REGISTRADA)
+    motivo_cancelamento = models.CharField(max_length=300, blank=True, default='')
     usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='+')
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-carregado_em']
+        ordering = ['-transferido_em']
 
 
 class LoteIntegracao(models.Model):

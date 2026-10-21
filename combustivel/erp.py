@@ -262,7 +262,7 @@ def carregamentos_comboio(equipamento: int, produto: int, desde: datetime) -> li
         WHERE BESTEQP = :eqp AND BESTESTQ = :item AND BESTDATA >= :desde AND BESTSIT IN (8, 10)""",
         eqp=equipamento, item=produto, desde=desde)
     return [{'cod': int(l['cod']), 'data': l['data'].isoformat() if l['data'] else None,
-             'litros': (-1 if int(l['sit']) == 10 else 1) * _num(l['litros']), 'via_bomba': bool(l['iab'])}
+             'litros': (-1 if int(l['sit']) == 10 else 1) * _num(l['litros']), 'iab': int(l['iab'] or 0) or None}
             for l in linhas]
 
 
