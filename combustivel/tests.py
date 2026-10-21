@@ -17,9 +17,9 @@ from .models import BASE_CODIGO_INTEGRACAO, Abastecimento, ChaveIntegracao, Tanq
 
 EQUIPAMENTOS = [
     {'cod': 531, 'nome': 'VEC-CF-09 - CAMINHAO FORA EST', 'placa': 'IUB-5649', 'centro_custo': 5481,
-     'centro_custo_nome': 'Transporte', 'usa_km': False, 'usa_horimetro': True, 'integra': True},
+     'centro_custo_nome': 'Transporte', 'usa_km': False, 'usa_horimetro': True, 'integra': True, 'abastece': True, 'tag': 'VEC-CF-09'},
     {'cod': 999, 'nome': 'SEM IDENT', 'placa': '', 'centro_custo': None, 'centro_custo_nome': '',
-     'usa_km': False, 'usa_horimetro': True, 'integra': False},
+     'usa_km': False, 'usa_horimetro': True, 'integra': False, 'abastece': True, 'tag': 'SEM'},
 ]
 FUNCIONARIOS = [{'cod': 194, 'nome': 'Frentista', 'integra': True}, {'cod': 300, 'nome': 'Sem ident', 'integra': False}]
 
@@ -386,3 +386,10 @@ class ComboioTests(CombustivelBase):
         self.assertEqual(rk[519]['litros'], 700)
         self.assertEqual((rk[531]['litros'], rk[531]['custo'], rk[531]['via_comboio']), (300, 1800, 300))
         self.assertEqual(p['kpis']['litros'], 1000)
+
+
+class TagTests(APITestCase):
+    def test_tag_sai_do_nome(self):
+        from .erp import tag_do_nome
+        self.assertEqual(tag_do_nome('VEC-CF-09 - CAMINHAO FORA EST SCANIA IUB'), 'VEC-CF-09')
+        self.assertEqual(tag_do_nome('SEM TRACO'), 'SEM TRACO')

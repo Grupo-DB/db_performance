@@ -60,22 +60,43 @@ def _cacheado(chave, segundos, func):
     return valor
 
 
+# Tipos de equipamento (TIPOEQUIPAMENTO) que abastecem diesel: veículos, máquinas móveis e os
+# motores estacionários que vão ao tanque (gerador, bomba d'água). A planta (correia, rosca, silo,
+# moinho…) fica de fora — eram 900 dos 986 equipamentos ativos na lista do registro.
+TIPOS_QUE_ABASTECEM = {
+    1: 'Carregadeira', 2: 'Escavadeira', 3: 'Veículos pesados', 4: 'Veículos leves', 13: 'Perfuratriz',
+    35: 'Gerador', 55: 'Munck', 59: 'Empilhadeira', 60: 'Patrola', 61: 'Retroescavadeira', 62: 'Sonda',
+    63: 'Trator', 64: "Bomba d'água", 74: 'Picador de cavaco', 85: 'Veículos leves PPR', 87: 'Ônibus', 94: 'Rompedor',
+}
+
+
+def tag_do_nome(nome: str) -> str:
+    """'VEC-CF-09 - CAMINHAO FORA EST SCANIA IUB' → 'VEC-CF-09' (o SGA guarda TAG e descrição no mesmo campo)."""
+    nome = _texto(nome)
+    return nome.split(' - ', 1)[0].strip() if ' - ' in nome else nome
+
+
 # ── Cadastros ────────────────────────────────────────────────────────────────────
 def equipamentos() -> list[dict]:
     def buscar():
         linhas = _rows("""
             SELECT e.EQPCOD cod, e.EQPNOME nome, e.EQPPLACA placa, e.EQPCC cc, c.CCNOME cc_nome,
-                   e.EQPKMSN km, e.EQPHRSN hr, e.EQPIDENTIAB ident
+                   e.EQPKMSN km, e.EQPHRSN hr, e.EQPIDENTIAB ident, e.EQPTEQP tipo
             FROM EQUIPAMENTO e LEFT JOIN CENTROCUSTO c ON c.CCCOD = e.EQPCC
             WHERE ISNULL(e.EQPINATIVO, 'N') <> 'S'""")
         return [{
             'cod': int(l['cod']), 'nome': _texto(l['nome']), 'placa': _texto(l['placa']),
+            'tag': tag_do_nome(l['nome']),
+            'descricao': _texto(l['nome']).split(' - ', 1)[1].strip() if ' - ' in _texto(l['nome']) else '',
+            'tipo': int(l['tipo'] or 0) or None,
+            'tipo_nome': TIPOS_QUE_ABASTECEM.get(int(l['tipo'] or 0), ''),
+            'abastece': int(l['tipo'] or 0) in TIPOS_QUE_ABASTECEM,
             'centro_custo': int(l['cc'] or 0) or None, 'centro_custo_nome': _texto(l['cc_nome']),
             'usa_km': _texto(l['km']) == 'S', 'usa_horimetro': _texto(l['hr']) == 'S',
             # Sem identificação o SgaAbastecimento recusa com "Equipamento não identificado".
             'integra': bool(_texto(l['ident'])),
         } for l in linhas]
-    return _cacheado('comb:equipamentos', CACHE_CADASTRO, buscar)
+    return _cacheado('comb:equipamentos:v2', CACHE_CADASTRO, buscar)
 
 
 def funcionarios() -> list[dict]:

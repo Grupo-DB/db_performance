@@ -171,7 +171,8 @@ class CadastrosView(APIView):
         if erro1 or erro2:
             return Response({'detail': erro1 or erro2}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response({
-            'equipamentos': eqp, 'funcionarios': fun,
+            # Só o que abastece (veículos e máquinas a diesel), não a planta inteira.
+            'equipamentos': [e for e in eqp if e['abastece']], 'funcionarios': fun,
             'tanques': TanqueSerializer(Tanque.objects.filter(ativo=True), many=True).data,
             'produtos': [{'cod': k, **v} for k, v in PRODUTOS.items()],
         })
