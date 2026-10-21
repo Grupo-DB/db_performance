@@ -112,6 +112,13 @@ def funcionarios() -> list[dict]:
     return _cacheado('comb:funcionarios', CACHE_CADASTRO, buscar)
 
 
+def nomes_centro_custo(codigos: list[int]) -> dict[int, str]:
+    if not codigos:
+        return {}
+    linhas = _rows("SELECT CCCOD cod, CCNOME nome FROM CENTROCUSTO WHERE CCCOD IN :ccs", expandir=('ccs',), ccs=list(codigos))
+    return {int(l['cod']): _texto(l['nome']) for l in linhas}
+
+
 def mapa_equipamentos() -> dict[int, dict]:
     return {e['cod']: e for e in equipamentos()}
 

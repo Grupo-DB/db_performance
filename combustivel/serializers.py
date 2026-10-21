@@ -1,10 +1,12 @@
 import io
+from datetime import timedelta
 
 from django.core.files.base import ContentFile
+from django.utils import timezone
 from PIL import Image, ImageOps, UnidentifiedImageError
 from rest_framework import serializers
 
-from .models import Abastecimento, ChaveIntegracao, Transferencia, LoteIntegracao, MedicaoTanque, Tanque
+from .models import Abastecimento, ChaveIntegracao, LoteIntegracao, Lubrificacao, MedicaoTanque, Tanque, Transferencia
 
 FOTO_MAX_BYTES = 8 * 1024 * 1024
 FOTO_MAX_PIXELS = 40_000_000
@@ -237,3 +239,39 @@ class ChaveSerializer(serializers.ModelSerializer):
             except ValueError:
                 raise serializers.ValidationError(f'"{linha}" não é um IP ou rede válida.')
         return texto
+
+
+class LubrificacaoSerializer(serializers.ModelSerializer):
+    uuid = serializers.UUIDField(required=False)
+    foto = FotoSegura(required=False, allow_null=True, write_only=True)
+    tem_foto = serializers.SerializerMethodField()
+    usuario_nome = serializers.SerializerMethodField()
+    tipo_nome = serializers.CharField(source='get_tipo_display', read_only=True)
+    compartimento_nome = serializers.CharField(source='get_compartimento_display', read_only=True)
+
+    class Meta:
+        model = Lubrificacao
+        fields = ['id', 'uuid', 'lubrificado_em', 'equipamento', 'equipamento_nome', 'tipo', 'tipo_nome', 'compartimento',
+                  'compartimento_nome', 'produto', 'produto_nome', 'unidade', 'quantidade', 'horimetro', 'km', 'funcionario',
+                  'funcionario_nome', 'foto', 'tem_foto', 'observacao', 'situacao', 'motivo_cancelamento', 'usuario_nome', 'criado_em']
+        read_only_fields = ['equipamento_nome', 'produto_nome', 'unidade', 'funcionario_nome', 'situacao',
+                            'motivo_cancelamento', 'criado_em']
+
+    def get_tem_foto(self, obj):
+        return bool(obj.foto)
+
+    def get_usuario_nome(self, obj):
+        return (obj.usuario.get_full_name() or obj.usuario.username) if obj.usuario else ''
+
+    def validate(self, attrs):
+        if attrs['quantidade'] <= 0:
+            raise serializers.ValidationError({'quantidade': 'Quantidade precisa ser maior que zero.'})
+        if attrs['quantidade'] > 2000:
+            raise serializers.ValidationError({'quantidade': 'Quantidade acima de 2.000: confira a unidade.'})
+        h = attrs.get('horimetro')
+        if h is not None and h < 0:
+            raise serializers.ValidationError({'horimetro': 'Horímetro negativo.'})
+        quando = attrs.get('lubrificado_em')
+        if quando and quando > timezone.now() + timedelta(minutes=10):
+            raise serializers.ValidationError({'lubrificado_em': 'Data no futuro.'})
+        return attrs

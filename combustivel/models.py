@@ -226,6 +226,46 @@ class Abastecimento(models.Model):
         return BASE_CODIGO_INTEGRACAO + self.pk
 
 
+class Lubrificacao(models.Model):
+    """
+    Lubrificação feita no campo (completar nível, troca de óleo, engraxar), registrada pelo celular.
+    Fica SÓ no Manager — não vira baixa no SGA (a baixa do lubrificante continua pela requisição/OS).
+    Serve para saber o que cada máquina recebeu, com horímetro, e cruzar com as baixas do SGA.
+    """
+    COMPLETAR, TROCA, ENGRAXAR = 'COMPLETAR', 'TROCA', 'ENGRAXAR'
+    TIPOS = [(COMPLETAR, 'Completar nível'), (TROCA, 'Troca de óleo'), (ENGRAXAR, 'Engraxar')]
+    COMPARTIMENTOS = [('MOTOR', 'Motor'), ('HIDRAULICO', 'Hidráulico'), ('TRANSMISSAO', 'Transmissão'),
+                      ('DIFERENCIAL', 'Diferencial/eixo'), ('REDUTOR', 'Redutor/engrenagem'),
+                      ('PONTOS', 'Pontos de graxa'), ('OUTRO', 'Outro')]
+    REGISTRADA, CANCELADA = 'REGISTRADA', 'CANCELADA'
+    SITUACOES = [(REGISTRADA, 'Registrada'), (CANCELADA, 'Cancelada')]
+
+    uuid = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
+    lubrificado_em = models.DateTimeField(default=timezone.now)
+    equipamento = models.PositiveIntegerField(help_text='EQPCOD do SGA')
+    equipamento_nome = models.CharField(max_length=120, blank=True, default='')
+    tipo = models.CharField(max_length=10, choices=TIPOS)
+    compartimento = models.CharField(max_length=12, choices=COMPARTIMENTOS, default='OUTRO')
+    produto = models.PositiveIntegerField(help_text='ESTQCOD do lubrificante no SGA')
+    produto_nome = models.CharField(max_length=120, blank=True, default='')
+    unidade = models.CharField(max_length=4, blank=True, default='')
+    quantidade = models.DecimalField(max_digits=9, decimal_places=2)
+    horimetro = models.DecimalField(max_digits=10, decimal_places=1, null=True, blank=True)
+    km = models.PositiveIntegerField(null=True, blank=True)
+    funcionario = models.PositiveIntegerField(null=True, blank=True, help_text='Quem lubrificou (FUNCOD)')
+    funcionario_nome = models.CharField(max_length=120, blank=True, default='')
+    foto = models.ImageField(upload_to=_caminho_foto, storage=PRIVADO, null=True, blank=True)
+    observacao = models.CharField(max_length=300, blank=True, default='')
+    situacao = models.CharField(max_length=10, choices=SITUACOES, default=REGISTRADA)
+    motivo_cancelamento = models.CharField(max_length=300, blank=True, default='')
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-lubrificado_em']
+        indexes = [models.Index(fields=['equipamento', 'lubrificado_em'])]
+
+
 class ChaveIntegracao(models.Model):
     """
     Chave de API para o SGA (ou outro sistema) BUSCAR os abastecimentos. Só o hash fica

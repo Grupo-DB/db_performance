@@ -12,16 +12,16 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import erp, integracao, regras
+from . import erp, integracao, lubrificacao, regras
 from .models import (
-    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, Transferencia, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, MedicaoTanque, Tanque,
+    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, Transferencia, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, Lubrificacao, MedicaoTanque, Tanque,
 )
 from .permissions import (
     AutenticacaoChave, LeituraOuGestao, LimiteIntegracao, LimiteRegistro, PodeGerir, PodeRegistrar, PodeVer, TemChave,
     TemChaveQueConfirma, eh_gestor, ip_do_pedido,
 )
 from .serializers import (
-    AbastecimentoSerializer, TransferenciaSerializer, ChaveSerializer, LoteSerializer, MedicaoSerializer, TanqueSerializer,
+    AbastecimentoSerializer, TransferenciaSerializer, ChaveSerializer, LoteSerializer, LubrificacaoSerializer, MedicaoSerializer, TanqueSerializer,
 )
 
 # Situações que ainda podem ir para o SGA.
@@ -749,4 +749,155 @@ class PainelView(APIView):
         return Response({
             'inicio': inicio, 'fim': fim, **dados, 'anomalias': anomalias[:50], 'tanques': tanques,
             'integracao': {**situacao, 'horas_sem_importar': horas_parada, 'manager': manager},
+        })
+
+
+# ── Lubrificação ─────────────────────────────────────────────────────────────────
+def _leituras_horimetro(desde: date, ate: date) -> list[dict]:
+    """Horímetros do SGA (integração) + os digitados no Manager (abastecimento e lubrificação)."""
+    sga = [{**l, 'origem': 'SGA'} for l in erp.leituras(desde, ate)]
+    manager = [{'equipamento': a['equipamento'], 'data': a['abastecido_em'].isoformat(), 'horimetro': float(a['horimetro']),
+                'origem': 'Manager'}
+               for a in Abastecimento.objects.filter(abastecido_em__date__gte=desde, horimetro__isnull=False)
+               .exclude(situacao=Abastecimento.CANCELADO).exclude(observacao__startswith=MARCA_TESTE)
+               .values('equipamento', 'abastecido_em', 'horimetro')]
+    campo = [{'equipamento': l['equipamento'], 'data': l['lubrificado_em'].isoformat(), 'horimetro': float(l['horimetro']),
+              'origem': 'Lubrificação'}
+             for l in Lubrificacao.objects.filter(lubrificado_em__date__gte=desde, horimetro__isnull=False)
+             .exclude(situacao=Lubrificacao.CANCELADA).values('equipamento', 'lubrificado_em', 'horimetro')]
+    return sga + manager + campo
+
+
+class LubrificacaoCadastrosView(APIView):
+    """Para o registro de campo: todos os equipamentos ativos (britador também lubrifica), lubrificantes e funcionários."""
+    permission_classes = [PodeVer]
+
+    def get(self, request):
+        try:
+            eqp, fun, prods = erp.equipamentos(), erp.funcionarios(), lubrificacao.produtos()
+        except erp.ErpIndisponivel as exc:
+            return Response({'detail': f'SGA indisponível no momento ({exc}).'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({
+            'equipamentos': [{k: e[k] for k in ('cod', 'nome', 'tag', 'descricao', 'abastece', 'usa_km', 'usa_horimetro')} for e in eqp],
+            'funcionarios': [{'cod': f['cod'], 'nome': f['nome']} for f in fun],
+            'produtos': prods,
+            'tipos': [{'value': v, 'label': l} for v, l in Lubrificacao.TIPOS],
+            'compartimentos': [{'value': v, 'label': l} for v, l in Lubrificacao.COMPARTIMENTOS],
+        })
+
+
+class LubrificacaoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    """Lubrificação de campo, só no Manager. Idempotente pelo uuid (o app manda offline)."""
+    permission_classes = [PodeRegistrar]
+    serializer_class = LubrificacaoSerializer
+    throttle_classes = [LimiteRegistro]
+    lookup_field = 'uuid'
+
+    def get_queryset(self):
+        qs = Lubrificacao.objects.select_related('usuario')
+        user = self.request.user
+        if not eh_gestor(user) and not user.groups.filter(name='CombustivelLeitura').exists() and not user.is_superuser:
+            qs = qs.filter(usuario=user)
+        if self.action == 'list':
+            inicio, fim = _periodo(self.request, dias=60)
+            qs = qs.filter(lubrificado_em__date__gte=inicio, lubrificado_em__date__lte=fim)
+            if self.request.query_params.get('equipamento'):
+                qs = qs.filter(equipamento=self.request.query_params['equipamento'])
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        uid = request.data.get('uuid')
+        if uid:
+            existente = Lubrificacao.objects.filter(uuid=uid).first()
+            if existente:
+                if existente.usuario_id != request.user.pk:
+                    return Response({'detail': 'Identificador já usado.'}, status=status.HTTP_409_CONFLICT)
+                return Response(self.get_serializer(existente).data, status=status.HTTP_200_OK)
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        dados = serializer.validated_data
+        equipamentos, _ = _erp_ou_503(erp.mapa_equipamentos)
+        funcionarios, _ = _erp_ou_503(erp.funcionarios)
+        prods, _ = _erp_ou_503(lubrificacao.produtos)
+        eqp = (equipamentos or {}).get(int(dados['equipamento']))
+        if equipamentos is not None and not eqp:
+            raise ValidationError({'equipamento': 'Equipamento não encontrado (ou inativo) no SGA.'})
+        prod = next((p for p in (prods or []) if p['cod'] == dados['produto']), None)
+        if prods is not None and not prod:
+            raise ValidationError({'produto': 'Lubrificante não encontrado no SGA.'})
+        fun = next((f for f in (funcionarios or []) if f['cod'] == dados.get('funcionario')), None)
+        lub = serializer.save(usuario=self.request.user, equipamento_nome=(eqp or {}).get('nome', '')[:120],
+                              produto_nome=(prod or {}).get('nome', '')[:120], unidade=(prod or {}).get('unidade', '')[:4],
+                              funcionario_nome=(fun or {}).get('nome', '')[:120])
+        auditar(self.request, 'lubrificacao.criar', lub.uuid, equipamento=lub.equipamento, produto=lub.produto,
+                quantidade=float(lub.quantidade))
+
+    @action(detail=True, methods=['post'], permission_classes=[PodeGerir])
+    def cancelar(self, request, uuid=None):
+        lub = self.get_object()
+        motivo = (request.data.get('motivo') or '').strip()
+        if len(motivo) < 5:
+            return Response({'detail': 'Diga o motivo do cancelamento.'}, status=status.HTTP_400_BAD_REQUEST)
+        lub.situacao, lub.motivo_cancelamento = Lubrificacao.CANCELADA, motivo[:300]
+        lub.save(update_fields=['situacao', 'motivo_cancelamento'])
+        auditar(request, 'lubrificacao.cancelar', lub.uuid, motivo=motivo)
+        return Response(self.get_serializer(lub).data)
+
+    @action(detail=True, methods=['get'], permission_classes=[PodeVer])
+    def foto(self, request, uuid=None):
+        lub = self.get_object()
+        if not lub.foto:
+            raise Http404
+        resp = FileResponse(lub.foto.open('rb'), content_type='image/jpeg')
+        resp['Cache-Control'] = 'private, max-age=3600'
+        resp['X-Content-Type-Options'] = 'nosniff'
+        return resp
+
+
+class LubrificacaoPainelView(APIView):
+    """Consumo e custo de óleo e graxa (baixas do SGA) no período, por produto e equipamento."""
+    permission_classes = [PodeVer]
+
+    def get(self, request):
+        inicio, fim = _periodo(request, dias=90)
+        try:
+            baixas = lubrificacao.baixas(inicio, fim)
+            equipamentos = erp.mapa_equipamentos()
+            leituras = _leituras_horimetro(inicio - timedelta(days=15), fim)
+            ccs = {b['centro_custo'] for b in baixas if b['centro_custo'] and not b['equipamento']}
+            nomes_cc = erp.nomes_centro_custo(sorted(ccs))
+        except erp.ErpIndisponivel as exc:
+            return Response({'detail': f'SGA indisponível no momento ({exc}).'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        campo = list(Lubrificacao.objects.filter(lubrificado_em__date__gte=inicio, lubrificado_em__date__lte=fim)
+                     .exclude(situacao=Lubrificacao.CANCELADA).values('tipo', 'quantidade'))
+        dados = lubrificacao.painel(baixas, lubrificacao.horas_no_periodo(leituras, inicio, fim), equipamentos, campo)
+        for c in dados['centros_custo']:
+            c['nome'] = nomes_cc.get(c['centro_custo'], 'Sem centro de custo' if not c['centro_custo'] else f"CC {c['centro_custo']}")
+        return Response({'inicio': inicio, 'fim': fim, **dados})
+
+
+class PreventivasView(APIView):
+    """Próximas preventivas por horímetro, recalculadas pelo horímetro dos abastecimentos."""
+    permission_classes = [PodeVer]
+
+    def get(self, request):
+        hoje = timezone.localdate()
+        try:
+            pend = lubrificacao.pendentes()
+            equipamentos = erp.mapa_equipamentos()
+            leituras = _leituras_horimetro(hoje - timedelta(days=120), hoje)
+        except erp.ErpIndisponivel as exc:
+            return Response({'detail': f'SGA indisponível no momento ({exc}).'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        atuais = lubrificacao.horimetros(leituras)
+        planos = lubrificacao.preventivas(pend, atuais, equipamentos, hoje)
+        com_plano = {p['equipamento'] for p in planos}
+        suspeitas = lubrificacao.leituras_suspeitas(leituras, equipamentos, hoje - timedelta(days=60))
+        resumo = {s: sum(1 for p in planos if p['situacao'] == s) for s in ('VENCIDA', 'PROXIMA', 'EM_DIA', 'INDEFINIDA')}
+        resumo['fantasmas'] = sum(1 for p in planos if p['vencida_fantasma'])
+        resumo['sga_vencidas'] = sum(1 for p in planos if p['sga_vencida'])
+        return Response({
+            'rodada': pend['rodada'], 'resumo': resumo, 'planos': planos,
+            # Primeiro as das máquinas com plano: é ali que a leitura errada estraga a preventiva.
+            'leituras_suspeitas': sorted(suspeitas, key=lambda s: s['equipamento'] not in com_plano),
         })

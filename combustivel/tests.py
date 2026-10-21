@@ -428,3 +428,103 @@ class TagTests(APITestCase):
         from .erp import tag_do_nome
         self.assertEqual(tag_do_nome('VEC-CF-09 - CAMINHAO FORA EST SCANIA IUB'), 'VEC-CF-09')
         self.assertEqual(tag_do_nome('SEM TRACO'), 'SEM TRACO')
+
+
+PRODUTOS_LUB = [{'cod': 2856, 'nome': 'GRAXA MULTIFAK EP2', 'grupo': 306, 'grupo_nome': 'Graxa automotiva',
+                 'categoria': 'GRAXA', 'unidade': 'kg', 'usos': 300}]
+
+
+class LubrificacaoTests(CombustivelBase):
+    def setUp(self):
+        super().setUp()
+        patch('combustivel.lubrificacao.produtos', return_value=PRODUTOS_LUB).start()
+
+    def _dados(self, **extra):
+        return {'uuid': str(uuid.uuid4()), 'equipamento': 531, 'tipo': 'ENGRAXAR', 'compartimento': 'PONTOS',
+                'produto': 2856, 'quantidade': '2.5', 'horimetro': '52900', 'funcionario': 194, **extra}
+
+    def test_registra_com_nomes_do_sga_e_e_idempotente(self):
+        self.client.force_authenticate(self.operador)
+        dados = self._dados()
+        r = self.client.post('/combustivel/lubrificacoes/', dados)
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['produto_nome'], 'GRAXA MULTIFAK EP2')
+        self.assertEqual(r.data['unidade'], 'kg')
+        self.assertEqual(r.data['funcionario_nome'], 'Frentista')
+        r2 = self.client.post('/combustivel/lubrificacoes/', dados)
+        self.assertEqual(r2.status_code, 200)
+        self.client.force_authenticate(self.gestor)
+        self.assertEqual(self.client.post('/combustivel/lubrificacoes/', dados).status_code, 409)
+
+    def test_recusa_produto_ou_equipamento_fora_do_sga(self):
+        self.client.force_authenticate(self.operador)
+        self.assertEqual(self.client.post('/combustivel/lubrificacoes/', self._dados(produto=1)).status_code, 400)
+        self.assertEqual(self.client.post('/combustivel/lubrificacoes/', self._dados(equipamento=12345)).status_code, 400)
+        self.assertEqual(self.client.post('/combustivel/lubrificacoes/', self._dados(quantidade='0')).status_code, 400)
+
+    def test_sem_grupo_nao_registra(self):
+        self.client.force_authenticate(self.estranho)
+        self.assertEqual(self.client.post('/combustivel/lubrificacoes/', self._dados()).status_code, 403)
+
+
+class LubrificacaoContasTests(APITestCase):
+    def _l(self, dia, hr, eqp=1):
+        return {'equipamento': eqp, 'data': f'2026-10-{dia:02d}T10:00:00', 'horimetro': hr}
+
+    def test_categoria_nao_confunde_aditivo_com_oleo(self):
+        from .lubrificacao import categoria
+        self.assertEqual(categoria('OLEO URSA 15W-40', 283), 'OLEO')
+        self.assertEqual(categoria('ADITIVO ARREFECEDORA P/ RADIADORES', 283), 'OUTROS')
+        self.assertEqual(categoria('GRAXA MULTIFAK EP2', 306), 'GRAXA')
+        self.assertEqual(categoria('FLUIDO ULTRACOOLANT', 306), 'OUTROS')
+
+    def test_leitura_errada_isolada_nao_vira_horimetro_atual(self):
+        from .lubrificacao import horimetros
+        at = horimetros([self._l(1, 1000), self._l(2, 1010), self._l(3, 1020), self._l(4, 90000)])
+        self.assertEqual(at[1]['horimetro'], 1020)
+
+    def test_horimetro_trocado_vale_a_serie_nova(self):
+        from .lubrificacao import horimetros, leituras_suspeitas
+        ls = [self._l(1, 10000), self._l(2, 10010), self._l(10, 60), self._l(11, 70), self._l(12, 80)]
+        self.assertEqual(horimetros(ls)[1]['horimetro'], 80)
+        s = leituras_suspeitas(ls, {}, timezone.localdate().replace(year=2026, month=9, day=1))
+        self.assertEqual([x['tipo'] for x in s], ['REINICIOU'])
+
+    def test_preventiva_acha_a_escala_e_marca_a_parada(self):
+        from datetime import date
+        from .lubrificacao import preventivas
+        pend = {'rodada': 10, 'planos': [
+            # Contador ×10 no SGA: 319250 = 31.925 h; plano de 400 h.
+            {'rodada': 10, 'equipamento': 1, 'plano': 1, 'plano_nome': 'P', 'periodo': 400, 'classe': 4, 'ultima_os': 1,
+             'ultima': 319250, 'data_ultima': None, 'registro': 322850, 'data_registro': '2026-10-01T00:00:00',
+             'proxima': 323250, 'restante': 40, 'vencida': False, 'por_dia': 8},
+            # Rodada antiga e horímetro que não fecha com nenhuma escala: vencida "fantasma".
+            {'rodada': 3, 'equipamento': 2, 'plano': 1, 'plano_nome': 'P', 'periodo': 400, 'classe': 4, 'ultima_os': 1,
+             'ultima': 894099, 'data_ultima': None, 'registro': 929830, 'data_registro': '2024-01-29T00:00:00',
+             'proxima': 898099, 'restante': -3173, 'vencida': True, 'por_dia': 0},
+        ]}
+        atuais = {1: {'horimetro': 32300.0, 'data': '2026-10-05T00:00:00', 'origem': 'SGA', 'por_dia': 8.0},
+                  2: {'horimetro': 369.7, 'data': '2026-10-05T00:00:00', 'origem': 'SGA', 'por_dia': 5.0}}
+        p1, p2 = sorted(preventivas(pend, atuais, {}, date(2026, 10, 21)), key=lambda p: p['equipamento'])
+        self.assertEqual(p1['escala'], 10)
+        self.assertEqual(p1['proxima_h'], 32325.0)
+        self.assertEqual(p1['restante'], 25.0)
+        self.assertEqual(p1['situacao'], 'PROXIMA')
+        self.assertEqual(p2['situacao'], 'INDEFINIDA')
+        self.assertTrue(p2['vencida_fantasma'])
+        self.assertEqual({a['codigo'] for a in p2['alertas']}, {'PARADO', 'HORIMETRO_DIVERGENTE'})
+
+    def test_painel_soma_oleo_em_litros_e_graxa_em_kg(self):
+        from .lubrificacao import painel
+        baixas = [
+            {'cod': 1, 'data': '2026-10-01T00:00:00', 'item': 282, 'nome': 'OLEO', 'grupo': 283, 'categoria': 'OLEO', 'unidade': 'L',
+             'quantidade': 20.0, 'custo': 400.0, 'equipamento': 1, 'centro_custo': 9, 'os': 55},
+            {'cod': 2, 'data': '2026-10-02T00:00:00', 'item': 2856, 'nome': 'GRAXA', 'grupo': 306, 'categoria': 'GRAXA', 'unidade': 'kg',
+             'quantidade': 5.0, 'custo': 200.0, 'equipamento': None, 'centro_custo': 9, 'os': None},
+        ]
+        d = painel(baixas, {1: 200.0}, {1: {'tag': 'X-1', 'descricao': 'Máquina'}}, [])
+        self.assertEqual(d['totais']['oleo_l'], 20.0)
+        self.assertEqual(d['totais']['graxa_kg'], 5.0)
+        self.assertEqual(d['totais']['pct_sem_os'], 33.3)
+        self.assertEqual(d['equipamentos'][0]['oleo_l_1000h'], 100.0)
+        self.assertEqual(d['totais']['custo_sem_equipamento'], 200.0)
