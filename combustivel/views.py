@@ -1,4 +1,6 @@
 import io
+import json
+import uuid as uuid_mod
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -807,7 +809,12 @@ class LubrificacaoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins
                 qs = qs.filter(equipamento=self.request.query_params['equipamento'])
         return qs
 
+    MAX_ITENS = 20
+    CAMPOS_ITEM = ('tipo', 'compartimento', 'produto', 'quantidade')
+
     def create(self, request, *args, **kwargs):
+        if 'itens' in request.data:
+            return self._criar_atendimento(request)
         uid = request.data.get('uuid')
         if uid:
             existente = Lubrificacao.objects.filter(uuid=uid).first()
@@ -817,7 +824,61 @@ class LubrificacaoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins
                 return Response(self.get_serializer(existente).data, status=status.HTTP_200_OK)
         return super().create(request, *args, **kwargs)
 
+    def _criar_atendimento(self, request):
+        """
+        Vários itens na mesma parada (``itens`` = JSON com tipo, compartimento, produto, quantidade):
+        equipamento, horímetro, quem fez, data, foto e observação valem para todos. O ``uuid`` enviado
+        é o do atendimento — reenviar devolve os itens já gravados, sem duplicar.
+        """
+        try:
+            itens = json.loads(request.data.get('itens') or '[]')
+        except (TypeError, ValueError):
+            raise ValidationError({'itens': 'Lista de itens inválida.'})
+        if not isinstance(itens, list) or not itens:
+            raise ValidationError({'itens': 'Informe ao menos um item.'})
+        if len(itens) > self.MAX_ITENS:
+            raise ValidationError({'itens': f'No máximo {self.MAX_ITENS} itens por registro.'})
+        try:
+            atendimento = uuid_mod.UUID(str(request.data.get('uuid') or uuid_mod.uuid4()))
+        except ValueError:
+            raise ValidationError({'uuid': 'Identificador inválido.'})
+        ja = list(Lubrificacao.objects.filter(atendimento=atendimento))
+        if ja:
+            if any(l.usuario_id != request.user.pk for l in ja):
+                return Response({'detail': 'Identificador já usado.'}, status=status.HTTP_409_CONFLICT)
+            return Response({'atendimento': str(atendimento), 'itens': self.get_serializer(ja, many=True).data})
+        cabecalho = {k: request.data.get(k) for k in ('lubrificado_em', 'equipamento', 'horimetro', 'km', 'funcionario', 'observacao')
+                     if request.data.get(k) not in (None, '')}
+        validados = []
+        for n, item in enumerate(itens, 1):
+            if not isinstance(item, dict):
+                raise ValidationError({'itens': f'Item {n} inválido.'})
+            ser = self.get_serializer(data={**cabecalho, **{k: item.get(k) for k in self.CAMPOS_ITEM if item.get(k) is not None}})
+            if not ser.is_valid():
+                raise ValidationError({'itens': {f'item {n}': ser.errors}})
+            validados.append(ser)
+        foto = None
+        if request.data.get('foto'):
+            ser_foto = self.get_serializer(data={**cabecalho, **{k: itens[0].get(k) for k in self.CAMPOS_ITEM}, 'foto': request.data['foto']})
+            ser_foto.is_valid(raise_exception=True)
+            foto = ser_foto.validated_data.get('foto')
+        with transaction.atomic():
+            gravados = []
+            for k, ser in enumerate(validados):
+                extra = {'atendimento': atendimento}
+                if foto is not None and k == 0:
+                    extra['foto'] = foto
+                gravados.append(self._gravar(ser, **extra))
+            if foto is not None and len(gravados) > 1 and gravados[0].foto:
+                # Uma foto para o atendimento: os outros itens apontam para o mesmo arquivo.
+                Lubrificacao.objects.filter(pk__in=[g.pk for g in gravados[1:]]).update(foto=gravados[0].foto.name)
+        return Response({'atendimento': str(atendimento), 'itens': self.get_serializer(gravados, many=True).data},
+                        status=status.HTTP_201_CREATED)
+
     def perform_create(self, serializer):
+        self._gravar(serializer)
+
+    def _gravar(self, serializer, **extra):
         dados = serializer.validated_data
         equipamentos, _ = _erp_ou_503(erp.mapa_equipamentos)
         funcionarios, _ = _erp_ou_503(erp.funcionarios)
@@ -827,13 +888,14 @@ class LubrificacaoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins
             raise ValidationError({'equipamento': 'Equipamento não encontrado (ou inativo) no SGA.'})
         prod = next((p for p in (prods or []) if p['cod'] == dados['produto']), None)
         if prods is not None and not prod:
-            raise ValidationError({'produto': 'Lubrificante não encontrado no SGA.'})
+            raise ValidationError({'produto': f"Lubrificante {dados['produto']} não encontrado no SGA."})
         fun = next((f for f in (funcionarios or []) if f['cod'] == dados.get('funcionario')), None)
         lub = serializer.save(usuario=self.request.user, equipamento_nome=(eqp or {}).get('nome', '')[:120],
                               produto_nome=(prod or {}).get('nome', '')[:120], unidade=(prod or {}).get('unidade', '')[:4],
-                              funcionario_nome=(fun or {}).get('nome', '')[:120])
+                              funcionario_nome=(fun or {}).get('nome', '')[:120], **extra)
         auditar(self.request, 'lubrificacao.criar', lub.uuid, equipamento=lub.equipamento, produto=lub.produto,
-                quantidade=float(lub.quantidade))
+                quantidade=float(lub.quantidade), atendimento=str(lub.atendimento) if lub.atendimento else None)
+        return lub
 
     @action(detail=True, methods=['post'], permission_classes=[PodeGerir])
     def cancelar(self, request, uuid=None):

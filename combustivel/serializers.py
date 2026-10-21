@@ -251,10 +251,10 @@ class LubrificacaoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Lubrificacao
-        fields = ['id', 'uuid', 'lubrificado_em', 'equipamento', 'equipamento_nome', 'tipo', 'tipo_nome', 'compartimento',
+        fields = ['id', 'uuid', 'atendimento', 'lubrificado_em', 'equipamento', 'equipamento_nome', 'tipo', 'tipo_nome', 'compartimento',
                   'compartimento_nome', 'produto', 'produto_nome', 'unidade', 'quantidade', 'horimetro', 'km', 'funcionario',
                   'funcionario_nome', 'foto', 'tem_foto', 'observacao', 'situacao', 'motivo_cancelamento', 'usuario_nome', 'criado_em']
-        read_only_fields = ['equipamento_nome', 'produto_nome', 'unidade', 'funcionario_nome', 'situacao',
+        read_only_fields = ['atendimento', 'equipamento_nome', 'produto_nome', 'unidade', 'funcionario_nome', 'situacao',
                             'motivo_cancelamento', 'criado_em']
 
     def get_tem_foto(self, obj):

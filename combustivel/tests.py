@@ -462,6 +462,41 @@ class LubrificacaoTests(CombustivelBase):
         self.assertEqual(self.client.post('/combustivel/lubrificacoes/', self._dados(equipamento=12345)).status_code, 400)
         self.assertEqual(self.client.post('/combustivel/lubrificacoes/', self._dados(quantidade='0')).status_code, 400)
 
+    def _atendimento(self, itens, **extra):
+        import json
+        dados = {'uuid': str(uuid.uuid4()), 'equipamento': 531, 'horimetro': '52900', 'funcionario': 194,
+                 'itens': json.dumps(itens), **extra}
+        return dados, self.client.post('/combustivel/lubrificacoes/', dados, format='multipart')
+
+    def test_varios_itens_no_mesmo_atendimento(self):
+        from .models import Lubrificacao
+        PRODUTOS_LUB.append({'cod': 282, 'nome': 'OLEO URSA 15W40', 'grupo': 283, 'grupo_nome': 'x', 'categoria': 'OLEO', 'unidade': 'L', 'usos': 9})
+        self.addCleanup(PRODUTOS_LUB.pop)
+        self.client.force_authenticate(self.operador)
+        itens = [{'tipo': 'TROCA', 'compartimento': 'MOTOR', 'produto': 282, 'quantidade': '28'},
+                 {'tipo': 'ENGRAXAR', 'compartimento': 'PONTOS', 'produto': 2856, 'quantidade': '1.5'}]
+        dados, r = self._atendimento(itens, foto=_foto())
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(len(r.data['itens']), 2)
+        linhas = list(Lubrificacao.objects.filter(atendimento=dados['uuid']))
+        self.assertEqual({l.produto for l in linhas}, {282, 2856})
+        self.assertEqual({float(l.horimetro) for l in linhas}, {52900.0})
+        self.assertEqual(len({l.foto.name for l in linhas}), 1)      # uma foto só
+        self.assertTrue(all(l.foto for l in linhas))
+        r2 = self.client.post('/combustivel/lubrificacoes/', {**dados, 'foto': _foto()}, format='multipart')
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(Lubrificacao.objects.filter(atendimento=dados['uuid']).count(), 2)
+
+    def test_item_ruim_recusa_o_atendimento_inteiro(self):
+        from .models import Lubrificacao
+        self.client.force_authenticate(self.operador)
+        _, r = self._atendimento([{'tipo': 'ENGRAXAR', 'compartimento': 'PONTOS', 'produto': 2856, 'quantidade': '1'},
+                                  {'tipo': 'TROCA', 'compartimento': 'MOTOR', 'produto': 1, 'quantidade': '5'}])
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(Lubrificacao.objects.count(), 0)
+        _, r = self._atendimento([])
+        self.assertEqual(r.status_code, 400)
+
     def test_sem_grupo_nao_registra(self):
         self.client.force_authenticate(self.estranho)
         self.assertEqual(self.client.post('/combustivel/lubrificacoes/', self._dados()).status_code, 403)

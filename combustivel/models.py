@@ -241,6 +241,8 @@ class Lubrificacao(models.Model):
     SITUACOES = [(REGISTRADA, 'Registrada'), (CANCELADA, 'Cancelada')]
 
     uuid = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
+    # Itens registrados juntos (a mesma parada: motor + hidráulico + graxa) têm o mesmo atendimento.
+    atendimento = models.UUIDField(null=True, blank=True, db_index=True)
     lubrificado_em = models.DateTimeField(default=timezone.now)
     equipamento = models.PositiveIntegerField(help_text='EQPCOD do SGA')
     equipamento_nome = models.CharField(max_length=120, blank=True, default='')
