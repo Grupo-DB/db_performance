@@ -546,8 +546,10 @@ class FotoLubrificanteTests(CombustivelBase):
         return buf.getvalue()
 
     def test_converte_bmp_do_sga_em_jpeg_pequeno(self):
-        import shutil
-        shutil.rmtree('/tmp/combustivel-testes/sga_itens', ignore_errors=True)
+        from .models import PRIVADO
+        if PRIVADO.exists('sga_itens/2856.jpg'):
+            PRIVADO.delete('sga_itens/2856.jpg')
+        self.addCleanup(lambda: PRIVADO.exists('sga_itens/2856.jpg') and PRIVADO.delete('sga_itens/2856.jpg'))
         with patch('combustivel.lubrificacao.foto_bruta', return_value=self._bmp()) as bruta:
             self.client.force_authenticate(self.leitor)
             r = self.client.get('/combustivel/lubrificacao/produtos/2856/foto/')

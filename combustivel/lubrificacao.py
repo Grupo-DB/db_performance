@@ -65,7 +65,11 @@ def produtos() -> list[dict]:
             'unidade': UNIDADES.get(int(l['esp'] or 0), ''), 'usos': int(l['usos']),
         } for l in linhas]
     fotos = com_foto()
-    return [{**p, 'tem_foto': p['cod'] in fotos} for p in _cacheado('comb:lub:produtos', CACHE_CADASTRO, buscar)]
+    saldos = {e['cod']: e for e in estoque()}
+    return [{**p, 'tem_foto': p['cod'] in fotos,
+             'geral': saldos.get(p['cod'], {}).get('geral', 0.0), 'fabrica': saldos.get(p['cod'], {}).get('fabrica', 0.0),
+             'custo_medio': saldos.get(p['cod'], {}).get('custo_medio', 0.0)}
+            for p in _cacheado('comb:lub:produtos', CACHE_CADASTRO, buscar)]
 
 
 def baixas(inicio: date, fim: date) -> list[dict]:
