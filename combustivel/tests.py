@@ -537,3 +537,31 @@ class LubrificacaoContasTests(APITestCase):
         self.assertEqual(f['totais']['valor_fabrica'], 200.0)
         self.assertEqual(f['totais']['valor_para_fabrica'], 1000.0)
         self.assertEqual([i['cod'] for i in f['itens']], [1])
+
+
+class FotoLubrificanteTests(CombustivelBase):
+    def _bmp(self):
+        buf = io.BytesIO()
+        Image.new('RGB', (900, 600), (10, 90, 200)).save(buf, 'BMP')
+        return buf.getvalue()
+
+    def test_converte_bmp_do_sga_em_jpeg_pequeno(self):
+        import shutil
+        shutil.rmtree('/tmp/combustivel-testes/sga_itens', ignore_errors=True)
+        with patch('combustivel.lubrificacao.foto_bruta', return_value=self._bmp()) as bruta:
+            self.client.force_authenticate(self.leitor)
+            r = self.client.get('/combustivel/lubrificacao/produtos/2856/foto/')
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r['Content-Type'], 'image/jpeg')
+            img = Image.open(io.BytesIO(b''.join(r.streaming_content)))
+            self.assertEqual(img.format, 'JPEG')
+            self.assertLessEqual(max(img.size), 480)
+            self.client.get('/combustivel/lubrificacao/produtos/2856/foto/')
+            self.assertEqual(bruta.call_count, 1)   # a segunda sai do disco
+
+    def test_sem_foto_e_sem_grupo(self):
+        with patch('combustivel.lubrificacao.foto_bruta', return_value=None):
+            self.client.force_authenticate(self.leitor)
+            self.assertEqual(self.client.get('/combustivel/lubrificacao/produtos/999999/foto/').status_code, 404)
+            self.client.force_authenticate(self.estranho)
+            self.assertEqual(self.client.get('/combustivel/lubrificacao/produtos/999999/foto/').status_code, 403)

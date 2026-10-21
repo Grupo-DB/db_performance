@@ -64,7 +64,8 @@ def produtos() -> list[dict]:
             'grupo_nome': GRUPOS.get(int(l['grupo']), ''), 'categoria': categoria(l['nome'], int(l['grupo'])),
             'unidade': UNIDADES.get(int(l['esp'] or 0), ''), 'usos': int(l['usos']),
         } for l in linhas]
-    return _cacheado('comb:lub:produtos', CACHE_CADASTRO, buscar)
+    fotos = com_foto()
+    return [{**p, 'tem_foto': p['cod'] in fotos} for p in _cacheado('comb:lub:produtos', CACHE_CADASTRO, buscar)]
 
 
 def baixas(inicio: date, fim: date) -> list[dict]:
@@ -92,6 +93,24 @@ def baixas(inicio: date, fim: date) -> list[dict]:
             })
         return saida
     return _cacheado(f'comb:lub:baixas:{inicio}:{fim}', CACHE_MOVIMENTO, buscar)
+
+
+def com_foto() -> set[int]:
+    """Lubrificantes que têm foto no cadastro do SGA (``ESTOQUEFOTO``, BMP gravado no banco)."""
+    def buscar():
+        linhas = _rows("""
+            SELECT DISTINCT f.ESTQFESTQ cod FROM ESTOQUEFOTO f JOIN ESTOQUE e ON e.ESTQCOD = f.ESTQFESTQ
+            WHERE e.ESTQGALM IN :grupos AND f.ESTQFFOTO IS NOT NULL""", expandir=('grupos',), grupos=list(GRUPOS))
+        return [int(l['cod']) for l in linhas]
+    return set(_cacheado('comb:lub:com_foto', CACHE_CADASTRO, buscar))
+
+
+def foto_bruta(cod: int) -> bytes | None:
+    """Foto do item como está no SGA (BMP de até 4 MB) — só de lubrificante."""
+    linhas = _rows("""
+        SELECT TOP 1 f.ESTQFFOTO foto FROM ESTOQUEFOTO f JOIN ESTOQUE e ON e.ESTQCOD = f.ESTQFESTQ
+        WHERE f.ESTQFESTQ = :cod AND e.ESTQGALM IN :grupos""", expandir=('grupos',), cod=cod, grupos=list(GRUPOS))
+    return bytes(linhas[0]['foto']) if linhas and linhas[0]['foto'] else None
 
 
 REF_GERAL, REF_FABRICA = 0, 100

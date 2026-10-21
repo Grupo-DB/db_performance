@@ -1,3 +1,4 @@
+import io
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -6,6 +7,7 @@ from django.db import transaction
 from django.db.models import Q, Sum
 from django.http import FileResponse, Http404, HttpResponse
 from django.utils import timezone
+from PIL import Image, ImageOps, UnidentifiedImageError
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -14,7 +16,7 @@ from rest_framework.views import APIView
 
 from . import erp, integracao, lubrificacao, regras
 from .models import (
-    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, Transferencia, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, Lubrificacao, MedicaoTanque, Tanque,
+    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, PRIVADO, Transferencia, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, Lubrificacao, MedicaoTanque, Tanque,
 )
 from .permissions import (
     AutenticacaoChave, LeituraOuGestao, LimiteIntegracao, LimiteRegistro, PodeGerir, PodeRegistrar, PodeVer, TemChave,
@@ -873,9 +875,61 @@ class LubrificacaoPainelView(APIView):
         campo = list(Lubrificacao.objects.filter(lubrificado_em__date__gte=inicio, lubrificado_em__date__lte=fim)
                      .exclude(situacao=Lubrificacao.CANCELADA).values('tipo', 'quantidade'))
         dados = lubrificacao.painel(baixas, lubrificacao.horas_no_periodo(leituras, inicio, fim), equipamentos, campo)
+        fotos = lubrificacao.com_foto()
+        for item in dados['produtos'] + fabrica['itens']:
+            item['tem_foto'] = item['cod'] in fotos
+        # As últimas saídas, uma a uma, para ver o que saiu e para onde.
+        dados['ultimas_baixas'] = [{
+            'cod': b['cod'], 'data': b['data'], 'item': b['item'], 'nome': b['nome'], 'categoria': b['categoria'],
+            'unidade': b['unidade'], 'quantidade': b['quantidade'], 'custo': b['custo'], 'os': b['os'],
+            'centro_custo': b['centro_custo'], 'tem_foto': b['item'] in fotos,
+            'equipamento': b['equipamento'], 'tag': (equipamentos.get(b['equipamento']) or {}).get('tag', '') if b['equipamento'] else '',
+        } for b in sorted(baixas, key=lambda x: x['data'] or '', reverse=True)[:60]]
         for c in dados['centros_custo']:
             c['nome'] = nomes_cc.get(c['centro_custo'], 'Sem centro de custo' if not c['centro_custo'] else f"CC {c['centro_custo']}")
         return Response({'inicio': inicio, 'fim': fim, **dados, 'fabrica': fabrica})
+
+
+class FotoLubrificanteView(APIView):
+    """
+    Foto do lubrificante cadastrada no SGA, em miniatura. O SGA guarda BMP de até 4 MB dentro do
+    banco: converte uma vez para JPEG de 480 px e guarda no disco privado (refaz depois de 7 dias).
+    """
+    permission_classes = [PodeVer]
+    LADO = 480
+    VALIDADE = timedelta(days=7)
+
+    def get(self, request, cod):
+        nome = f'sga_itens/{int(cod)}.jpg'
+        try:
+            novo = not PRIVADO.exists(nome) or timezone.now() - PRIVADO.get_modified_time(nome) > self.VALIDADE
+        except OSError:
+            novo = True
+        if novo:
+            try:
+                bruta = lubrificacao.foto_bruta(int(cod))
+            except erp.ErpIndisponivel:
+                bruta = None
+                if not PRIVADO.exists(nome):
+                    return Response({'detail': 'SGA indisponível.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            if bruta is None and not PRIVADO.exists(nome):
+                raise Http404
+            if bruta is not None:
+                try:
+                    img = Image.open(io.BytesIO(bruta))
+                    img = ImageOps.exif_transpose(img).convert('RGB')
+                    img.thumbnail((self.LADO, self.LADO))
+                except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+                    raise Http404
+                saida = io.BytesIO()
+                img.save(saida, 'JPEG', quality=80, optimize=True)
+                if PRIVADO.exists(nome):
+                    PRIVADO.delete(nome)
+                PRIVADO.save(nome, ContentFile(saida.getvalue()))
+        resp = FileResponse(PRIVADO.open(nome, 'rb'), content_type='image/jpeg')
+        resp['Cache-Control'] = 'private, max-age=86400'
+        resp['X-Content-Type-Options'] = 'nosniff'
+        return resp
 
 
 class PreventivasView(APIView):
