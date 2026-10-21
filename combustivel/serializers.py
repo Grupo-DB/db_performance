@@ -4,7 +4,7 @@ from django.core.files.base import ContentFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from rest_framework import serializers
 
-from .models import Abastecimento, ChaveIntegracao, LoteIntegracao, MedicaoTanque, Tanque
+from .models import Abastecimento, CarregamentoComboio, ChaveIntegracao, LoteIntegracao, MedicaoTanque, Tanque
 
 FOTO_MAX_BYTES = 8 * 1024 * 1024
 FOTO_MAX_PIXELS = 40_000_000
@@ -43,9 +43,17 @@ class TanqueSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Tanque
-        fields = ['id', 'nome', 'filial', 'produto', 'produto_nome', 'capacidade_l', 'estoque_minimo_l',
-                  'bomba_ident', 'ativo', 'criado_em']
+        fields = ['id', 'nome', 'tipo', 'equipamento', 'envia_ao_sga', 'filial', 'produto', 'produto_nome',
+                  'capacidade_l', 'estoque_minimo_l', 'bomba_ident', 'ativo', 'criado_em']
         read_only_fields = ['criado_em']
+
+    def validate(self, attrs):
+        tipo = attrs.get('tipo', getattr(self.instance, 'tipo', Tanque.FIXO))
+        if tipo == Tanque.FIXO:
+            # Tanque fixo sempre baixa no SGA; os campos de comboio não se aplicam.
+            attrs['envia_ao_sga'] = True
+            attrs['equipamento'] = None
+        return attrs
 
     def validate_capacidade_l(self, v):
         if v <= 0:
@@ -138,6 +146,30 @@ class AbastecimentoSerializer(serializers.ModelSerializer):
         lat, lng = attrs.get('latitude'), attrs.get('longitude')
         if lat is not None and not -90 <= lat <= 90 or lng is not None and not -180 <= lng <= 180:
             raise serializers.ValidationError({'latitude': 'Coordenada inválida.'})
+        return attrs
+
+
+class CarregamentoSerializer(serializers.ModelSerializer):
+    usuario_nome = serializers.SerializerMethodField()
+    comboio_nome = serializers.CharField(source='comboio.nome', read_only=True)
+    origem_nome = serializers.CharField(source='origem.nome', read_only=True, default='')
+
+    class Meta:
+        model = CarregamentoComboio
+        fields = ['id', 'comboio', 'comboio_nome', 'origem', 'origem_nome', 'carregado_em', 'litros', 'encerrante_inicial',
+                  'encerrante_final', 'observacao', 'usuario_nome', 'criado_em']
+        read_only_fields = ['criado_em']
+
+    def get_usuario_nome(self, obj):
+        return (obj.usuario.get_full_name() or obj.usuario.username) if obj.usuario else ''
+
+    def validate(self, attrs):
+        if attrs['comboio'].tipo != Tanque.COMBOIO:
+            raise serializers.ValidationError({'comboio': 'Escolha um comboio.'})
+        if attrs.get('origem') and attrs['origem'].tipo != Tanque.FIXO:
+            raise serializers.ValidationError({'origem': 'A origem é um tanque fixo.'})
+        if attrs['litros'] <= 0:
+            raise serializers.ValidationError({'litros': 'Quantidade precisa ser maior que zero.'})
         return attrs
 
 

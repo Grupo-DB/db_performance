@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -13,14 +14,14 @@ from rest_framework.views import APIView
 
 from . import erp, integracao, regras
 from .models import (
-    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, MedicaoTanque, Tanque,
+    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, CarregamentoComboio, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, MedicaoTanque, Tanque,
 )
 from .permissions import (
     AutenticacaoChave, LeituraOuGestao, LimiteIntegracao, LimiteRegistro, PodeGerir, PodeRegistrar, PodeVer, TemChave,
     TemChaveQueConfirma, eh_gestor, ip_do_pedido,
 )
 from .serializers import (
-    AbastecimentoSerializer, ChaveSerializer, LoteSerializer, MedicaoSerializer, TanqueSerializer,
+    AbastecimentoSerializer, CarregamentoSerializer, ChaveSerializer, LoteSerializer, MedicaoSerializer, TanqueSerializer,
 )
 
 # Situações que ainda podem ir para o SGA.
@@ -66,11 +67,31 @@ def _pendentes_por_tanque() -> dict[int, float]:
     return {l['tanque']: float(l['litros'] or 0) for l in linhas}
 
 
+def _saldo_comboio(t: Tanque, medicao) -> dict:
+    """
+    Saldo do caminhão, contado no Manager: última régua (ou zero no cadastro) + carregamentos
+    − entregas. No modo "já baixado no carregamento" os carregamentos são as baixas do SGA no
+    equipamento do comboio; no outro modo, os registrados no Manager.
+    """
+    desde = medicao.medido_em if medicao else t.criado_em
+    base = float(medicao.litros) if medicao else 0.0
+    carregado, aviso = 0.0, None
+    if not t.envia_ao_sga and t.equipamento:
+        linhas, aviso = _erp_ou_503(erp.carregamentos_comboio, t.equipamento, t.produto,
+                                    timezone.make_naive(desde) if timezone.is_aware(desde) else desde)
+        carregado += sum(l['litros'] for l in (linhas or []))
+    carregado += float(t.carregamentos.filter(carregado_em__gte=desde).aggregate(s=Sum('litros'))['s'] or 0)
+    entregue = float(Abastecimento.objects.filter(tanque=t, abastecido_em__gte=desde)
+                     .exclude(situacao=Abastecimento.CANCELADO).exclude(observacao__startswith=MARCA_TESTE)
+                     .aggregate(s=Sum('litros'))['s'] or 0)
+    return {'saldo': base + carregado - entregue, 'carregado': carregado, 'entregue': entregue, 'desde': desde, 'aviso': aviso}
+
+
 def situacao_tanques(serie=None) -> tuple[list[dict], str | None]:
     estoque, erro = _erp_ou_503(erp.estoque_sga)
     pendentes = _pendentes_por_tanque()
     ultimas = {}
-    for m in MedicaoTanque.objects.filter(medido_em__gte=timezone.now() - timedelta(days=120)).order_by('-medido_em'):
+    for m in MedicaoTanque.objects.order_by('-medido_em')[:1000]:
         ultimas.setdefault(m.tanque_id, m)   # a primeira de cada tanque é a mais recente
     # Consumo diário de cada produto (para a autonomia em dias).
     consumo_por_produto = {}
@@ -78,42 +99,64 @@ def situacao_tanques(serie=None) -> tuple[list[dict], str | None]:
         for item, litros in dia['por_item'].items():
             consumo_por_produto.setdefault(int(item), []).append({'litros': litros})
     ativos = list(Tanque.objects.filter(ativo=True))
-    # O SGA tem UM saldo por produto e filial. Dois tanques de S-10 na matriz dividem esse saldo
-    # na proporção da capacidade (sem isso cada um mostrava o total e passava de 100%).
-    grupos = {}
+    comboios = {t.id: _saldo_comboio(t, ultimas.get(t.id)) for t in ativos if t.tipo == Tanque.COMBOIO}
+    # O SGA tem UM saldo por produto e filial. Dois tanques fixos de S-10 na matriz dividem esse
+    # saldo na proporção da capacidade (sem isso cada um mostrava o total e passava de 100%).
+    # Comboio com "baixa em cada entrega" ainda está no estoque do SGA: o que está nele sai dos fixos.
+    grupos, no_caminhao = {}, {}
     for t in ativos:
-        grupos.setdefault((t.produto, t.filial), []).append(t)
+        if t.tipo == Tanque.FIXO:
+            grupos.setdefault((t.produto, t.filial), []).append(t)
+        elif t.envia_ao_sga:
+            chave = (t.produto, t.filial)
+            no_caminhao[chave] = no_caminhao.get(chave, 0.0) + max(comboios[t.id]['saldo'], 0.0)
     saida = []
     for t in ativos:
-        sga = (estoque or {}).get((t.produto, t.filial))
-        irmaos = grupos[(t.produto, t.filial)]
         cap = float(t.capacidade_l)
-        cap_grupo = sum(float(x.capacidade_l) for x in irmaos) or cap
-        saldo = saldo_grupo = None
-        if sga is not None:
-            saldo_grupo = sga['saldo'] - sum(pendentes.get(x.id, 0.0) for x in irmaos)
-            saldo = sga['saldo'] * (cap / cap_grupo) - pendentes.get(t.id, 0.0)
         med = ultimas.get(t.id)
-        saida.append({
-            'id': t.id, 'nome': t.nome, 'produto': t.produto, 'produto_nome': t.produto_nome, 'filial': t.filial,
+        item = {
+            'id': t.id, 'nome': t.nome, 'tipo': t.tipo, 'equipamento': t.equipamento, 'envia_ao_sga': t.envia_ao_sga,
+            'produto': t.produto, 'produto_nome': t.produto_nome, 'filial': t.filial,
             'capacidade_l': cap, 'estoque_minimo_l': float(t.estoque_minimo_l),
-            'saldo_l': round(saldo, 2) if saldo is not None else None,
-            'saldo_sga_l': sga['saldo'] if sga else None,
-            'pendente_l': round(pendentes.get(t.id, 0.0), 2),
-            'custo_medio': sga['custo_medio'] if sga else None,
-            'nivel': round(max(min(saldo / cap, 1.2), -0.2), 4) if saldo is not None and cap else None,
-            'abaixo_minimo': saldo is not None and saldo < float(t.estoque_minimo_l),
-            # Saldo do sistema maior que o tanque: cadastro de capacidade errado, outro tanque do mesmo
-            # combustível não cadastrado ou estoque do SGA fora do físico (a régua mostra qual).
-            'acima_capacidade': saldo is not None and saldo > cap * 1.02,
-            'tanques_no_saldo': len(irmaos),
-            # Autonomia do conjunto: o consumo do SGA é do produto, não do tanque.
-            'autonomia_dias': regras.autonomia(saldo_grupo, consumo_por_produto.get(t.produto, [])) if saldo_grupo else None,
             'ultima_medicao': {
                 'medido_em': med.medido_em, 'litros': float(med.litros),
                 'diferenca_l': float(med.litros - med.saldo_sistema_l) if med.saldo_sistema_l is not None else None,
             } if med else None,
+        }
+        if t.tipo == Tanque.COMBOIO:
+            c = comboios[t.id]
+            saldo = c['saldo']
+            item.update({
+                'saldo_l': round(saldo, 2), 'saldo_sga_l': None, 'pendente_l': 0.0, 'custo_medio': None,
+                'carregado_l': round(c['carregado'], 2), 'entregue_l': round(c['entregue'], 2), 'saldo_desde': c['desde'],
+                'tanques_no_saldo': 1, 'autonomia_dias': None, 'aviso': c['aviso'],
+            })
+        else:
+            sga = (estoque or {}).get((t.produto, t.filial))
+            irmaos = grupos[(t.produto, t.filial)]
+            cap_grupo = sum(float(x.capacidade_l) for x in irmaos) or cap
+            saldo = saldo_grupo = None
+            if sga is not None:
+                fora = no_caminhao.get((t.produto, t.filial), 0.0)
+                saldo_grupo = sga['saldo'] - fora - sum(pendentes.get(x.id, 0.0) for x in irmaos)
+                saldo = (sga['saldo'] - fora) * (cap / cap_grupo) - pendentes.get(t.id, 0.0)
+            item.update({
+                'saldo_l': round(saldo, 2) if saldo is not None else None,
+                'saldo_sga_l': sga['saldo'] if sga else None,
+                'pendente_l': round(pendentes.get(t.id, 0.0), 2),
+                'custo_medio': sga['custo_medio'] if sga else None,
+                'tanques_no_saldo': len(irmaos),
+                # Autonomia do conjunto: o consumo do SGA é do produto, não do tanque.
+                'autonomia_dias': regras.autonomia(saldo_grupo, consumo_por_produto.get(t.produto, [])) if saldo_grupo else None,
+            })
+        item.update({
+            'nivel': round(max(min(saldo / cap, 1.2), -0.2), 4) if saldo is not None and cap else None,
+            'abaixo_minimo': saldo is not None and saldo < float(t.estoque_minimo_l),
+            # Saldo maior que o tanque: capacidade errada, outro tanque do mesmo combustível não
+            # cadastrado ou estoque fora do físico (a régua mostra qual).
+            'acima_capacidade': saldo is not None and saldo > cap * 1.02,
         })
+        saida.append(item)
     return saida, erro
 
 
@@ -178,11 +221,28 @@ class MedicaoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.Ge
 
     def perform_create(self, serializer):
         tanque = serializer.validated_data['tanque']
-        estoque, _ = _erp_ou_503(erp.estoque_sga)
-        sga = (estoque or {}).get((tanque.produto, tanque.filial))
-        saldo = sga['saldo'] - _pendentes_por_tanque().get(tanque.id, 0.0) if sga else None
-        m = serializer.save(usuario=self.request.user, saldo_sistema_l=round(saldo, 2) if saldo is not None else None)
+        # O mesmo saldo que a tela mostra (dividido entre tanques, comboio contado no Manager).
+        situacao, _ = situacao_tanques()
+        saldo = next((x['saldo_l'] for x in situacao if x['id'] == tanque.id), None)
+        m = serializer.save(usuario=self.request.user,
+                            saldo_sistema_l=Decimal(str(round(saldo, 2))) if saldo is not None else None)
         auditar(self.request, 'medicao.criar', m.tanque, litros=float(m.litros))
+
+
+class CarregamentoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
+    """Diesel que entrou no comboio, registrado no Manager (o do SGA é lido sozinho)."""
+    permission_classes = [PodeRegistrar]
+    serializer_class = CarregamentoSerializer
+
+    def get_queryset(self):
+        qs = CarregamentoComboio.objects.select_related('usuario', 'comboio', 'origem')
+        if self.request.query_params.get('comboio'):
+            qs = qs.filter(comboio_id=self.request.query_params['comboio'])
+        return qs[:200]
+
+    def perform_create(self, serializer):
+        c = serializer.save(usuario=self.request.user)
+        auditar(self.request, 'comboio.carregar', c.comboio, litros=float(c.litros))
 
 
 # ── Abastecimentos ───────────────────────────────────────────────────────────────
@@ -250,7 +310,14 @@ class AbastecimentoViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         dados = dict(serializer.validated_data)
         eqp, fun, alertas = _contexto_conferencia(dados, dados['tanque'])
+        tanque = dados['tanque']
+        interno = tanque.tipo == Tanque.COMBOIO and not tanque.envia_ao_sga
+        if interno:
+            # Diesel já baixado no carregamento do comboio: não vai ao SGA, então o que só
+            # importava para a baixa (identificação na integração) deixa de bloquear.
+            alertas = [a for a in alertas if a['codigo'] not in ('EQUIPAMENTO_SEM_IDENT', 'FUNCIONARIO_SEM_IDENT', 'DATA_ANTIGA')]
         ab = serializer.save(
+            situacao=Abastecimento.INTERNO if interno else Abastecimento.REGISTRADO,
             registrado_por=self.request.user, alertas=alertas, bloqueado=regras.bloqueia(alertas),
             equipamento_nome=(eqp or {}).get('nome', ''), placa=(eqp or {}).get('placa', '')[:10],
             centro_custo=(eqp or {}).get('centro_custo'), funcionario_nome=(fun or {}).get('nome', ''))
@@ -260,14 +327,16 @@ class AbastecimentoViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def perform_update(self, serializer):
         ab = serializer.instance
-        if ab.situacao not in (Abastecimento.REGISTRADO, Abastecimento.CONFERIDO):
+        if ab.situacao not in (Abastecimento.REGISTRADO, Abastecimento.CONFERIDO, Abastecimento.INTERNO):
             raise ValidationError('Só dá para corrigir antes do envio ao SGA.')
         antes = {c: str(getattr(ab, c)) for c in ('litros', 'horimetro', 'km', 'equipamento', 'funcionario', 'abastecido_em')}
         dados = {**{c: getattr(ab, c) for c in ('litros', 'horimetro', 'km', 'equipamento', 'funcionario', 'abastecido_em',
                                                 'encerrante_inicial', 'encerrante_final')},
                  'foto_bomba': ab.foto_bomba, 'foto_painel': ab.foto_painel, **serializer.validated_data}
         eqp, fun, alertas = _contexto_conferencia(dados, serializer.validated_data.get('tanque', ab.tanque), excluir_id=ab.pk)
-        ab = serializer.save(alertas=alertas, bloqueado=regras.bloqueia(alertas), situacao=Abastecimento.REGISTRADO,
+        tq = serializer.validated_data.get('tanque', ab.tanque)
+        nova = Abastecimento.INTERNO if tq.tipo == Tanque.COMBOIO and not tq.envia_ao_sga else Abastecimento.REGISTRADO
+        ab = serializer.save(alertas=alertas, bloqueado=regras.bloqueia(alertas), situacao=nova,
                              equipamento_nome=(eqp or {}).get('nome', ab.equipamento_nome),
                              placa=(eqp or {}).get('placa', ab.placa)[:10],
                              centro_custo=(eqp or {}).get('centro_custo', ab.centro_custo),
@@ -559,7 +628,15 @@ class PainelView(APIView):
             return Response({'detail': f'SGA indisponível no momento ({exc}).'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         leituras_periodo = [l for l in leituras if l['data'] and l['data'][:10] >= inicio.isoformat()]
-        dados = regras.painel(baixas, entradas, leituras_periodo, equipamentos)
+        # Entregas do comboio (só no Manager): o diesel foi baixado no caminhão; aqui ele passa
+        # para a máquina que de fato consumiu, no ranking e nos centros de custo.
+        entregas = [{
+            'equipamento': a.equipamento, 'centro_custo': a.centro_custo, 'litros': float(a.litros),
+            'comboio': a.tanque.equipamento,
+        } for a in Abastecimento.objects.select_related('tanque').filter(
+            situacao=Abastecimento.INTERNO, abastecido_em__date__gte=inicio, abastecido_em__date__lte=fim,
+            tanque__equipamento__isnull=False).exclude(observacao__startswith=MARCA_TESTE)]
+        dados = regras.painel(baixas, entradas, leituras_periodo, equipamentos, entregas_comboio=entregas)
         anomalias = [a for a in regras.anomalias(leituras, equipamentos) if a['data'][:10] >= inicio.isoformat()]
         tanques, _ = situacao_tanques(dados['serie'])
 

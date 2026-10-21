@@ -231,6 +231,20 @@ def situacao_integracao() -> dict:
     return _cacheado('comb:situacao', CACHE_MOVIMENTO, buscar)
 
 
+def carregamentos_comboio(equipamento: int, produto: int, desde: datetime) -> list[dict]:
+    """
+    Diesel baixado NO comboio (o carregamento que a bomba/CTA lança no equipamento do caminhão).
+    Devolução (BESTSIT 10) entra negativa.
+    """
+    linhas = _rows("""
+        SELECT BESTCOD cod, BESTDATA data, BESTQUANT litros, BESTSIT sit, BESTIAB iab FROM BAIXAESTOQUE
+        WHERE BESTEQP = :eqp AND BESTESTQ = :item AND BESTDATA >= :desde AND BESTSIT IN (8, 10)""",
+        eqp=equipamento, item=produto, desde=desde)
+    return [{'cod': int(l['cod']), 'data': l['data'].isoformat() if l['data'] else None,
+             'litros': (-1 if int(l['sit']) == 10 else 1) * _num(l['litros']), 'via_bomba': bool(l['iab'])}
+            for l in linhas]
+
+
 def baixas_dos_codigos(codigos: list[int], desde: datetime) -> dict[int, dict]:
     """Conciliação: quais registros do Manager o SGA já baixou (BESTIAB = código de integração)."""
     if not codigos:

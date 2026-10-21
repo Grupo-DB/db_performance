@@ -322,3 +322,67 @@ class ExemploTests(CombustivelBase):
         self.assertFalse(Abastecimento.objects.filter(lote__isnull=False).exists())
         self.client.force_authenticate(self.operador)
         self.assertEqual(self.client.get('/combustivel/lotes/exemplo/').status_code, 403)
+
+
+class ComboioTests(CombustivelBase):
+    def setUp(self):
+        super().setUp()
+        self.comboio = Tanque.objects.create(nome='Comboio CS-02', tipo=Tanque.COMBOIO, equipamento=519, envia_ao_sga=False,
+                                             filial=0, produto=253, capacidade_l=Decimal('4000'))
+        self.patch_carga = patch('combustivel.erp.carregamentos_comboio', return_value=[{'litros': 1000.0}])
+        self.patch_carga.start()
+
+    def _entrega(self, **extra):
+        return self._registrar(tanque=self.comboio.id, **extra)
+
+    def test_entrega_ja_baixada_no_carregamento_fica_so_no_manager(self):
+        r = self._entrega(funcionario=300)  # sem ident no SGA: aqui não importa
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['situacao'], 'INTERNO')
+        self.assertFalse(r.data['bloqueado'], r.data['alertas'])
+        self.client.force_authenticate(self.gestor)
+        self.assertEqual(self.client.post('/combustivel/lotes/', {'formato': 'CSV'}, format='json').status_code, 400)
+        t = {x['nome']: x for x in self.client.get('/combustivel/tanques/situacao/').data['tanques']}
+        # 1000 carregados no SGA − 120,5 entregues; o tanque fixo não é tocado.
+        self.assertEqual(t['Comboio CS-02']['saldo_l'], 879.5)
+        self.assertEqual(t['Tanque S-10']['saldo_l'], 5000)
+
+    def test_regua_vira_ponto_de_partida_do_comboio(self):
+        self.client.force_authenticate(self.gestor)
+        self.client.post('/combustivel/medicoes/', {'tanque': self.comboio.id, 'litros': '2500'}, format='multipart')
+        self._entrega()
+        self.client.force_authenticate(self.gestor)
+        t = next(x for x in self.client.get('/combustivel/tanques/situacao/').data['tanques'] if x['id'] == self.comboio.id)
+        self.assertEqual(t['saldo_l'], 2500 + 1000 - 120.5)
+
+    def test_comboio_com_baixa_na_entrega(self):
+        self.comboio.envia_ao_sga = True
+        self.comboio.save()
+        self.client.force_authenticate(self.operador)
+        r = self.client.post('/combustivel/carregamentos/', {'comboio': self.comboio.id, 'origem': self.tanque.id,
+                                                             'litros': '800'}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        r = self._entrega()
+        self.assertEqual(r.data['situacao'], 'REGISTRADO')
+        self.client.force_authenticate(self.gestor)
+        t = {x['nome']: x for x in self.client.get('/combustivel/tanques/situacao/').data['tanques']}
+        self.assertEqual(t['Comboio CS-02']['saldo_l'], 800 - 120.5)
+        # O diesel no caminhão ainda está no estoque do SGA: sai do tanque fixo (e a entrega pendente
+        # é do comboio, não do fixo).
+        self.assertEqual(t['Tanque S-10']['saldo_l'], 5000 - (800 - 120.5))
+        self.assertEqual(self.client.post('/combustivel/lotes/', {'formato': 'CSV'}, format='json').status_code, 201)
+
+    def test_carregamento_so_em_comboio(self):
+        self.client.force_authenticate(self.operador)
+        r = self.client.post('/combustivel/carregamentos/', {'comboio': self.tanque.id, 'litros': '10'}, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_painel_passa_entrega_do_comboio_para_a_maquina(self):
+        eqps = {531: EQUIPAMENTOS[0], 519: {'nome': 'COMBOIO', 'centro_custo': 5487, 'centro_custo_nome': 'Comboio', 'placa': ''}}
+        baixas = [{'data': '2026-10-01T10:00', 'item': 253, 'litros': 1000, 'custo': 6000, 'equipamento': 519,
+                   'centro_custo': 5487, 'origem': 'BOMBA'}]
+        p = regras.painel(baixas, [], [], eqps, entregas_comboio=[{'equipamento': 531, 'centro_custo': 5481, 'litros': 300, 'comboio': 519}])
+        rk = {r['equipamento']: r for r in p['ranking']}
+        self.assertEqual(rk[519]['litros'], 700)
+        self.assertEqual((rk[531]['litros'], rk[531]['custo'], rk[531]['via_comboio']), (300, 1800, 300))
+        self.assertEqual(p['kpis']['litros'], 1000)

@@ -55,7 +55,25 @@ def _caminho_lote(instancia, nome):
 
 
 class Tanque(models.Model):
+    """
+    Tanque fixo ou comboio (caminhão que leva o diesel até as máquinas no campo).
+
+    Comboio tem dois modos (``envia_ao_sga``), porque o mesmo diesel não pode baixar duas vezes:
+
+    * ``False`` — "já baixado no carregamento" (padrão, como é hoje): a bomba/CTA baixa o
+      carregamento no equipamento do comboio (VEC-CS-02 = 519). As entregas ficam só no Manager
+      (situação INTERNO): mostram o consumo de cada máquina e o saldo do caminhão.
+    * ``True`` — "baixa em cada entrega": cada entrega vai ao SGA no centro de custo da máquina;
+      o carregamento é registrado no Manager (CarregamentoComboio) e NÃO pode ser baixa no SGA.
+    """
+    FIXO, COMBOIO = 'FIXO', 'COMBOIO'
+    TIPOS = [(FIXO, 'Tanque fixo'), (COMBOIO, 'Comboio')]
+
     nome = models.CharField(max_length=80)
+    tipo = models.CharField(max_length=8, choices=TIPOS, default=FIXO)
+    equipamento = models.PositiveIntegerField(null=True, blank=True,
+                                              help_text='Comboio: EQPCOD do caminhão no SGA (os carregamentos baixados nele entram no saldo)')
+    envia_ao_sga = models.BooleanField(default=True, help_text='Comboio: as entregas viram baixa no SGA')
     filial = models.PositiveSmallIntegerField(default=0, help_text='Filial do SGA (0 = matriz)')
     produto = models.PositiveIntegerField(choices=PRODUTO_CHOICES, default=253)
     capacidade_l = models.DecimalField(max_digits=10, decimal_places=2)
@@ -93,6 +111,22 @@ class MedicaoTanque(models.Model):
         ordering = ['-medido_em']
 
 
+class CarregamentoComboio(models.Model):
+    """Diesel que entrou no comboio registrado no Manager (o que veio do SGA é lido na hora)."""
+    comboio = models.ForeignKey(Tanque, on_delete=models.CASCADE, related_name='carregamentos')
+    origem = models.ForeignKey(Tanque, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    carregado_em = models.DateTimeField(default=timezone.now)
+    litros = models.DecimalField(max_digits=8, decimal_places=2)
+    encerrante_inicial = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    encerrante_final = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    observacao = models.CharField(max_length=300, blank=True, default='')
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-carregado_em']
+
+
 class LoteIntegracao(models.Model):
     """Arquivo gerado para o SGA (um lote = um conjunto de abastecimentos exportados)."""
     CSV, TXT, JSON = 'CSV', 'TXT', 'JSON'
@@ -118,9 +152,11 @@ class LoteIntegracao(models.Model):
 class Abastecimento(models.Model):
     """Abastecimento registrado no Manager (os do CTA continuam vindo do SGA, só leitura)."""
     REGISTRADO, CONFERIDO, EXPORTADO, BAIXADO, CANCELADO = 'REGISTRADO', 'CONFERIDO', 'EXPORTADO', 'BAIXADO', 'CANCELADO'
+    # Entrega de comboio "já baixado no carregamento": não vai ao SGA (seria baixa em dobro).
+    INTERNO = 'INTERNO'
     SITUACOES = [
         (REGISTRADO, 'Registrado'), (CONFERIDO, 'Conferido'), (EXPORTADO, 'Enviado ao SGA'),
-        (BAIXADO, 'Baixado no SGA'), (CANCELADO, 'Cancelado'),
+        (BAIXADO, 'Baixado no SGA'), (CANCELADO, 'Cancelado'), (INTERNO, 'Só no Manager (comboio)'),
     ]
 
     # Gerado no aparelho: reenviar o mesmo registro (internet caiu no meio) não duplica.

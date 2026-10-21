@@ -160,9 +160,22 @@ def bloqueia(alertas: list[dict]) -> bool:
 
 
 # ── Painel ───────────────────────────────────────────────────────────────────────
-def painel(baixas: list[dict], entradas: list[dict], leituras: list[dict], equipamentos: dict[int, dict]) -> dict:
+def painel(baixas: list[dict], entradas: list[dict], leituras: list[dict], equipamentos: dict[int, dict],
+           entregas_comboio: list[dict] | None = None) -> dict:
     litros = sum(b['litros'] for b in baixas)
     custo = sum(b['custo'] for b in baixas)
+    custo_litro = custo / litros if litros else 0.0
+    # Ranking e centros de custo pelo consumo REAL: cada entrega do comboio sai do caminhão e vai
+    # para a máquina que recebeu, ao custo médio do período. Os totais não mudam.
+    realocadas = []
+    for e in entregas_comboio or []:
+        cc_destino = e.get('centro_custo') or equipamentos.get(e['equipamento'], {}).get('centro_custo')
+        cc_comboio = equipamentos.get(e['comboio'], {}).get('centro_custo')
+        valor = e['litros'] * custo_litro
+        realocadas.append({'equipamento': e['equipamento'], 'centro_custo': cc_destino, 'litros': e['litros'],
+                           'custo': valor, 'comboio': True})
+        realocadas.append({'equipamento': e['comboio'], 'centro_custo': cc_comboio, 'litros': -e['litros'],
+                           'custo': -valor, 'comboio': True})
     comprados = sum(e['litros'] for e in entradas)
     gasto_compra = sum(e['total'] for e in entradas)
 
@@ -201,9 +214,18 @@ def painel(baixas: list[dict], entradas: list[dict], leituras: list[dict], equip
             'litros_intervalo': sum(l['litros'] for l in ls[1:]) if len(ls) > 1 else None,
         }
 
-    eqp_tot = defaultdict(lambda: {'litros': 0.0, 'custo': 0.0, 'abastecimentos': 0})
+    eqp_tot = defaultdict(lambda: {'litros': 0.0, 'custo': 0.0, 'abastecimentos': 0, 'via_comboio': 0.0})
     cc_tot = defaultdict(lambda: {'litros': 0.0, 'custo': 0.0})
     origem = defaultdict(lambda: {'litros': 0.0, 'abastecimentos': 0})
+    for r_ in realocadas:
+        t = eqp_tot[r_['equipamento']]
+        t['litros'] += r_['litros']
+        t['custo'] += r_['custo']
+        if r_['litros'] > 0:
+            t['via_comboio'] += r_['litros']
+            t['abastecimentos'] += 1
+        cc_tot[r_['centro_custo']]['litros'] += r_['litros']
+        cc_tot[r_['centro_custo']]['custo'] += r_['custo']
     for b in baixas:
         if b['equipamento']:
             t = eqp_tot[b['equipamento']]
@@ -226,11 +248,13 @@ def painel(baixas: list[dict], entradas: list[dict], leituras: list[dict], equip
             'equipamento': eqp, 'nome': info.get('nome') or f'Equipamento {eqp}', 'placa': info.get('placa', ''),
             'centro_custo_nome': info.get('centro_custo_nome', ''),
             'litros': round(t['litros'], 2), 'custo': round(t['custo'], 2), 'abastecimentos': t['abastecimentos'],
+            'via_comboio': round(t['via_comboio'], 2),
             'horas': round(tr['horas'], 1) if tr.get('horas') else None,
             'km': round(tr['km'], 1) if tr.get('km') else None,
             'litros_hora': round(li / tr['horas'], 2) if li and tr.get('horas') else None,
             'km_litro': round(tr['km'] / li, 2) if li and tr.get('km') else None,
         })
+    ranking = [r for r in ranking if abs(r['litros']) > 0.01]
     ranking.sort(key=lambda r: r['litros'], reverse=True)
 
     centros = sorted(({'centro_custo': cc, 'nome': nomes_cc.get(cc) or ('Sem centro de custo' if not cc else f'CC {cc}'),
