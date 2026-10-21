@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.db.models import Q, Sum
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -359,7 +359,10 @@ class LoteViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             qs = qs.filter(uuid__in=uuids)
         lista = list(qs.order_by('id'))
         if not lista:
-            return Response({'detail': 'Nada para enviar: sem abastecimento liberado fora de lote.'},
+            so_teste = Abastecimento.objects.filter(observacao__startswith=MARCA_TESTE, lote__isnull=True).exists()
+            return Response({'detail': 'Nada para enviar: os abastecimentos de teste nunca vão para o SGA — use '
+                                       '"Baixar exemplo" para ver o arquivo.' if so_teste else
+                             'Nada para enviar: sem abastecimento liberado fora de lote.'},
                             status=status.HTTP_400_BAD_REQUEST)
         registros = [integracao.registro(a) for a in lista]
         conteudo, ext, _, sha = integracao.gerar(formato, registros)
@@ -373,6 +376,28 @@ class LoteViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             lote=lote, situacao=Abastecimento.EXPORTADO, enviado_sga_em=agora)
         auditar(request, 'lote.gerar', lote.pk, formato=formato, quantidade=len(lista), sha256=sha)
         return Response(LoteSerializer(lote).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'])
+    def exemplo(self, request):
+        """
+        O arquivo de verdade, montado só com os abastecimentos de TESTE: mostra o formato (e serve de
+        modelo para a Minerion) sem criar lote nem mudar situação. Os registros reais nunca entram aqui.
+        """
+        formato = (request.query_params.get('formato') or 'CSV').upper()
+        if formato not in integracao.GERADORES:
+            return Response({'detail': 'Formato inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        lista = list(Abastecimento.objects.select_related('tanque').filter(observacao__startswith=MARCA_TESTE)
+                     .exclude(situacao=Abastecimento.CANCELADO).order_by('id')[:100])
+        if not lista:
+            return Response({'detail': 'Sem abastecimentos de teste: gere com o comando gerar_abastecimentos_teste.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        conteudo, ext, tipo, sha = integracao.gerar(formato, [integracao.registro(a) for a in lista])
+        nome = f'EXEMPLO-NAO-IMPORTAR_abastecimentos_{timezone.localtime():%Y%m%d_%H%M%S}.{ext}'
+        auditar(request, 'lote.exemplo', '', formato=formato, quantidade=len(lista))
+        resp = HttpResponse(conteudo, content_type=tipo)
+        resp['Content-Disposition'] = f'attachment; filename="{nome}"'
+        resp['X-Content-Type-Options'] = 'nosniff'
+        return resp
 
     @action(detail=True, methods=['get'])
     def arquivo(self, request, pk=None):

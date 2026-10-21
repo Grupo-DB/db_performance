@@ -301,3 +301,24 @@ class TesteEDivisaoTests(CombustivelBase):
         self.assertEqual(t['pendente_l'], 0)  # não desconta do saldo
         call_command('gerar_abastecimentos_teste', apagar=True, stdout=io.StringIO())
         self.assertEqual(Abastecimento.objects.count(), 0)
+
+
+class ExemploTests(CombustivelBase):
+    def test_exemplo_usa_so_os_de_teste_e_nao_muda_nada(self):
+        from django.core.management import call_command
+        self._registrar()  # um real, liberado
+        call_command('gerar_abastecimentos_teste', quantidade=3, usuario='gestor', stdout=io.StringIO())
+        real = Abastecimento.objects.exclude(observacao__startswith='[TESTE]').get()
+        self.client.force_authenticate(self.gestor)
+        r = self.client.get('/combustivel/lotes/exemplo/?formato=CSV')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('EXEMPLO-NAO-IMPORTAR', r['Content-Disposition'])
+        linhas = r.content.decode().splitlines()
+        testes = Abastecimento.objects.filter(observacao__startswith='[TESTE]').exclude(situacao=Abastecimento.CANCELADO).count()
+        self.assertEqual(len(linhas), 1 + testes)  # cabeçalho + os de teste não cancelados
+        self.assertNotIn(str(real.codigo_integracao), r.content.decode())
+        real.refresh_from_db()
+        self.assertEqual(real.situacao, Abastecimento.REGISTRADO)
+        self.assertFalse(Abastecimento.objects.filter(lote__isnull=False).exists())
+        self.client.force_authenticate(self.operador)
+        self.assertEqual(self.client.get('/combustivel/lotes/exemplo/').status_code, 403)
