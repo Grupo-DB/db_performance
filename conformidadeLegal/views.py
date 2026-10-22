@@ -3,8 +3,9 @@ from datetime import date, timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Count, ProtectedError, Q
+from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
@@ -114,15 +115,58 @@ class NormaViewSet(viewsets.ModelViewSet):
         if 'unidade' in serializer.validated_data and norma.unidade_id:
             Requisito.objects.filter(norma=norma).exclude(unidade=norma.unidade_id).update(unidade=norma.unidade_id)
 
+    @staticmethod
+    def _impacto(norma) -> dict:
+        """O que sai junto com a norma: requisitos e, deles, verificações, evidências e planos de ação."""
+        planos = PlanoAcao.objects.filter(requisito__norma=norma)
+        return {
+            'requisitos': Requisito.objects.filter(norma=norma).count(),
+            'verificacoes': Verificacao.objects.filter(requisito__norma=norma).count(),
+            'evidencias': EvidenciaAnexo.objects.filter(verificacao__requisito__norma=norma).count(),
+            'planos': planos.count(),
+            # A tarefa do Kanban fica (o vínculo é do plano para a tarefa); só perde a referência.
+            'planos_com_tarefa': planos.filter(tarefa__isnull=False).count(),
+            'extracoes_ia': norma.extracoes.count(),
+        }
+
+    @action(detail=True, methods=['get'])
+    def exclusao(self, request, pk=None):
+        """Prévia da exclusão: quanto vai junto. A tela mostra antes de confirmar."""
+        return Response(self._impacto(self.get_object()))
+
     def destroy(self, request, *args, **kwargs):
-        try:
-            return super().destroy(request, *args, **kwargs)
-        except ProtectedError:
-            return Response(
-                {'detail': 'Esta norma tem requisitos cadastrados. Marque-a como revogada em vez de excluir — '
-                           'o histórico de verificações é evidência de auditoria.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        """
+        Exclui a norma COM os requisitos (e verificações, evidências e planos deles, em cascata).
+        Com requisitos, exige ``?com_requisitos=1`` — confirmação explícita, para uma chamada solta
+        não apagar o histórico de auditoria. Os arquivos (PDF da norma e anexos das evidências) saem
+        do disco depois que o banco confirmou.
+        """
+        norma = self.get_object()
+        impacto = self._impacto(norma)
+        if impacto['requisitos'] and str(request.query_params.get('com_requisitos', '')).lower() not in ('1', 'true', 'sim'):
+            return Response({
+                'detail': f"Esta norma tem {impacto['requisitos']} requisito(s). Confirme a exclusão junto com eles.",
+                'impacto': impacto,
+            }, status=status.HTTP_409_CONFLICT)
+        arquivos = [f for f in EvidenciaAnexo.objects.filter(verificacao__requisito__norma=norma).values_list('arquivo', flat=True) if f]
+        if norma.arquivo:
+            arquivos.append(norma.arquivo.name)
+        # O logo do relatório pode ter sido copiado para outra norma: só sai se ninguém mais usa.
+        logo = norma.relatorio_logo.name if norma.relatorio_logo else None
+        identificacao, pk = str(norma), norma.pk
+        with transaction.atomic():
+            Requisito.objects.filter(norma=norma).delete()
+            norma.delete()
+        if logo and not Norma.objects.filter(relatorio_logo=logo).exists():
+            arquivos.append(logo)
+        for nome in arquivos:
+            if not EvidenciaAnexo.objects.filter(arquivo=nome).exists() and not Norma.objects.filter(arquivo=nome).exists():
+                try:
+                    default_storage.delete(nome)
+                except OSError:
+                    logger.warning('Conformidade: arquivo %s não pôde ser apagado do disco', nome)
+        logger.info('Conformidade: norma %s (%s) excluída por %s com %s', pk, identificacao, request.user, impacto)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['get', 'post'], url_path='extracao-ia')
     def extracao_ia(self, request, pk=None):

@@ -223,11 +223,37 @@ class ConformidadeLegalTests(APITestCase):
         self.assertEqual(r.data['indice_conformidade'], 50.0)
         self.assertEqual([v['dias'] for v in r.data['validades']], [60])
 
-    def test_norma_com_requisito_nao_se_apaga(self):
-        self._requisito()
-        r = self.client.delete(f'/conformidadeLegal/normas/{self.norma.id}/')
-        self.assertEqual(r.status_code, 400)
-        self.assertTrue(Norma.objects.filter(pk=self.norma.id).exists())
+    def test_norma_com_requisito_so_sai_com_confirmacao_e_leva_tudo_junto(self):
+        import os
+        from django.core.files.base import ContentFile
+        with tempfile.TemporaryDirectory() as pasta, override_settings(MEDIA_ROOT=pasta):
+            req = self._requisito()
+            ver = Verificacao.objects.create(requisito=req, data=date(2026, 10, 1), resultado='ATENDIDO')
+            anexo = EvidenciaAnexo(verificacao=ver)
+            anexo.arquivo.save('foto.jpg', ContentFile(b'x'), save=True)
+            caminho = anexo.arquivo.path
+            PlanoAcao.objects.create(requisito=req, descricao='Corrigir')
+            base = f'/conformidadeLegal/normas/{self.norma.id}/'
+
+            prev = self.client.get(base + 'exclusao/').data
+            self.assertEqual((prev['requisitos'], prev['verificacoes'], prev['evidencias'], prev['planos']), (1, 1, 1, 1))
+
+            r = self.client.delete(base)
+            self.assertEqual(r.status_code, 409)                  # sem confirmação não apaga
+            self.assertEqual(r.data['impacto']['requisitos'], 1)
+            self.assertTrue(Norma.objects.filter(pk=self.norma.id).exists())
+
+            self.assertEqual(self.client.delete(base + '?com_requisitos=1').status_code, 204)
+            self.assertFalse(Norma.objects.filter(pk=self.norma.id).exists())
+            self.assertFalse(Requisito.objects.filter(pk=req.pk).exists())
+            self.assertFalse(Verificacao.objects.exists())
+            self.assertFalse(PlanoAcao.objects.exists())
+            self.assertFalse(EvidenciaAnexo.objects.exists())
+            self.assertFalse(os.path.exists(caminho))             # o anexo saiu do disco
+
+    def test_norma_sem_requisito_sai_direto(self):
+        self.assertEqual(self.client.delete(f'/conformidadeLegal/normas/{self.norma.id}/').status_code, 204)
+        self.assertFalse(Norma.objects.filter(pk=self.norma.id).exists())
 
     def test_criar_lote(self):
         r = self.client.post('/conformidadeLegal/requisitos/criar-lote/', {'norma': self.norma.id, 'itens': [
