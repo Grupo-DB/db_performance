@@ -2,12 +2,13 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
-    ConfiguracaoMonitorView, ExecucoesMonitorView, NormaViewSet, OrgaoMonitorViewSet, PalavraChaveViewSet,
+    ConfiguracaoMonitorView, ExecucoesMonitorView, MatrizViewSet, NormaViewSet, OrgaoMonitorViewSet, PalavraChaveViewSet,
     PlanoAcaoViewSet, PublicacaoViewSet, RequisitoViewSet, ResponsaveisView, TestarPalavrasView, VerificacaoViewSet,
     TerceiroViewSet, DocumentoTerceiroViewSet, AvisosView, AvisosTesteView, AvisosDestinatariosView, UnidadesView,
 )
 
 router = DefaultRouter()
+router.register(r'matriz', MatrizViewSet, basename='conformidade-matriz')
 router.register(r'normas', NormaViewSet, basename='conformidade-norma')
 router.register(r'requisitos', RequisitoViewSet, basename='conformidade-requisito')
 router.register(r'verificacoes', VerificacaoViewSet, basename='conformidade-verificacao')

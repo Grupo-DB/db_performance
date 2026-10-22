@@ -695,3 +695,64 @@ class DocumentoTerceiro(models.Model):
         if dias <= (self.dias_aviso or dias_aviso_documento()):
             return 'A_VENCER'
         return 'EM_DIA'
+
+
+class MatrizItem(models.Model):
+    """
+    Uma linha da Matriz de Requisitos Legais e Obrigações (planilha do SGI): a atividade da empresa e
+    as obrigações dela. A situação NÃO é digitada — sai dos requisitos e licenças ligados
+    (``MatrizVinculo``) e das verificações deles; ``situacao_manual`` só existe para o que o sistema
+    não acompanha (ex.: "Não aplicável" com justificativa).
+    """
+    SITUACOES_MANUAIS = [
+        ('CONFORME', 'Conforme'), ('PARCIAL', 'Parcial'), ('NAO_CONFORME', 'Não conforme'), ('NAO_APLICAVEL', 'Não aplicável'),
+    ]
+
+    ordem = models.PositiveIntegerField(default=0)
+    atividade = models.CharField(max_length=200)
+    obrigacoes = models.TextField(blank=True, default='')
+    referencias = models.TextField(blank=True, default='', help_text='Origem / referência legal (como veio na planilha).')
+    controles = models.TextField(blank=True, default='', help_text='Exemplos de atendimento / controles.')
+    evidencias = models.TextField(blank=True, default='', help_text='Evidências de atendimento esperadas.')
+    responsavel_sugerido = models.CharField(max_length=200, blank=True, default='')
+    frequencia = models.CharField(max_length=200, blank=True, default='')
+    situacao_manual = models.CharField(max_length=15, choices=SITUACOES_MANUAIS, blank=True, default='')
+    justificativa = models.TextField(blank=True, default='')
+    pendencias_manual = models.TextField(blank=True, default='')
+    requisitos = models.ManyToManyField(Requisito, through='MatrizVinculo', related_name='matriz_itens', blank=True)
+    normas = models.ManyToManyField(Norma, through='MatrizVinculoNorma', related_name='matriz_itens', blank=True)
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['ordem', 'id']
+        verbose_name = 'Item da matriz de requisitos'
+        verbose_name_plural = 'Matriz de requisitos'
+
+    def __str__(self):
+        return self.atividade
+
+
+class MatrizVinculo(models.Model):
+    """Requisito que evidencia a atividade da matriz. ``excluido``: a ligação automática foi tirada à mão e não volta."""
+    item = models.ForeignKey(MatrizItem, on_delete=models.CASCADE, related_name='vinculos')
+    requisito = models.ForeignKey(Requisito, on_delete=models.CASCADE, related_name='matriz_vinculos')
+    automatico = models.BooleanField(default=False)
+    excluido = models.BooleanField(default=False)
+    motivo = models.CharField(max_length=200, blank=True, default='')
+
+    class Meta:
+        unique_together = [('item', 'requisito')]
+
+
+class MatrizVinculoNorma(models.Model):
+    """Norma/licença ligada à atividade (a validade da licença conta na situação)."""
+    item = models.ForeignKey(MatrizItem, on_delete=models.CASCADE, related_name='vinculos_normas')
+    norma = models.ForeignKey(Norma, on_delete=models.CASCADE, related_name='matriz_vinculos')
+    automatico = models.BooleanField(default=False)
+    excluido = models.BooleanField(default=False)
+    motivo = models.CharField(max_length=200, blank=True, default='')
+
+    class Meta:
+        unique_together = [('item', 'norma')]

@@ -1,3 +1,4 @@
+import io
 import shutil
 import tempfile
 from datetime import date, timedelta
@@ -1646,3 +1647,128 @@ class RelatorioForaELogoTests(RelatorioAnualTests):
         self.assertIsNone(r.data['logo_proprio'])
         self.client.patch(base, {'logo': 'nao'}, format='json')
         self.assertEqual(len(Document(io.BytesIO(arquivo().content)).inline_shapes), 0)
+
+
+class MatrizTests(APITestCase):
+    """Matriz de requisitos (planilha do SGI) — importação, vínculo automático e situação calculada."""
+    CAB = ['Atividade', 'Obrigações ambientais aplicáveis', 'Origem / referência a confirmar', 'Exemplos de atendimento / controles',
+           'Evidências de atendimento', 'Responsável sugerido', 'Frequência / prazo', 'Situação', 'Última verificação', 'Pendências / ações']
+
+    def setUp(self):
+        self.user = User.objects.create_user('sgi', password='x')
+        self.user.groups.add(Group.objects.create(name='ConformidadeLegal'))
+        self.client.force_authenticate(self.user)
+        self.pnrs = Norma.objects.create(tipo='LEI', numero='12.305', ano=2010, ementa='Política Nacional de Resíduos Sólidos.')
+        self.conama = Norma.objects.create(tipo='RESOLUCAO', orgao='CONAMA', numero='430', ano=2011, ementa='Lançamento de efluentes.')
+        self.lo = Norma.objects.create(tipo='LICENCA', orgao='FEPAM', numero='LO 100', ano=2024, ementa='Licença de operação da lavra.',
+                                       validade=date.today() + timedelta(days=400))
+        self.r_mtr = Requisito.objects.create(norma=self.pnrs, descricao='Emitir MTR para toda saída de resíduo.', aplicabilidade='APLICAVEL')
+        self.r_efl = Requisito.objects.create(norma=self.conama, descricao='Monitorar o efluente da caixa separadora.', aplicabilidade='APLICAVEL')
+        self.r_lavra = Requisito.objects.create(norma=self.lo, descricao='Manter a frente de lavra sinalizada.', aplicabilidade='APLICAVEL')
+        self.r_fora = Requisito.objects.create(norma=self.lo, descricao='Instalar hidrômetro.', aplicabilidade='NAO_APLICAVEL')
+
+    def _planilha(self, linhas):
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Matriz de Requisitos'
+        ws.append(self.CAB)
+        for l in linhas:
+            ws.append(l + ['A preencher'] * (len(self.CAB) - len(l)))
+        buf = io.BytesIO()
+        wb.save(buf)
+        return SimpleUploadedFile('matriz.xlsx', buf.getvalue(),
+                                  content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    LINHAS = [
+        ['Gestão de resíduos sólidos', 'Classificação, destinação adequada; MTR quando exigido', 'Lei 12.305/2010; PGRS', 'Coletores', 'MTR', 'Meio Ambiente', 'Conforme geração'],
+        ['Tratamento e lançamento de efluentes', 'Atender padrões de lançamento', 'Resolução CONAMA 430/2011', 'Coletas', 'Laudos', 'Manutenção', 'Conforme licença'],
+        ['Mineração a céu aberto', 'Licenciamento ambiental; atendimento às condicionantes', 'Licença ambiental vigente', 'Inspecionar', 'Licença', 'Mineração', 'Conforme a licença'],
+        ['Silvicultura, plantio e corte', 'Verificar necessidade de autorização florestal', 'Legislação florestal', 'Mapear', 'Mapas', 'Meio Ambiente', 'Antes'],
+    ]
+
+    def _importar(self, linhas=None):
+        r = self.client.post('/conformidadeLegal/matriz/importar/', {'arquivo': self._planilha(linhas or self.LINHAS)}, format='multipart')
+        self.assertEqual(r.status_code, 201, r.data)
+        return r.data
+
+    def _item(self, atividade):
+        from .models import MatrizItem
+        mi = MatrizItem.objects.get(atividade=atividade)
+        return self.client.get(f'/conformidadeLegal/matriz/{mi.id}/').data
+
+    def test_importa_liga_ao_que_existe_e_calcula_a_situacao(self):
+        d = self._importar()
+        self.assertEqual((d['criados'], d['atualizados']), (4, 0))
+        res = self._item('Gestão de resíduos sólidos')
+        self.assertIn(self.r_mtr.id, [v['requisito'] for v in res['vinculos']])
+        self.assertEqual(res['situacao'], 'NAO_VERIFICADO')           # ligado, mas ninguém verificou ainda
+        efl = self._item('Tratamento e lançamento de efluentes')
+        self.assertEqual([v['requisito'] for v in efl['vinculos']], [self.r_efl.id])
+        lavra = self._item('Mineração a céu aberto')
+        self.assertIn(self.lo.id, [v['norma'] for v in lavra['vinculos_normas']])
+        self.assertIn(self.r_lavra.id, [v['requisito'] for v in lavra['vinculos']])
+        self.assertNotIn(self.r_fora.id, [v['requisito'] for v in lavra['vinculos']])   # não aplicável fica de fora
+        self.assertEqual(self._item('Silvicultura, plantio e corte')['situacao'], 'NAO_MAPEADO')
+
+        self.r_mtr.verificacoes.create(resultado='ATENDIDO', data=date.today())
+        self.r_mtr.recalcular_situacao()
+        res = self._item('Gestão de resíduos sólidos')
+        self.assertEqual((res['situacao'], res['ultima_verificacao']), ('CONFORME', date.today().isoformat()))
+        self.r_efl.verificacoes.create(resultado='NAO_ATENDIDO', data=date.today())
+        self.r_efl.recalcular_situacao()
+        efl = self._item('Tratamento e lançamento de efluentes')
+        self.assertEqual(efl['situacao'], 'NAO_CONFORME')
+        self.assertTrue(any(p['tipo'] == 'NAO_ATENDIDO' for p in efl['pendencias']))
+        resumo = self.client.get('/conformidadeLegal/matriz/resumo/').data
+        self.assertEqual(resumo['contagem']['CONFORME'], 1)
+        self.assertEqual(resumo['total'], 4)
+
+    def test_licenca_vencida_deixa_nao_conforme(self):
+        self._importar()
+        self.lo.validade = date.today() - timedelta(days=1)
+        self.lo.save()
+        self.r_lavra.verificacoes.create(resultado='ATENDIDO', data=date.today())
+        self.r_lavra.recalcular_situacao()
+        lavra = self._item('Mineração a céu aberto')
+        self.assertEqual(lavra['situacao'], 'NAO_CONFORME')
+        self.assertTrue(any(p['tipo'] == 'LICENCA_VENCIDA' for p in lavra['pendencias']))
+
+    def test_reimportar_atualiza_sem_duplicar_e_vinculo_tirado_nao_volta(self):
+        self._importar()
+        res = self._item('Gestão de resíduos sólidos')
+        r = self.client.delete(f"/conformidadeLegal/matriz/{res['id']}/vinculos/?requisito={self.r_mtr.id}")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn(self.r_mtr.id, [v['requisito'] for v in r.data['vinculos']])
+        linhas = [l[:] for l in self.LINHAS]
+        linhas[0][1] = 'Texto novo da obrigação de resíduos'
+        d = self._importar(linhas)
+        self.assertEqual((d['criados'], d['atualizados']), (0, 4))
+        res = self._item('Gestão de resíduos sólidos')
+        self.assertEqual(res['obrigacoes'], 'Texto novo da obrigação de resíduos')
+        self.assertNotIn(self.r_mtr.id, [v['requisito'] for v in res['vinculos']])
+        r = self.client.post(f"/conformidadeLegal/matriz/{res['id']}/vinculos/", {'requisito': self.r_mtr.id}, format='json')
+        self.assertIn(self.r_mtr.id, [v['requisito'] for v in r.data['vinculos']])
+
+    def test_situacao_manual_exige_justificativa_e_exporta_planilha(self):
+        self._importar()
+        silv = self._item('Silvicultura, plantio e corte')
+        url = f"/conformidadeLegal/matriz/{silv['id']}/"
+        self.assertEqual(self.client.patch(url, {'situacao_manual': 'NAO_APLICAVEL'}, format='json').status_code, 400)
+        r = self.client.patch(url, {'situacao_manual': 'NAO_APLICAVEL', 'justificativa': 'Sem silvicultura na unidade.'}, format='json')
+        self.assertEqual((r.status_code, r.data['situacao'], r.data['situacao_automatica']), (200, 'NAO_APLICAVEL', 'NAO_MAPEADO'))
+        from openpyxl import load_workbook
+        r = self.client.get('/conformidadeLegal/matriz/exportar/')
+        self.assertEqual(r.status_code, 200)
+        ws = load_workbook(io.BytesIO(r.content)).active
+        linhas = {row[0]: row for row in ws.iter_rows(min_row=2, values_only=True)}
+        self.assertEqual(linhas['Silvicultura, plantio e corte'][7], 'Não aplicável (manual)')
+
+    def test_importar_recusa_planilha_sem_cabecalho(self):
+        from openpyxl import Workbook
+        wb = Workbook()
+        wb.active.append(['Nada', 'aqui'])
+        buf = io.BytesIO()
+        wb.save(buf)
+        r = self.client.post('/conformidadeLegal/matriz/importar/', {'arquivo': SimpleUploadedFile('x.xlsx', buf.getvalue())}, format='multipart')
+        self.assertEqual(r.status_code, 400)

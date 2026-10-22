@@ -8,7 +8,7 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
-from rest_framework import mixins, status, viewsets
+from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -16,9 +16,9 @@ from rest_framework.views import APIView
 
 from kanban.models import KanbanColumn, KanbanTask
 
-from . import avisos, ia, importar_relatorio, normas_tecnicas, relatorio_anual
+from . import avisos, ia, importar_relatorio, matriz, normas_tecnicas, relatorio_anual
 from .models import (
-    TEMAS, ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, Norma, OrgaoMonitor, PalavraChaveMonitor,
+    TEMAS, ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, MatrizItem, MatrizVinculo, MatrizVinculoNorma, Norma, OrgaoMonitor, PalavraChaveMonitor,
     PlanoAcao, PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao, ConfiguracaoAvisos,
 )
 from .permissions import IsConformidade
@@ -1195,3 +1195,114 @@ class AvisosDestinatariosView(APIView):
             msg = avisos.montar_email(avisos.pendencias(filtros), nome, completo)
             lista.append({'email': email, 'nome': nome, 'completo': completo, 'itens': msg[2] if msg else 0})
         return Response({'dia_de_enviar': avisos.dia_de_enviar(cfg), 'destinatarios': lista})
+
+
+# ── Matriz de requisitos legais (planilha do SGI) ───────────────────────────────
+class MatrizItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MatrizItem
+        fields = ['id', 'ordem', 'atividade', 'obrigacoes', 'referencias', 'controles', 'evidencias', 'responsavel_sugerido',
+                  'frequencia', 'situacao_manual', 'justificativa', 'pendencias_manual', 'atualizado_em']
+        read_only_fields = ['atualizado_em']
+
+    def validate(self, attrs):
+        if attrs.get('situacao_manual') and not (attrs.get('justificativa') or getattr(self.instance, 'justificativa', '')):
+            raise ValidationError({'justificativa': 'Diga por que a situação foi definida à mão.'})
+        return attrs
+
+    def to_representation(self, item):
+        dados = super().to_representation(item)
+        dados.update(matriz.situacao(item))
+        if self.context.get('detalhe'):
+            dados['vinculos'] = [{
+                'id': v.id, 'requisito': v.requisito_id, 'texto': v.requisito.descricao[:300], 'referencia': v.requisito.referencia,
+                'norma': v.requisito.norma.identificacao, 'norma_id': v.requisito.norma_id, 'situacao': v.requisito.situacao,
+                'aplicabilidade': v.requisito.aplicabilidade, 'ultima_verificacao': v.requisito.ultima_verificacao,
+                'proxima_verificacao': v.requisito.proxima_verificacao, 'automatico': v.automatico, 'motivo': v.motivo,
+            } for v in item.vinculos.all() if not v.excluido and v.requisito.ativo]
+            dados['vinculos_normas'] = [{
+                'id': v.id, 'norma': v.norma_id, 'identificacao': v.norma.identificacao, 'tipo': v.norma.tipo,
+                'validade': v.norma.validade, 'situacao': v.norma.situacao, 'automatico': v.automatico, 'motivo': v.motivo,
+            } for v in item.vinculos_normas.all() if not v.excluido]
+        return dados
+
+
+class MatrizViewSet(viewsets.ModelViewSet):
+    """
+    Matriz de requisitos legais. A situação de cada atividade vem dos requisitos e licenças
+    ligados (ver ``matriz.py``); importar a planilha cria/atualiza e já liga ao que está cadastrado.
+    """
+    permission_classes = [IsConformidade]
+    serializer_class = MatrizItemSerializer
+
+    def get_queryset(self):
+        return matriz.queryset_itens()
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), 'detalhe': self.action != 'list'}
+
+    def perform_create(self, serializer):
+        item = serializer.save(criado_por=self.request.user)
+        matriz.vincular_automatico([item])
+
+    @action(detail=False, methods=['get'])
+    def resumo(self, request):
+        return Response(matriz.resumo())
+
+    @action(detail=False, methods=['post'])
+    def importar(self, request):
+        arquivo = request.FILES.get('arquivo')
+        if not arquivo:
+            raise ValidationError({'arquivo': 'Envie a planilha (.xlsx).'})
+        if arquivo.size > 5 * 1024 * 1024:
+            raise ValidationError({'arquivo': 'Planilha maior que 5 MB.'})
+        if not arquivo.name.lower().endswith(('.xlsx', '.xlsm')):
+            raise ValidationError({'arquivo': 'Envie no formato .xlsx (Excel).'})
+        try:
+            resultado = matriz.importar_planilha(arquivo, request.user)
+        except ValueError as exc:
+            raise ValidationError({'arquivo': str(exc)})
+        logger.info('Conformidade: matriz importada por %s: %s', request.user, resultado)
+        return Response({**resultado, 'resumo': matriz.resumo()}, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='vincular-automatico')
+    def vincular(self, request):
+        """Procura de novo (ex.: depois de cadastrar uma licença). Não traz de volta o que foi tirado à mão."""
+        return Response({'novos': matriz.vincular_automatico(), 'resumo': matriz.resumo()})
+
+    @action(detail=False, methods=['get'])
+    def exportar(self, request):
+        resp = HttpResponse(matriz.exportar_planilha(),
+                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        resp['Content-Disposition'] = f'attachment; filename="matriz_requisitos_{date.today():%Y%m%d}.xlsx"'
+        return resp
+
+    @action(detail=True, methods=['post', 'delete'])
+    def vinculos(self, request, pk=None):
+        """POST {requisito} ou {norma} liga à mão; DELETE ?requisito= / ?norma= tira (a automática fica marcada para não voltar)."""
+        item = self.get_object()
+        origem = request.data if request.method == 'POST' else request.query_params
+        rid, nid = origem.get('requisito'), origem.get('norma')
+        if not (rid or nid):
+            raise ValidationError({'detail': 'Informe o requisito ou a norma.'})
+        if request.method == 'POST':
+            if rid:
+                req = Requisito.objects.filter(pk=rid).first()
+                if not req:
+                    raise ValidationError({'requisito': 'Requisito não encontrado.'})
+                MatrizVinculo.objects.update_or_create(item=item, requisito=req, defaults={'excluido': False, 'automatico': False, 'motivo': 'Ligado à mão'})
+            if nid:
+                norma = Norma.objects.filter(pk=nid).first()
+                if not norma:
+                    raise ValidationError({'norma': 'Norma não encontrada.'})
+                MatrizVinculoNorma.objects.update_or_create(item=item, norma=norma, defaults={'excluido': False, 'automatico': False, 'motivo': 'Ligada à mão'})
+        else:
+            modelo, campo, valor = (MatrizVinculo, 'requisito_id', rid) if rid else (MatrizVinculoNorma, 'norma_id', nid)
+            v = modelo.objects.filter(item=item, **{campo: valor}).first()
+            if v and v.automatico:
+                v.excluido = True
+                v.save(update_fields=['excluido'])
+            elif v:
+                v.delete()
+        item = self.get_queryset().get(pk=item.pk)
+        return Response(self.get_serializer(item).data)
