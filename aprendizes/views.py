@@ -3,14 +3,17 @@ from datetime import datetime, timedelta
 from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.utils import timezone
-from rest_framework import mixins, status, viewsets
+from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
+from rest_framework.throttling import SimpleRateThrottle
+from rest_framework.views import APIView
 from rest_framework.response import Response
 
 from avaliacoes.management.models import Colaborador
 
 from . import jovem_aprendiz
-from .models import Acompanhamento, AvaliacaoJovemAprendiz, Etapa
+from .models import Acompanhamento, AvaliacaoJovemAprendiz, ConviteAutoavaliacao, Etapa
 from .permissions import IsRHAcompanhamento
 from .importacao import _dados_do_colaborador, importar_linhas
 from .regras import vencimentos
@@ -209,3 +212,94 @@ class AvaliacaoJovemAprendizViewSet(viewsets.ModelViewSet):
                 'medias': {c: (round(sum(a.get(c, 0) for a in avs) / len(avs), 2) if avs else None) for c in jovem_aprendiz.CHAVES},
             }
         return Response(saida)
+
+
+class ConviteSerializer(serializers.ModelSerializer):
+    situacao = serializers.CharField(read_only=True)
+    avaliacao_id = serializers.IntegerField(source='avaliacao.id', read_only=True, default=None)
+
+    class Meta:
+        model = ConviteAutoavaliacao
+        fields = ['id', 'token', 'colaborador', 'nome', 'setor', 'telefone', 'expira_em', 'cancelado', 'respondido_em',
+                  'situacao', 'avaliacao_id', 'criado_em']
+        read_only_fields = ['token', 'expira_em', 'cancelado', 'respondido_em', 'criado_em']
+
+    def validate_nome(self, v):
+        v = (v or '').strip()
+        if not v:
+            raise serializers.ValidationError('Informe o nome do jovem.')
+        return v[:150]
+
+    def validate_telefone(self, v):
+        return ''.join(ch for ch in (v or '') if ch.isdigit())[:20]
+
+
+class ConviteAutoavaliacaoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
+    """RH gera o link da autoavaliação para o jovem responder pelo celular."""
+    permission_classes = [IsRHAcompanhamento]
+    serializer_class = ConviteSerializer
+    queryset = ConviteAutoavaliacao.objects.select_related('avaliacao')
+
+    def perform_create(self, serializer):
+        serializer.save(criado_por=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def cancelar(self, request, pk=None):
+        c = self.get_object()
+        if c.respondido_em:
+            return Response({'detail': 'Já respondido: exclua a autoavaliação se precisar.'}, status=status.HTTP_400_BAD_REQUEST)
+        c.cancelado = True
+        c.save(update_fields=['cancelado'])
+        return Response(self.get_serializer(c).data)
+
+
+class LimiteRespostaPublica(SimpleRateThrottle):
+    """Por IP: o link é público; uma pessoa responde uma vez, 30/min sobra e corta abuso."""
+    scope = 'aprendizes_publico'
+    rate = '30/min'
+
+    def get_cache_key(self, request, view):
+        return self.cache_format % {'scope': self.scope, 'ident': self.get_ident(request)}
+
+
+class AutoavaliacaoPublicaView(APIView):
+    """
+    A autoavaliação aberta, pelo link do convite: ``GET`` entrega o formulário e o nome do jovem;
+    ``POST`` grava. Sem login por definição — ``authentication_classes = []`` evita que um JWT
+    vencido no navegador derrube a requisição com 401 (mesmo padrão das Pesquisas).
+    """
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [LimiteRespostaPublica]
+
+    MENSAGENS = {
+        'RESPONDIDO': 'Esta autoavaliação já foi respondida. Obrigado!',
+        'CANCELADO': 'Este link foi cancelado. Peça um novo ao RH.',
+        'VENCIDO': 'Este link venceu. Peça um novo ao RH.',
+    }
+
+    def get(self, request, token):
+        c = ConviteAutoavaliacao.objects.filter(token=token).first()
+        if not c:
+            return Response({'detail': 'Link não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        if c.situacao != 'ABERTO':
+            return Response({'fechado': True, 'situacao': c.situacao, 'detail': self.MENSAGENS[c.situacao], 'nome': c.nome.split(' ')[0]})
+        return Response({'fechado': False, 'nome': c.nome, 'setor': c.setor, 'formulario': jovem_aprendiz.formulario('AUTO')})
+
+    @transaction.atomic
+    def post(self, request, token):
+        c = ConviteAutoavaliacao.objects.select_for_update().filter(token=token).first()
+        if not c:
+            return Response({'detail': 'Link não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        if c.situacao != 'ABERTO':
+            return Response({'detail': self.MENSAGENS[c.situacao]}, status=status.HTTP_400_BAD_REQUEST)
+        ser = AvaliacaoJovemAprendizSerializer(data={
+            'tipo': AvaliacaoJovemAprendiz.AUTO, 'colaborador': c.colaborador_id, 'nome': c.nome, 'setor': c.setor,
+            'data': timezone.localdate().isoformat(), 'notas': request.data.get('notas') or {},
+            'respostas': request.data.get('respostas') or {}, 'avaliador': 'Respondida pelo jovem (link)',
+        })
+        ser.is_valid(raise_exception=True)
+        av = ser.save()
+        c.avaliacao, c.respondido_em = av, timezone.now()
+        c.save(update_fields=['avaliacao', 'respondido_em'])
+        return Response({'ok': True, 'nome': c.nome.split(' ')[0]}, status=status.HTTP_201_CREATED)

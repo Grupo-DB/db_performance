@@ -5,8 +5,12 @@ cada linha é uma ETAPA de uma pessoa (1º vencimento, prorrogação, efetivaç�
 pessoa vira um ``Acompanhamento`` e as linhas viram ``Etapa`` — a tela mensal é só um
 filtro por vencimento, e o histórico da pessoa fica junto.
 """
+import secrets
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from avaliacoes.management.models import Colaborador
 
@@ -152,3 +156,42 @@ class AvaliacaoJovemAprendiz(models.Model):
 
     def __str__(self):
         return f'{self.get_tipo_display()} — {self.nome} ({self.data:%d/%m/%Y})'
+
+
+def _token_convite() -> str:
+    return secrets.token_urlsafe(18)
+
+
+def _expira_convite():
+    return timezone.now() + timedelta(days=30)
+
+
+class ConviteAutoavaliacao(models.Model):
+    """
+    Link para o próprio jovem responder a autoavaliação pelo celular, sem login.
+    Uma resposta por link; vence em 30 dias; o RH pode cancelar.
+    """
+    token = models.CharField(max_length=40, unique=True, default=_token_convite, db_index=True)
+    colaborador = models.ForeignKey(Colaborador, null=True, blank=True, on_delete=models.SET_NULL, related_name='convites_autoavaliacao')
+    nome = models.CharField(max_length=150)
+    setor = models.CharField(max_length=150, blank=True, default='')
+    telefone = models.CharField(max_length=20, blank=True, default='')
+    expira_em = models.DateTimeField(default=_expira_convite)
+    cancelado = models.BooleanField(default=False)
+    respondido_em = models.DateTimeField(null=True, blank=True)
+    avaliacao = models.OneToOneField(AvaliacaoJovemAprendiz, null=True, blank=True, on_delete=models.SET_NULL, related_name='convite')
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-criado_em']
+
+    @property
+    def situacao(self) -> str:
+        if self.respondido_em:
+            return 'RESPONDIDO'
+        if self.cancelado:
+            return 'CANCELADO'
+        if self.expira_em and self.expira_em < timezone.now():
+            return 'VENCIDO'
+        return 'ABERTO'

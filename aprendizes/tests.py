@@ -187,3 +187,58 @@ class JovemAprendizTests(APITestCase):
     def test_so_o_rh(self):
         self.client.force_authenticate(User.objects.create_user('outro', password='x'))
         self.assertEqual(self.client.get(self.url).status_code, 403)
+
+
+class AutoavaliacaoPeloCelularTests(APITestCase):
+    """O jovem responde a autoavaliação pelo link do convite, sem login (22/10/2026)."""
+
+    def setUp(self):
+        self.rh = User.objects.create_user('rh', password='x')
+        self.rh.groups.add(Group.objects.create(name='RHGestor'))
+
+    def _convite(self):
+        self.client.force_authenticate(self.rh)
+        r = self.client.post('/aprendizes/jovem-aprendiz/convites/', {'nome': 'Carlos Eduardo', 'setor': 'Manutenção', 'telefone': '(55) 99999-1234'}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['telefone'], '55999991234')
+        self.client.force_authenticate(None)
+        return r.data
+
+    def _respostas(self):
+        from .jovem_aprendiz import CHAVES
+        return {'notas': {c: 3 for c in CHAVES}, 'respostas': {'quero_melhorar': 'Chegar no horário'}}
+
+    def test_jovem_responde_sem_login_uma_vez_so(self):
+        c = self._convite()
+        url = f"/aprendizes/publico/autoavaliacao/{c['token']}/"
+        g = self.client.get(url)
+        self.assertEqual((g.status_code, g.data['fechado'], g.data['nome']), (200, False, 'Carlos Eduardo'))
+        self.assertEqual(len(g.data['formulario']['competencias']), 10)
+        incompleto = self._respostas()
+        incompleto['notas'].pop('etica')
+        self.assertEqual(self.client.post(url, incompleto, format='json').status_code, 400)
+        r = self.client.post(url, self._respostas(), format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        from .models import AvaliacaoJovemAprendiz, ConviteAutoavaliacao
+        av = AvaliacaoJovemAprendiz.objects.get()
+        self.assertEqual((av.tipo, av.nome, av.setor), ('AUTO', 'Carlos Eduardo', 'Manutenção'))
+        self.assertEqual(ConviteAutoavaliacao.objects.get().avaliacao_id, av.id)
+        self.assertEqual(self.client.post(url, self._respostas(), format='json').status_code, 400)   # segunda vez não
+        self.assertEqual(self.client.get(url).data['situacao'], 'RESPONDIDO')
+
+    def test_cancelado_e_vencido_fecham_e_token_errado_some(self):
+        from django.utils import timezone as tz
+        from datetime import timedelta
+        from .models import ConviteAutoavaliacao
+        c = self._convite()
+        self.client.force_authenticate(self.rh)
+        self.client.post(f"/aprendizes/jovem-aprendiz/convites/{c['id']}/cancelar/")
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get(f"/aprendizes/publico/autoavaliacao/{c['token']}/").data['situacao'], 'CANCELADO')
+        c2 = self._convite()
+        ConviteAutoavaliacao.objects.filter(pk=c2['id']).update(expira_em=tz.now() - timedelta(minutes=1))
+        self.assertEqual(self.client.post(f"/aprendizes/publico/autoavaliacao/{c2['token']}/", self._respostas(), format='json').status_code, 400)
+        self.assertEqual(self.client.get('/aprendizes/publico/autoavaliacao/naoexiste/').status_code, 404)
+
+    def test_convites_so_o_rh(self):
+        self.assertEqual(self.client.get('/aprendizes/jovem-aprendiz/convites/').status_code, 401)
