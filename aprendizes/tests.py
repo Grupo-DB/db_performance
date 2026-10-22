@@ -132,3 +132,58 @@ class ComandoImportarTests(APITestCase):
         rai = Etapa.objects.get(acompanhamento__nome='RAÍ DE BARCELLOS')
         self.assertEqual((rai.tipo, rai.situacao), (Etapa.EFETIVACAO, Etapa.PENDENTE))
         self.assertFalse(rai.brinde_entregue)
+
+
+class JovemAprendizTests(APITestCase):
+    """Programa Jovem Aprendiz (22/10/2026): avaliação do instrutor, autoavaliação e comparativo."""
+
+    def setUp(self):
+        u = User.objects.create_user('rh', password='x')
+        u.groups.add(Group.objects.create(name='RHGestor'))
+        self.client.force_authenticate(u)
+        self.url = '/aprendizes/jovem-aprendiz/'
+
+    def _notas(self, base):
+        from .jovem_aprendiz import CHAVES
+        return {c: base for c in CHAVES}
+
+    def test_formularios_tem_o_texto_dos_documentos(self):
+        f = self.client.get(self.url + 'formularios/').data
+        self.assertEqual(len(f['INSTRUTOR']['competencias']), 10)
+        self.assertEqual(f['AUTO']['competencias'][1]['nome'], 'Escuta')
+        self.assertEqual(f['INSTRUTOR']['competencias'][1]['nome'], 'Escuta e receptividade')
+        self.assertEqual(f['INSTRUTOR']['escala'][3]['rotulo'], 'Supera o esperado')
+        self.assertEqual(len(f['AUTO']['perguntas']), 3)
+        self.assertEqual(len(f['INSTRUTOR']['evolucoes']), 4)
+
+    def test_exige_todas_as_notas_de_1_a_4(self):
+        notas = self._notas(3)
+        notas.pop('etica')
+        r = self.client.post(self.url, {'tipo': 'INSTRUTOR', 'nome': 'Ana', 'data': '2026-10-22', 'notas': notas}, format='json')
+        self.assertEqual(r.status_code, 400)
+        notas = self._notas(5)
+        r = self.client.post(self.url, {'tipo': 'INSTRUTOR', 'nome': 'Ana', 'data': '2026-10-22', 'notas': notas}, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_salva_e_compara_instrutor_com_autoavaliacao(self):
+        r = self.client.post(self.url, {'tipo': 'INSTRUTOR', 'nome': 'Ana Souza', 'setor': 'Laboratório', 'data': '2026-10-22',
+                                        'notas': {**self._notas(3), 'pontualidade': 2}, 'evolucao': 'MODERADA',
+                                        'competencia_prioritaria': 'pontualidade', 'respostas': {'ponto_forte': 'Comunicação', 'xx': 'some'},
+                                        'avaliador': 'Instrutor Carlos'}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['respostas'], {'ponto_forte': 'Comunicação'})   # pergunta de fora não grava
+        self.assertEqual(r.data['media'], 2.9)
+        r = self.client.post(self.url, {'tipo': 'AUTO', 'nome': 'Ana Souza', 'data': '2026-10-22', 'notas': {**self._notas(3), 'pontualidade': 4},
+                                        'evolucao': 'MODERADA', 'respostas': {'quero_melhorar': 'Chegar no horário'}}, format='json')
+        self.assertEqual((r.status_code, r.data['evolucao']), (201, ''))         # autoavaliação não tem evolução
+        c = self.client.get(self.url + 'comparativo/?nome=ana souza').data
+        linha = next(l for l in c['linhas'] if l['chave'] == 'pontualidade')
+        self.assertEqual((linha['instrutor'], linha['auto'], linha['diferenca']), (2, 4, 2))
+        self.assertEqual(c['atencao'], ['Pontualidade e assiduidade'])
+        self.assertEqual(len(self.client.get(self.url + '?tipo=AUTO').data), 1)
+        resumo = self.client.get(self.url + 'resumo/').data
+        self.assertEqual(resumo['INSTRUTOR']['medias']['pontualidade'], 2)
+
+    def test_so_o_rh(self):
+        self.client.force_authenticate(User.objects.create_user('outro', password='x'))
+        self.assertEqual(self.client.get(self.url).status_code, 403)

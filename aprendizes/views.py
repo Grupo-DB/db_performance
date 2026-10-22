@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.db import transaction
 from django.db.models import Prefetch, Q
@@ -9,11 +9,12 @@ from rest_framework.response import Response
 
 from avaliacoes.management.models import Colaborador
 
-from .models import Acompanhamento, Etapa
+from . import jovem_aprendiz
+from .models import Acompanhamento, AvaliacaoJovemAprendiz, Etapa
 from .permissions import IsRHAcompanhamento
 from .importacao import _dados_do_colaborador, importar_linhas
 from .regras import vencimentos
-from .serializers import AcompanhamentoSerializer, EtapaSerializer
+from .serializers import AcompanhamentoSerializer, AvaliacaoJovemAprendizSerializer, EtapaSerializer
 
 
 class AcompanhamentoViewSet(viewsets.ModelViewSet):
@@ -56,7 +57,10 @@ class AcompanhamentoViewSet(viewsets.ModelViewSet):
             qs = qs.filter(nome__icontains=q)
         else:
             dias = int(request.query_params.get('dias') or 120)
-            qs = qs.filter(data_admissao__date__gte=timezone.localdate() - timedelta(days=dias))
+            # Intervalo de datetime, não ``__date``: no MySQL da VM (sem tabelas de fuso) o __date vira
+            # CONVERT_TZ = NULL e a lista vinha vazia.
+            desde = timezone.localdate() - timedelta(days=dias)
+            qs = qs.filter(data_admissao__gte=timezone.make_aware(datetime.combine(desde, datetime.min.time())))
         ja = set(Acompanhamento.objects.exclude(colaborador=None).values_list('colaborador_id', flat=True))
         lista = []
         for c in qs.order_by('-data_admissao', 'nome')[:80]:
@@ -130,3 +134,78 @@ class EtapaViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, mixins.Update
         acompanhamento = instance.acompanhamento
         instance.delete()
         acompanhamento.atualizar_situacao()
+
+
+class AvaliacaoJovemAprendizViewSet(viewsets.ModelViewSet):
+    """
+    Programa Jovem Aprendiz: avaliação do instrutor e autoavaliação (``?tipo=INSTRUTOR|AUTO``).
+    ``formularios/`` devolve o texto dos dois documentos; ``comparativo/`` põe lado a lado a última
+    avaliação do instrutor e a última autoavaliação do mesmo jovem.
+    """
+    permission_classes = [IsRHAcompanhamento]
+    serializer_class = AvaliacaoJovemAprendizSerializer
+
+    def get_queryset(self):
+        qs = AvaliacaoJovemAprendiz.objects.select_related('criado_por')
+        p = self.request.query_params
+        if p.get('tipo'):
+            qs = qs.filter(tipo=p['tipo'])
+        if p.get('colaborador'):
+            qs = qs.filter(colaborador_id=p['colaborador'])
+        if p.get('nome'):
+            qs = qs.filter(nome__iexact=p['nome'].strip())
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(criado_por=self.request.user)
+
+    @action(detail=False, methods=['get'])
+    def formularios(self, request):
+        return Response({t: jovem_aprendiz.formulario(t) for t in ('INSTRUTOR', 'AUTO')})
+
+    @action(detail=False, methods=['get'])
+    def jovens(self, request):
+        """Colaboradores ativos para escolher (``?q=``); os que já têm avaliação vêm marcados."""
+        q = (request.query_params.get('q') or '').strip()
+        qs = Colaborador.objects.filter(situacao=True).select_related('setor', 'cargo')
+        if q:
+            qs = qs.filter(nome__icontains=q)
+        avaliados = set(AvaliacaoJovemAprendiz.objects.exclude(colaborador=None).values_list('colaborador_id', flat=True))
+        lista = []
+        for c in qs.order_by('nome')[:60]:
+            d = _dados_do_colaborador(c)
+            lista.append({'id': c.id, 'nome': d['nome'], 'setor': d['setor'], 'cargo': d['cargo'], 'ja_avaliado': c.id in avaliados})
+        return Response(lista)
+
+    @action(detail=False, methods=['get'])
+    def comparativo(self, request):
+        """Última do instrutor × última autoavaliação de um jovem (``?colaborador=`` ou ``?nome=``)."""
+        qs = self.get_queryset()
+        if not (request.query_params.get('colaborador') or request.query_params.get('nome')):
+            return Response({'detail': 'Informe o jovem.'}, status=status.HTTP_400_BAD_REQUEST)
+        inst = qs.filter(tipo=AvaliacaoJovemAprendiz.INSTRUTOR).first()
+        auto = qs.filter(tipo=AvaliacaoJovemAprendiz.AUTO).first()
+        nomes = jovem_aprendiz.formulario('INSTRUTOR')['competencias']
+        linhas = [{'chave': c['chave'], 'nome': c['nome'],
+                   'instrutor': (inst.notas or {}).get(c['chave']) if inst else None,
+                   'auto': (auto.notas or {}).get(c['chave']) if auto else None} for c in nomes]
+        for l in linhas:
+            l['diferenca'] = l['auto'] - l['instrutor'] if l['auto'] and l['instrutor'] else None
+        ser = self.get_serializer
+        return Response({
+            'instrutor': ser(inst).data if inst else None, 'auto': ser(auto).data if auto else None, 'linhas': linhas,
+            # Onde o jovem se vê bem acima do que o instrutor vê (>= 2 pontos): conversa de feedback.
+            'atencao': [l['nome'] for l in linhas if l['diferenca'] is not None and l['diferenca'] >= 2],
+        })
+
+    @action(detail=False, methods=['get'])
+    def resumo(self, request):
+        """Média de cada competência (por tipo) entre todas as avaliações — o retrato da turma."""
+        saida = {}
+        for tipo in ('INSTRUTOR', 'AUTO'):
+            avs = list(AvaliacaoJovemAprendiz.objects.filter(tipo=tipo).values_list('notas', flat=True))
+            saida[tipo] = {
+                'total': len(avs),
+                'medias': {c: (round(sum(a.get(c, 0) for a in avs) / len(avs), 2) if avs else None) for c in jovem_aprendiz.CHAVES},
+            }
+        return Response(saida)

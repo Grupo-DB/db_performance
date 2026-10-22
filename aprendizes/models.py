@@ -116,3 +116,39 @@ class Etapa(models.Model):
 
     def __str__(self):
         return f'{self.acompanhamento} — {self.get_tipo_display()}'
+
+
+class AvaliacaoJovemAprendiz(models.Model):
+    """
+    Avaliação do Programa Jovem Aprendiz: a do instrutor (INSTRUTOR) ou a autoavaliação (AUTO).
+    Notas 1–4 por competência em ``notas`` ({chave: nota}); as chaves são as de ``jovem_aprendiz.CHAVES``.
+    """
+    INSTRUTOR, AUTO = 'INSTRUTOR', 'AUTO'
+    TIPOS = [(INSTRUTOR, 'Avaliação do instrutor'), (AUTO, 'Autoavaliação')]
+    EVOLUCOES = [('SIGNIFICATIVA', 'Sim, significativa'), ('MODERADA', 'Sim, moderada'),
+                 ('POUCA', 'Pouca evolução'), ('NAO_PERCEBIDA', 'Ainda não foi possível perceber')]
+
+    tipo = models.CharField(max_length=10, choices=TIPOS)
+    colaborador = models.ForeignKey(Colaborador, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name='avaliacoes_jovem_aprendiz')
+    # Cópia no momento (o jovem pode não estar, ou deixar de estar, no cadastro).
+    nome = models.CharField(max_length=150)
+    setor = models.CharField(max_length=150, blank=True, default='')
+    data = models.DateField()
+    notas = models.JSONField(default=dict)
+    respostas = models.JSONField(default=dict, blank=True)
+    evolucao = models.CharField(max_length=15, choices=EVOLUCOES, blank=True, default='')
+    competencia_prioritaria = models.CharField(max_length=30, blank=True, default='')
+    avaliador = models.CharField(max_length=150, blank=True, default='', help_text='Quem avaliou (instrutor) ou o próprio jovem.')
+    observacao = models.TextField(blank=True, default='')
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-data', '-id']
+        verbose_name = 'Avaliação do Jovem Aprendiz'
+        verbose_name_plural = 'Avaliações do Jovem Aprendiz'
+
+    def __str__(self):
+        return f'{self.get_tipo_display()} — {self.nome} ({self.data:%d/%m/%Y})'
