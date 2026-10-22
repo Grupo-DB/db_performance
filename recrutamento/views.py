@@ -4,6 +4,7 @@ from statistics import median
 from threading import Thread
 
 from django.db.models import Count, ProtectedError, Q
+from django.utils.dateparse import parse_date
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -98,6 +99,11 @@ class CandidatoViewSet(ProtegeExclusaoMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Candidato.objects.prefetch_related('areas_interesse', 'processos__vaga', 'fichas__vaga')
         if self.action == 'list':
+            # Recebido em: ?recebido_de=AAAA-MM-DD&recebido_ate=AAAA-MM-DD (DateField, sem fuso).
+            for param, lookup in (('recebido_de', 'data_recebimento__gte'), ('recebido_ate', 'data_recebimento__lte')):
+                valor = parse_date(self.request.query_params.get(param) or '')
+                if valor:
+                    qs = qs.filter(**{lookup: valor})
             qs = qs.annotate(
                 total_processos=Count('processos', distinct=True),
                 total_fichas=Count('fichas', distinct=True),
