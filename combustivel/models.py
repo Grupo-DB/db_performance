@@ -268,6 +268,22 @@ class Lubrificacao(models.Model):
         indexes = [models.Index(fields=['equipamento', 'lubrificado_em'])]
 
 
+class LimiteLubrificante(models.Model):
+    """
+    Estoque mínimo/máximo de um lubrificante definido no Manager. Vazio = vale o do SGA
+    (QUANTESTOQUE.QESTQESTMIN/MAX). Não grava nada no SGA.
+    """
+    produto = models.PositiveIntegerField(unique=True, help_text='ESTQCOD do SGA')
+    produto_nome = models.CharField(max_length=120, blank=True, default='')
+    minimo = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    maximo = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    alerta = models.BooleanField(default=True, help_text='Avisar quando ficar abaixo do mínimo')
+    ignorar = models.BooleanField(default=False, help_text='Item que não se controla (fora de linha, uso eventual)')
+    observacao = models.CharField(max_length=300, blank=True, default='')
+    atualizado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='+')
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+
 class ChaveIntegracao(models.Model):
     """
     Chave de API para o SGA (ou outro sistema) BUSCAR os abastecimentos. Só o hash fica

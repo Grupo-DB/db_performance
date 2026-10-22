@@ -18,7 +18,7 @@ from rest_framework.views import APIView
 
 from . import erp, integracao, lubrificacao, regras
 from .models import (
-    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, PRIVADO, Transferencia, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LoteIntegracao, Lubrificacao, MedicaoTanque, Tanque,
+    BASE_CODIGO_INTEGRACAO, MARCA_TESTE, PRIVADO, Transferencia, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LimiteLubrificante, LoteIntegracao, Lubrificacao, MedicaoTanque, Tanque,
 )
 from .permissions import (
     AutenticacaoChave, LeituraOuGestao, LimiteIntegracao, LimiteRegistro, PodeGerir, PodeRegistrar, PodeVer, TemChave,
@@ -785,6 +785,16 @@ def _leituras_horimetro(desde: date, ate: date) -> list[dict]:
     return sga + manager + campo
 
 
+def _com_situacao(prods: list[dict]) -> list[dict]:
+    """Situação do estoque (mínimo) em cada lubrificante do cadastro — o registro mostra no detalhe."""
+    try:
+        sit = {i['cod']: i for i in _situacao_estoque_lub()['itens']}
+    except erp.ErpIndisponivel:
+        return prods
+    return [{**p, 'situacao_estoque': (sit.get(p['cod']) or {}).get('situacao'), 'minimo': (sit.get(p['cod']) or {}).get('minimo')}
+            for p in prods]
+
+
 class LubrificacaoCadastrosView(APIView):
     """Para o registro de campo: todos os equipamentos ativos (britador também lubrifica), lubrificantes e funcionários."""
     permission_classes = [PodeVer]
@@ -797,7 +807,7 @@ class LubrificacaoCadastrosView(APIView):
         return Response({
             'equipamentos': [{k: e[k] for k in ('cod', 'nome', 'tag', 'descricao', 'abastece', 'usa_km', 'usa_horimetro')} for e in eqp],
             'funcionarios': [{'cod': f['cod'], 'nome': f['nome']} for f in fun],
-            'produtos': prods,
+            'produtos': _com_situacao(prods),
             'tipos': [{'value': v, 'label': l} for v, l in Lubrificacao.TIPOS],
             'compartimentos': [{'value': v, 'label': l} for v, l in Lubrificacao.COMPARTIMENTOS],
         })
@@ -962,7 +972,12 @@ class LubrificacaoPainelView(APIView):
         } for b in sorted(baixas, key=lambda x: x['data'] or '', reverse=True)[:60]]
         for c in dados['centros_custo']:
             c['nome'] = nomes_cc.get(c['centro_custo'], 'Sem centro de custo' if not c['centro_custo'] else f"CC {c['centro_custo']}")
-        return Response({'inicio': inicio, 'fim': fim, **dados, 'fabrica': fabrica})
+        try:
+            est = _situacao_estoque_lub()
+            estoque = {'resumo': est['resumo'], 'criticos': [i for i in est['itens'] if i['situacao'] in ('ZERADO', 'ABAIXO')][:8]}
+        except erp.ErpIndisponivel:
+            estoque = None
+        return Response({'inicio': inicio, 'fim': fim, **dados, 'fabrica': fabrica, 'estoque': estoque})
 
 
 class FotoLubrificanteView(APIView):
@@ -1005,6 +1020,75 @@ class FotoLubrificanteView(APIView):
         resp['Cache-Control'] = 'private, max-age=86400'
         resp['X-Content-Type-Options'] = 'nosniff'
         return resp
+
+
+def _situacao_estoque_lub() -> dict:
+    """Estoque dos lubrificantes contra o mínimo (Manager ou SGA) e o consumo dos últimos 90 dias."""
+    hoje = timezone.localdate()
+    consumo = {}
+    for b in lubrificacao.baixas(hoje - timedelta(days=lubrificacao.DIAS_CONSUMO - 1), hoje):
+        consumo[b['item']] = consumo.get(b['item'], 0.0) + b['quantidade']
+    limites = {l['produto']: {**l, 'minimo': float(l['minimo']) if l['minimo'] is not None else None,
+                              'maximo': float(l['maximo']) if l['maximo'] is not None else None}
+               for l in LimiteLubrificante.objects.values('produto', 'minimo', 'maximo', 'alerta', 'ignorar', 'observacao')}
+    return lubrificacao.situacao_estoque(lubrificacao.estoque(), limites, consumo, lubrificacao.com_foto())
+
+
+class EstoqueLubrificanteView(APIView):
+    """Estoque e mínimos dos lubrificantes: situação, dias até o mínimo e quanto repor."""
+    permission_classes = [PodeVer]
+
+    def get(self, request):
+        try:
+            dados = _situacao_estoque_lub()
+        except erp.ErpIndisponivel as exc:
+            return Response({'detail': f'SGA indisponível no momento ({exc}).'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        ignorados = list(LimiteLubrificante.objects.filter(ignorar=True).values('produto', 'produto_nome'))
+        return Response({**dados, 'ignorados': ignorados})
+
+
+class LimiteLubrificanteView(APIView):
+    """PUT define o mínimo/máximo do Manager para o item; DELETE volta a valer o do SGA."""
+    permission_classes = [PodeGerir]
+
+    def _item(self, cod):
+        try:
+            return next((e for e in lubrificacao.estoque() if e['cod'] == cod), None)
+        except erp.ErpIndisponivel:
+            return None
+
+    def put(self, request, cod):
+        item = self._item(int(cod))
+        if not item:
+            raise ValidationError({'produto': 'Lubrificante não encontrado no SGA.'})
+
+        def numero(campo):
+            v = request.data.get(campo)
+            if v in (None, ''):
+                return None
+            try:
+                d = Decimal(str(v).replace(',', '.'))
+            except Exception:
+                raise ValidationError({campo: 'Número inválido.'})
+            if d < 0 or d > 1_000_000:
+                raise ValidationError({campo: 'Fora do intervalo.'})
+            return d.quantize(Decimal('0.01'))
+        minimo, maximo = numero('minimo'), numero('maximo')
+        if minimo is not None and maximo is not None and maximo < minimo:
+            raise ValidationError({'maximo': 'Máximo menor que o mínimo.'})
+        lim, _ = LimiteLubrificante.objects.update_or_create(produto=item['cod'], defaults={
+            'produto_nome': item['nome'][:120], 'minimo': minimo, 'maximo': maximo,
+            'alerta': str(request.data.get('alerta', True)).lower() not in ('false', '0'),
+            'ignorar': str(request.data.get('ignorar', False)).lower() in ('true', '1'),
+            'observacao': str(request.data.get('observacao') or '')[:300], 'atualizado_por': request.user})
+        auditar(request, 'lubrificacao.limite', item['cod'], minimo=float(minimo) if minimo is not None else None,
+                maximo=float(maximo) if maximo is not None else None, ignorar=lim.ignorar)
+        return Response({'produto': lim.produto, 'minimo': lim.minimo, 'maximo': lim.maximo, 'alerta': lim.alerta, 'ignorar': lim.ignorar})
+
+    def delete(self, request, cod):
+        LimiteLubrificante.objects.filter(produto=int(cod)).delete()
+        auditar(request, 'lubrificacao.limite_sga', int(cod))
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class PreventivasView(APIView):

@@ -19,6 +19,8 @@ urlpatterns = [
     path('lubrificacao/painel/', views.LubrificacaoPainelView.as_view()),
     path('lubrificacao/preventivas/', views.PreventivasView.as_view()),
     path('lubrificacao/cadastros/', views.LubrificacaoCadastrosView.as_view()),
+    path('lubrificacao/estoque/', views.EstoqueLubrificanteView.as_view()),
+    path('lubrificacao/estoque/<int:cod>/limite/', views.LimiteLubrificanteView.as_view()),
     path('lubrificacao/produtos/<int:cod>/foto/', views.FotoLubrificanteView.as_view()),
     path('documentacao/', views.DocumentacaoView.as_view()),
     path('auditoria/', views.AuditoriaView.as_view()),

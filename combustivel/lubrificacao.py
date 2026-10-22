@@ -128,7 +128,10 @@ def estoque() -> list[dict]:
                    SUM(q.QESTQESTOQUE) saldo,
                    -- Linha de outra filial com saldo zero guarda custo velho (R$ 490/L no 15W-40): pondera pelo saldo.
                    SUM(CASE WHEN q.QESTQESTOQUE > 0 THEN q.QESTQESTOQUE * q.QESTQCUSTO ELSE 0 END) valor,
-                   SUM(CASE WHEN q.QESTQESTOQUE > 0 THEN q.QESTQESTOQUE ELSE 0 END) positivo
+                   SUM(CASE WHEN q.QESTQESTOQUE > 0 THEN q.QESTQESTOQUE ELSE 0 END) positivo,
+                   -- Mínimo/máximo do cadastro de estoque do SGA (vale a linha da matriz, GERAL).
+                   MAX(CASE WHEN q.QESTQFIL = 0 THEN q.QESTQESTMIN ELSE 0 END) minimo,
+                   MAX(CASE WHEN q.QESTQFIL = 0 THEN q.QESTQESTMAX ELSE 0 END) maximo
             FROM QUANTESTOQUE q JOIN ESTOQUE e ON e.ESTQCOD = q.QESTQESTQ
             WHERE e.ESTQGALM IN :grupos AND q.QESTQEMP = 1 AND q.QESTQTIPO = 0 AND q.QESTQREF IN (0, 100)
             GROUP BY q.QESTQESTQ, e.ESTQNOME, e.ESTQGALM, e.ESTQESP, q.QESTQREF""",
@@ -139,15 +142,72 @@ def estoque() -> list[dict]:
             i = itens.setdefault(int(l['item']), {
                 'cod': int(l['item']), 'nome': _texto(l['nome']), 'grupo': GRUPOS.get(grupo, ''),
                 'categoria': categoria(l['nome'], grupo), 'unidade': UNIDADES.get(int(l['esp'] or 0), ''),
-                'geral': 0.0, 'fabrica': 0.0, '_valor': 0.0, '_positivo': 0.0})
+                'geral': 0.0, 'fabrica': 0.0, '_valor': 0.0, '_positivo': 0.0, 'minimo_sga': 0.0, 'maximo_sga': 0.0})
             i['fabrica' if int(l['ref']) == REF_FABRICA else 'geral'] += _num(l['saldo'])
+            if int(l['ref']) != REF_FABRICA:
+                i['minimo_sga'] = max(i['minimo_sga'], _num(l['minimo']))
+                i['maximo_sga'] = max(i['maximo_sga'], _num(l['maximo']))
             i['_valor'] += _num(l['valor'])
             i['_positivo'] += _num(l['positivo'])
         for i in itens.values():
             valor, positivo = i.pop('_valor'), i.pop('_positivo')
             i['custo_medio'] = round(valor / positivo, 4) if positivo else 0.0
         return list(itens.values())
-    return _cacheado('comb:lub:estoque:v2', CACHE_MOVIMENTO, buscar)
+    return _cacheado('comb:lub:estoque:v3', CACHE_MOVIMENTO, buscar)
+
+
+DIAS_CONSUMO = 90
+ATENCAO_FOLGA = 1.25      # até 25% acima do mínimo
+ATENCAO_DIAS = 15         # ou chega ao mínimo em menos de 15 dias
+
+
+def situacao_estoque(estoque_: list[dict], limites: dict[int, dict], consumo: dict[int, float], fotos: set[int]) -> dict:
+    """
+    Estoque de cada lubrificante contra o mínimo (o do Manager, se a gestão definiu; senão o do SGA).
+    Saldo = GERAL + FABRICA (o que está na oficina também está disponível). ``consumo`` = quantidade
+    baixada nos últimos ``DIAS_CONSUMO`` dias, por item.
+    """
+    itens = []
+    for e in estoque_:
+        lim = limites.get(e['cod'], {})
+        if lim.get('ignorar'):
+            continue
+        minimo = lim['minimo'] if lim.get('minimo') is not None else (e['minimo_sga'] or None)
+        maximo = lim['maximo'] if lim.get('maximo') is not None else (e['maximo_sga'] or None)
+        saldo = max(e['geral'], 0) + max(e['fabrica'], 0)
+        por_dia = max(consumo.get(e['cod'], 0.0), 0.0) / DIAS_CONSUMO
+        dias_cobertura = round(saldo / por_dia, 0) if por_dia > 0 else None
+        dias_ate_minimo = round((saldo - minimo) / por_dia, 0) if por_dia > 0 and minimo else None
+        if not minimo and not por_dia and saldo <= 0:
+            continue    # sem uso, sem saldo e sem mínimo: não interessa
+        if not minimo:
+            situacao = 'SEM_MINIMO'
+        elif saldo <= 0:
+            situacao = 'ZERADO'
+        elif saldo < minimo:
+            situacao = 'ABAIXO'
+        elif saldo < minimo * ATENCAO_FOLGA or (dias_ate_minimo is not None and dias_ate_minimo < ATENCAO_DIAS):
+            situacao = 'ATENCAO'
+        else:
+            situacao = 'OK'
+        # Sugestão de compra: até o máximo; sem máximo cadastrado, até o dobro do mínimo.
+        alvo = maximo or ((minimo or 0) * 2)
+        repor = round(max(alvo - saldo, 0), 2) if situacao in ('ZERADO', 'ABAIXO', 'ATENCAO') else 0.0
+        itens.append({
+            'cod': e['cod'], 'nome': e['nome'], 'grupo': e['grupo'], 'categoria': e['categoria'], 'unidade': e['unidade'],
+            'geral': e['geral'], 'fabrica': e['fabrica'], 'saldo': round(saldo, 2), 'custo_medio': e['custo_medio'],
+            'minimo': minimo, 'maximo': maximo, 'minimo_sga': e['minimo_sga'] or None, 'maximo_sga': e['maximo_sga'] or None,
+            'origem_minimo': 'MANAGER' if lim.get('minimo') is not None else ('SGA' if e['minimo_sga'] else None),
+            'consumo_dia': round(por_dia, 3), 'dias_cobertura': dias_cobertura, 'dias_ate_minimo': dias_ate_minimo,
+            'situacao': situacao, 'repor': repor, 'valor_repor': round(repor * e['custo_medio'], 2),
+            'alerta': lim.get('alerta', True), 'observacao': lim.get('observacao', ''), 'tem_foto': e['cod'] in fotos,
+        })
+    ordem = {'ZERADO': 0, 'ABAIXO': 1, 'ATENCAO': 2, 'OK': 3, 'SEM_MINIMO': 4}
+    itens.sort(key=lambda i: (ordem[i['situacao']], i['dias_ate_minimo'] if i['dias_ate_minimo'] is not None else 1e9, i['nome']))
+    resumo = {s: sum(1 for i in itens if i['situacao'] == s) for s in ordem}
+    resumo['valor_repor'] = round(sum(i['valor_repor'] for i in itens), 2)
+    resumo['alertas'] = sum(1 for i in itens if i['situacao'] in ('ZERADO', 'ABAIXO') and i['alerta'])
+    return {'resumo': resumo, 'itens': itens, 'dias_consumo': DIAS_CONSUMO}
 
 
 def transferencias(inicio: date, fim: date) -> dict[int, dict]:

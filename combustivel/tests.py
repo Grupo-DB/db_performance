@@ -602,3 +602,41 @@ class FotoLubrificanteTests(CombustivelBase):
             self.assertEqual(self.client.get('/combustivel/lubrificacao/produtos/999999/foto/').status_code, 404)
             self.client.force_authenticate(self.estranho)
             self.assertEqual(self.client.get('/combustivel/lubrificacao/produtos/999999/foto/').status_code, 403)
+
+
+class EstoqueMinimoTests(CombustivelBase):
+    EST = [
+        {'cod': 282, 'nome': 'OLEO 15W40', 'grupo': 'x', 'categoria': 'OLEO', 'unidade': 'L', 'geral': 1076.0, 'fabrica': 135.0,
+         'custo_medio': 20.0, 'minimo_sga': 2000.0, 'maximo_sga': 4000.0},
+        {'cod': 2856, 'nome': 'GRAXA', 'grupo': 'x', 'categoria': 'GRAXA', 'unidade': 'kg', 'geral': 850.0, 'fabrica': 180.0,
+         'custo_medio': 33.0, 'minimo_sga': 850.0, 'maximo_sga': 0.0},
+        {'cod': 99, 'nome': 'SEM USO', 'grupo': 'x', 'categoria': 'OLEO', 'unidade': 'L', 'geral': 0.0, 'fabrica': 0.0,
+         'custo_medio': 0.0, 'minimo_sga': 0.0, 'maximo_sga': 0.0},
+    ]
+
+    def test_situacao_pelo_minimo_do_sga_e_do_manager(self):
+        from .lubrificacao import situacao_estoque
+        d = situacao_estoque(self.EST, {}, {282: 1800.0, 2856: 3600.0}, set())
+        por = {i['cod']: i for i in d['itens']}
+        self.assertNotIn(99, por)                      # sem uso, sem saldo, sem mínimo
+        self.assertEqual(por[282]['situacao'], 'ABAIXO')
+        self.assertEqual(por[282]['saldo'], 1211.0)    # GERAL + FABRICA
+        self.assertEqual(por[282]['repor'], 2789.0)    # até o máximo
+        self.assertEqual(por[2856]['situacao'], 'ATENCAO')
+        self.assertEqual(por[2856]['repor'], 670.0)    # sem máximo: até 2× o mínimo
+        d = situacao_estoque(self.EST, {282: {'minimo': 900.0, 'maximo': None}}, {282: 900.0}, set())
+        i = next(x for x in d['itens'] if x['cod'] == 282)
+        self.assertEqual((i['situacao'], i['origem_minimo']), ('OK', 'MANAGER'))
+
+    def test_so_gestao_define_o_minimo(self):
+        with patch('combustivel.lubrificacao.estoque', return_value=self.EST):
+            self.client.force_authenticate(self.operador)
+            self.assertEqual(self.client.put('/combustivel/lubrificacao/estoque/282/limite/', {'minimo': 10}, format='json').status_code, 403)
+            self.client.force_authenticate(self.gestor)
+            r = self.client.put('/combustivel/lubrificacao/estoque/282/limite/', {'minimo': '1500', 'maximo': '1000'}, format='json')
+            self.assertEqual(r.status_code, 400)       # máximo < mínimo
+            r = self.client.put('/combustivel/lubrificacao/estoque/282/limite/', {'minimo': '1500,5', 'maximo': '3000'}, format='json')
+            self.assertEqual(r.status_code, 200, r.data)
+            self.assertEqual(str(r.data['minimo']), '1500.50')
+            self.assertEqual(self.client.put('/combustivel/lubrificacao/estoque/12345/limite/', {'minimo': 1}, format='json').status_code, 400)
+            self.assertEqual(self.client.delete('/combustivel/lubrificacao/estoque/282/limite/').status_code, 204)
