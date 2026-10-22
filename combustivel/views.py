@@ -56,6 +56,19 @@ def _periodo(request, dias=30):
     return max(inicio, fim - timedelta(days=400)), fim
 
 
+def _no_periodo(campo: str, inicio: date, fim: date | None = None) -> dict:
+    """
+    Filtro de período por intervalo de data/hora local. NÃO usar ``campo__date``: no MySQL vira
+    CONVERT_TZ, que devolve NULL sem as tabelas de fuso carregadas — a listagem saía vazia em
+    produção com 33 abastecimentos no banco (22/10/2026); no SQLite dos testes funcionava.
+    """
+    tz = timezone.get_current_timezone()
+    filtro = {f'{campo}__gte': timezone.make_aware(datetime.combine(inicio, datetime.min.time()), tz)}
+    if fim is not None:
+        filtro[f'{campo}__lt'] = timezone.make_aware(datetime.combine(fim + timedelta(days=1), datetime.min.time()), tz)
+    return filtro
+
+
 def _erp_ou_503(func, *args):
     try:
         return func(*args), None
@@ -263,7 +276,7 @@ class TransferenciaViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixin
             qs = qs.filter(usuario=user)
         if self.action == 'list':
             inicio, fim = _periodo(self.request, dias=60)
-            qs = qs.filter(transferido_em__date__gte=inicio, transferido_em__date__lte=fim)
+            qs = qs.filter(**_no_periodo('transferido_em', inicio, fim))
             if self.request.query_params.get('destino'):
                 qs = qs.filter(destino_id=self.request.query_params['destino'])
         return qs
@@ -377,7 +390,7 @@ class AbastecimentoViewSet(viewsets.ModelViewSet):
         p = self.request.query_params
         if self.action == 'list':
             inicio, fim = _periodo(self.request, dias=60)
-            qs = qs.filter(abastecido_em__date__gte=inicio, abastecido_em__date__lte=fim)
+            qs = qs.filter(**_no_periodo('abastecido_em', inicio, fim))
             if p.get('situacao'):
                 qs = qs.filter(situacao__in=p['situacao'].split(','))
             if p.get('equipamento'):
@@ -727,7 +740,7 @@ class PainelView(APIView):
             'equipamento': a.equipamento, 'centro_custo': a.centro_custo, 'litros': float(a.litros),
             'comboio': a.tanque.equipamento,
         } for a in Abastecimento.objects.select_related('tanque').filter(
-            situacao=Abastecimento.INTERNO, abastecido_em__date__gte=inicio, abastecido_em__date__lte=fim,
+            situacao=Abastecimento.INTERNO, **_no_periodo('abastecido_em', inicio, fim),
             tanque__equipamento__isnull=False).exclude(observacao__startswith=MARCA_TESTE)]
         dados = regras.painel(baixas, entradas, leituras_periodo, equipamentos, entregas_comboio=entregas)
         anomalias = [a for a in regras.anomalias(leituras, equipamentos) if a['data'][:10] >= inicio.isoformat()]
@@ -746,7 +759,7 @@ class PainelView(APIView):
 
         locais = Abastecimento.objects.exclude(situacao=Abastecimento.CANCELADO).exclude(observacao__startswith=MARCA_TESTE)
         manager = {
-            'registrados_periodo': locais.filter(abastecido_em__date__gte=inicio, abastecido_em__date__lte=fim).count(),
+            'registrados_periodo': locais.filter(**_no_periodo('abastecido_em', inicio, fim)).count(),
             'aguardando_sga': locais.filter(situacao__in=SEM_BAIXA).count(),
             'bloqueados': locais.filter(situacao__in=SEM_BAIXA, bloqueado=True).count(),
         }
@@ -762,12 +775,12 @@ def _leituras_horimetro(desde: date, ate: date) -> list[dict]:
     sga = [{**l, 'origem': 'SGA'} for l in erp.leituras(desde, ate)]
     manager = [{'equipamento': a['equipamento'], 'data': a['abastecido_em'].isoformat(), 'horimetro': float(a['horimetro']),
                 'origem': 'Manager'}
-               for a in Abastecimento.objects.filter(abastecido_em__date__gte=desde, horimetro__isnull=False)
+               for a in Abastecimento.objects.filter(**_no_periodo('abastecido_em', desde), horimetro__isnull=False)
                .exclude(situacao=Abastecimento.CANCELADO).exclude(observacao__startswith=MARCA_TESTE)
                .values('equipamento', 'abastecido_em', 'horimetro')]
     campo = [{'equipamento': l['equipamento'], 'data': l['lubrificado_em'].isoformat(), 'horimetro': float(l['horimetro']),
               'origem': 'Lubrificação'}
-             for l in Lubrificacao.objects.filter(lubrificado_em__date__gte=desde, horimetro__isnull=False)
+             for l in Lubrificacao.objects.filter(**_no_periodo('lubrificado_em', desde), horimetro__isnull=False)
              .exclude(situacao=Lubrificacao.CANCELADA).values('equipamento', 'lubrificado_em', 'horimetro')]
     return sga + manager + campo
 
@@ -804,7 +817,7 @@ class LubrificacaoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins
             qs = qs.filter(usuario=user)
         if self.action == 'list':
             inicio, fim = _periodo(self.request, dias=60)
-            qs = qs.filter(lubrificado_em__date__gte=inicio, lubrificado_em__date__lte=fim)
+            qs = qs.filter(**_no_periodo('lubrificado_em', inicio, fim))
             if self.request.query_params.get('equipamento'):
                 qs = qs.filter(equipamento=self.request.query_params['equipamento'])
         return qs
@@ -934,7 +947,7 @@ class LubrificacaoPainelView(APIView):
             fabrica = lubrificacao.fabrica(lubrificacao.estoque(), lubrificacao.transferencias(inicio, fim))
         except erp.ErpIndisponivel as exc:
             return Response({'detail': f'SGA indisponível no momento ({exc}).'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        campo = list(Lubrificacao.objects.filter(lubrificado_em__date__gte=inicio, lubrificado_em__date__lte=fim)
+        campo = list(Lubrificacao.objects.filter(**_no_periodo('lubrificado_em', inicio, fim))
                      .exclude(situacao=Lubrificacao.CANCELADA).values('tipo', 'quantidade'))
         dados = lubrificacao.painel(baixas, lubrificacao.horas_no_periodo(leituras, inicio, fim), equipamentos, campo)
         fotos = lubrificacao.com_foto()
