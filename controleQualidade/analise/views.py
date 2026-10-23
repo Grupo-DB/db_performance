@@ -677,6 +677,69 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
     
  
+    # Ensaios específicos (argamassa e colantes) gravados em JSON na própria análise. Só estes
+    # campos podem ser pedidos: o nome vira lookup do ORM.
+    CAMPOS_HISTORICO_ESPECIFICO = (
+        'substrato', 'superficial', 'flexao', 'compressao', 'variacao_dimensional', 'variacao_massa',
+        'modulo_elasticidade', 'capilaridade', 'retencao_agua', 'tracao_normal', 'tracao_submersa',
+        'tracao_estufa', 'tracao_tempo_aberto', 'deslizamento',
+    )
+
+    @action(detail=False, methods=['get'], url_path='historico-especifico', permission_classes=[permissions.IsAuthenticated])
+    def historico_especifico(self, request):
+        """
+        Últimas análises com um ensaio específico preenchido (23/10/2026), para o histórico da tela de
+        análise. Devolve o JSON cru de cada uma: quem resume (média, MPa, %) é o front, com as mesmas
+        regras dos modais. Filtros opcionais: material, produto (id), excluir (id da análise aberta).
+        `campos` aceita vários separados por vírgula (flexão e compressão vêm juntas).
+        """
+        campos = [c.strip() for c in (request.query_params.get('campos') or '').split(',') if c.strip()]
+        if not campos or any(c not in self.CAMPOS_HISTORICO_ESPECIFICO for c in campos):
+            return Response({'detail': 'Informe campos válidos: ' + ', '.join(self.CAMPOS_HISTORICO_ESPECIFICO)}, status=400)
+        try:
+            limite = max(1, min(int(request.query_params.get('limite', 20)), 60))
+        except ValueError:
+            limite = 20
+
+        filtro_preenchido = Q()
+        for c in campos:
+            filtro_preenchido |= Q(**{f'{c}__isnull': False})
+        qs = Analise.objects.filter(filtro_preenchido).select_related('amostra', 'amostra__produto_amostra')
+        material = (request.query_params.get('material') or '').strip()
+        if material:
+            qs = qs.filter(amostra__material__iexact=material)
+        produto = request.query_params.get('produto')
+        if produto and str(produto).isdigit():
+            qs = qs.filter(amostra__produto_amostra_id=int(produto))
+        excluir = request.query_params.get('excluir')
+        if excluir and str(excluir).isdigit():
+            qs = qs.exclude(id=int(excluir))
+        qs = qs.order_by('-amostra__data_entrada', '-id')
+
+        vazio = (None, {}, [], '')
+        saida = []
+        # JSON "vazio" ({} ou lista vazia) passa no isnull=False: descarta aqui, lendo um pouco a mais.
+        for a in qs.only('id', 'data', *campos, 'amostra__numero', 'amostra__material', 'amostra__data_entrada',
+                         'amostra__produto_amostra__id', 'amostra__produto_amostra__nome')[:limite * 3]:
+            valores = {c: getattr(a, c) for c in campos}
+            if all(v in vazio for v in valores.values()):
+                continue
+            am = a.amostra
+            prod = am.produto_amostra if am else None
+            saida.append({
+                'analise_id': a.id,
+                'data': a.data,
+                'data_entrada': am.data_entrada if am else None,
+                'amostra_numero': am.numero if am else None,
+                'material': am.material if am else None,
+                'produto_id': prod.id if prod else None,
+                'produto': prod.nome if prod else None,
+                **valores,
+            })
+            if len(saida) >= limite:
+                break
+        return Response(saida)
+
     @csrf_exempt
     @action(detail=False, methods=['post'], url_path='resultados-anteriores')
     def resultados_anteriores(self, request):
