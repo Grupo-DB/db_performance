@@ -4,7 +4,9 @@ view daqui declara a sua, senão ficaria aberta.
 
 * Gestão (Admin, Master, CombustivelGestor): tudo — tanques, conferência, cancelamento,
   arquivos e chaves de integração.
-* Operador (CombustivelOperador): registra abastecimento e vê os que registrou.
+* Operador (CombustivelOperador): SÓ faz as baixas — registra abastecimento, transferência e
+  lubrificação (cadastros do formulário e os próprios registros). Painéis, tanques, estoque e
+  preventivas ficam de fora (23/10).
 * Leitura (CombustivelLeitura): painel e listas, sem alterar nada.
 
 A integração com o SGA não usa usuário: usa ``ChaveIntegracao`` (ver ``AutenticacaoChave``).
@@ -22,7 +24,10 @@ from .models import ChaveIntegracao
 
 GRUPOS_GESTAO = ('Admin', 'Master', 'CombustivelGestor')
 GRUPOS_OPERADOR = GRUPOS_GESTAO + ('CombustivelOperador',)
-GRUPOS_LEITURA = GRUPOS_OPERADOR + ('CombustivelLeitura',)
+# Painéis e listas: gestão e leitura, não o operador (ele só faz as baixas).
+GRUPOS_LEITURA = GRUPOS_GESTAO + ('CombustivelLeitura',)
+# Qualquer papel do módulo: o que o formulário de baixa precisa (cadastros, última leitura, fotos).
+GRUPOS_MODULO = GRUPOS_OPERADOR + ('CombustivelLeitura',)
 
 
 def _no_grupo(user, grupos) -> bool:
@@ -44,6 +49,14 @@ class PodeVer(BasePermission):
         return _no_grupo(request.user, GRUPOS_LEITURA)
 
 
+class PodeUsarFormulario(BasePermission):
+    """Leitura do que o formulário de baixa usa: qualquer papel do módulo, inclusive o operador."""
+    message = 'Acesso restrito ao controle de combustível.'
+
+    def has_permission(self, request, view):
+        return _no_grupo(request.user, GRUPOS_MODULO)
+
+
 class PodeGerir(BasePermission):
     message = 'Só a gestão do combustível pode fazer isso.'
 
@@ -61,12 +74,15 @@ class LeituraOuGestao(BasePermission):
 
 
 class PodeRegistrar(BasePermission):
-    """Ler: quem vê. Criar: operador. Alterar/cancelar: gestão (o operador não mexe depois)."""
+    """
+    Ler: qualquer papel (o operador só os seus, ver get_queryset). Criar: operador.
+    Alterar/cancelar: gestão (o operador não mexe depois).
+    """
     message = 'Sem permissão para registrar abastecimentos.'
 
     def has_permission(self, request, view):
         if request.method in SAFE_METHODS:
-            return _no_grupo(request.user, GRUPOS_LEITURA)
+            return _no_grupo(request.user, GRUPOS_MODULO)
         if request.method == 'POST' and getattr(view, 'action', None) == 'create':
             return _no_grupo(request.user, GRUPOS_OPERADOR)
         return _no_grupo(request.user, GRUPOS_GESTAO)

@@ -21,7 +21,7 @@ from .models import (
     BASE_CODIGO_INTEGRACAO, MARCA_TESTE, PRIVADO, Transferencia, PRODUTOS, Abastecimento, Auditoria, ChaveIntegracao, LimiteLubrificante, LoteIntegracao, Lubrificacao, MedicaoTanque, Tanque,
 )
 from .permissions import (
-    AutenticacaoChave, LeituraOuGestao, LimiteIntegracao, LimiteRegistro, PodeGerir, PodeRegistrar, PodeVer, TemChave,
+    AutenticacaoChave, LeituraOuGestao, LimiteIntegracao, LimiteRegistro, PodeGerir, PodeRegistrar, PodeUsarFormulario, PodeVer, TemChave,
     TemChaveQueConfirma, eh_gestor, ip_do_pedido,
 )
 from .serializers import (
@@ -192,7 +192,7 @@ def situacao_tanques(serie=None) -> tuple[list[dict], str | None]:
 # ── Cadastros vindos do SGA ─────────────────────────────────────────────────────
 class CadastrosView(APIView):
     """Equipamentos e funcionários do SGA para o formulário de registro (cache de 30 min)."""
-    permission_classes = [PodeVer]
+    permission_classes = [PodeUsarFormulario]
 
     def get(self, request):
         eqp, erro1 = _erp_ou_503(erp.equipamentos)
@@ -209,7 +209,7 @@ class CadastrosView(APIView):
 
 class UltimaLeituraView(APIView):
     """Última leitura de horímetro/km do equipamento — o formulário mostra antes de digitar."""
-    permission_classes = [PodeVer]
+    permission_classes = [PodeUsarFormulario]
 
     def get(self, request, equipamento):
         do_erp, erro = _erp_ou_503(erp.ultima_leitura, int(equipamento))
@@ -240,7 +240,7 @@ class TanqueViewSet(viewsets.ModelViewSet):
 
 
 class MedicaoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
-    permission_classes = [PodeRegistrar]
+    permission_classes = [LeituraOuGestao]  # régua é da gestão; o operador só faz as baixas
     serializer_class = MedicaoSerializer
 
     def get_queryset(self):
@@ -340,7 +340,7 @@ class TransferenciaViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixin
         auditar(request, 'transferencia.cancelar', tr.uuid, motivo=motivo)
         return Response(self.get_serializer(tr).data)
 
-    @action(detail=True, methods=['get'], permission_classes=[PodeVer])
+    @action(detail=True, methods=['get'], permission_classes=[PodeUsarFormulario])
     def foto(self, request, uuid=None):
         tr = self.get_object()
         if not tr.foto_bomba:
@@ -476,7 +476,7 @@ class AbastecimentoViewSet(viewsets.ModelViewSet):
         auditar(request, 'abastecimento.cancelar', ab.uuid, motivo=motivo)
         return Response(self.get_serializer(ab).data)
 
-    @action(detail=True, methods=['get'], url_path=r'foto/(?P<qual>bomba|painel)', permission_classes=[PodeVer])
+    @action(detail=True, methods=['get'], url_path=r'foto/(?P<qual>bomba|painel)', permission_classes=[PodeUsarFormulario])
     def foto(self, request, uuid=None, qual=None):
         ab = self.get_object()
         arquivo = ab.foto_bomba if qual == 'bomba' else ab.foto_painel
@@ -797,7 +797,7 @@ def _com_situacao(prods: list[dict]) -> list[dict]:
 
 class LubrificacaoCadastrosView(APIView):
     """Para o registro de campo: todos os equipamentos ativos (britador também lubrifica), lubrificantes e funcionários."""
-    permission_classes = [PodeVer]
+    permission_classes = [PodeUsarFormulario]
 
     def get(self, request):
         try:
@@ -931,7 +931,7 @@ class LubrificacaoViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins
         auditar(request, 'lubrificacao.cancelar', lub.uuid, motivo=motivo)
         return Response(self.get_serializer(lub).data)
 
-    @action(detail=True, methods=['get'], permission_classes=[PodeVer])
+    @action(detail=True, methods=['get'], permission_classes=[PodeUsarFormulario])
     def foto(self, request, uuid=None):
         lub = self.get_object()
         if not lub.foto:
@@ -985,7 +985,7 @@ class FotoLubrificanteView(APIView):
     Foto do lubrificante cadastrada no SGA, em miniatura. O SGA guarda BMP de até 4 MB dentro do
     banco: converte uma vez para JPEG de 480 px e guarda no disco privado (refaz depois de 7 dias).
     """
-    permission_classes = [PodeVer]
+    permission_classes = [PodeUsarFormulario]
     LADO = 480
     VALIDADE = timedelta(days=7)
 

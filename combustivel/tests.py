@@ -83,6 +83,18 @@ class PermissoesTests(CombustivelBase):
         self.assertEqual(self.client.post('/combustivel/lotes/', {'formato': 'CSV'}).status_code, 403)
         self.assertEqual(self.client.post('/combustivel/tanques/', {'nome': 'x', 'capacidade_l': 1}).status_code, 403)
 
+    def test_operador_so_faz_as_baixas(self):
+        # 23/10: o operador registra (abastecimento, transferência, lubrificação) e não vê painéis.
+        self.client.force_authenticate(self.operador)
+        self.assertEqual(self.client.get('/combustivel/cadastros/').status_code, 200)
+        self.assertEqual(self.client.get('/combustivel/equipamentos/531/ultima-leitura/').status_code, 200)
+        for url in ('/combustivel/painel/', '/combustivel/tanques/', '/combustivel/tanques/situacao/',
+                    '/combustivel/lubrificacao/painel/', '/combustivel/lubrificacao/estoque/',
+                    '/combustivel/lubrificacao/preventivas/'):
+            self.assertEqual(self.client.get(url).status_code, 403, url)
+        r = self.client.post('/combustivel/medicoes/', {'tanque': self.tanque.id, 'litros': '100'}, format='multipart')
+        self.assertEqual(r.status_code, 403)
+
     def test_leitura_ve_mas_nao_registra(self):
         self._registrar()
         self.client.force_authenticate(self.leitor)
