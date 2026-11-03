@@ -131,6 +131,7 @@ INSTALLED_APPS = [
     'sipat',
     'aprendizes',
     'uniformes',
+    'combustivel',
     'conformidadeLegal',
 ]
 
@@ -191,7 +192,7 @@ DATABASES = {
         'NAME': 'db_manager',
         'USER':'grupodb',
         'PASSWORD': '!@#123qweQWE',
-        #'HOST': '45.6.118.52', #for local env
+        # 'HOST': '45.6.118.52', #for local env
         'HOST': 'localhost',
         'PORT': '3306',
         'OPTIONS': {

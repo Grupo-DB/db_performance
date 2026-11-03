@@ -1,6 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .convites import AvaliacaoPublicaView, ConviteAvaliacaoViewSet
 from .views import (AlunoViewSet, AvaliacaoTreinamentoViewSet, CursoViewSet,
                     MatriculaViewSet, TurmaViewSet, analise_por_aluno, cursos_por_periodo)
 
@@ -9,9 +10,12 @@ router.register(r'aluno', AlunoViewSet, basename='Aluno')
 router.register(r'curso', CursoViewSet, basename='Curso')
 router.register(r'turma', TurmaViewSet, basename='Turma')
 router.register(r'matricula', MatriculaViewSet, basename='Matricula')
+router.register(r'avaliacao/convites', ConviteAvaliacaoViewSet, basename='ConviteAvaliacaoTreinamento')
 router.register(r'avaliacao', AvaliacaoTreinamentoViewSet, basename='AvaliacaoTreinamento')
 
 urlpatterns = [
+    # Público (sem login): o participante responde a ficha pelo link da turma.
+    path('publico/avaliacao/<str:token>/', AvaliacaoPublicaView.as_view()),
     path('', include(router.urls)),
     path('relatorios/cursos-por-periodo/', cursos_por_periodo, name='UnidbCursosPorPeriodo'),
     path('relatorios/por-aluno/', analise_por_aluno, name='UnidbAnalisePorAluno'),

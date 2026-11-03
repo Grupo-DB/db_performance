@@ -16,7 +16,12 @@ modelos (decisão do usuário, 19/08/2026): o que não muda de uma turma para ou
 isso, o nome e a validade de um mesmo treinamento se repetiriam em dezenas de linhas e
 divergiriam com o tempo.
 """
+import secrets
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class Aluno(models.Model):
@@ -232,6 +237,9 @@ class AvaliacaoTreinamento(models.Model):
     # natural para reimportar sem duplicar: a aba é recarregada do zero. Esta marca
     # delimita o que a importação pode apagar — o que o RH digitar na tela fica.
     importada_da_planilha = models.BooleanField(default=False)
+    # Resposta que veio pelo link do celular (nula = ficha digitada pelo RH ou importada).
+    convite = models.ForeignKey('ConviteAvaliacaoTreinamento', on_delete=models.SET_NULL, blank=True, null=True,
+                                related_name='respostas')
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -242,3 +250,39 @@ class AvaliacaoTreinamento(models.Model):
     def __str__(self):
         nome = self.nome_treinamento or (self.turma.curso.nome if self.turma else 'sem treinamento')
         return f'Avaliação — {nome}'
+
+
+def _token_convite() -> str:
+    return secrets.token_urlsafe(18)
+
+
+def _expira_convite():
+    return timezone.now() + timedelta(days=15)
+
+
+class ConviteAvaliacaoTreinamento(models.Model):
+    """
+    Link da ficha de avaliação para os participantes responderem pelo celular, sem login.
+
+    Mesmo desenho do convite da autoavaliação do Jovem Aprendiz, com uma diferença que vem
+    da ficha ser ANÔNIMA: o link é da TURMA, não da pessoa, e aceita várias respostas — um
+    QR projetado na sala ou um link mandado no grupo serve para todos. Vence em 15 dias e
+    o RH pode cancelar.
+    """
+    token = models.CharField(max_length=40, unique=True, default=_token_convite, db_index=True)
+    turma = models.ForeignKey(Turma, on_delete=models.CASCADE, related_name='convites_avaliacao')
+    expira_em = models.DateTimeField(default=_expira_convite)
+    cancelado = models.BooleanField(default=False)
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-criado_em']
+
+    @property
+    def situacao(self) -> str:
+        if self.cancelado:
+            return 'CANCELADO'
+        if self.expira_em and self.expira_em < timezone.now():
+            return 'VENCIDO'
+        return 'ABERTO'
