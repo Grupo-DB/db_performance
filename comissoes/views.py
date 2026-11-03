@@ -989,6 +989,7 @@ def calculos_comissoes(request):
     if darcilei_externo:
         vendedores_internos_acum['ALEXANDRA PERUSSI'] = {'total': 0.0, 'detalhamento': []}
     base_jocelaine_vendas = 0.0
+    base_jocelaine_por_rep = {}   # rep → venda que entrou na base (para o detalhamento na tela)
     base_mpa_vendas = 0.0
     total_comissao_primex = 0.0  # base para Marco Alan Lopes (10%)
 
@@ -1185,6 +1186,7 @@ def calculos_comissoes(request):
             # vinculado, então a base dos meses antigos não muda.
             if vinc_int in ('HELENA VARGAS MARQUES', 'VAGNER MOREIRA PAZ'):
                 base_jocelaine_vendas += sum(vendas.values())
+                base_jocelaine_por_rep[rep_chave] = base_jocelaine_por_rep.get(rep_chave, 0.0) + sum(vendas.values())
 
         # Acumula base MPA se for rep MPA
         if any(t in rep_chave for t in REP_MPA_TERMOS):
@@ -1393,6 +1395,7 @@ def calculos_comissoes(request):
         'comissao': round(comissao_int_adriano, 2),
     })
     base_jocelaine_vendas += sum(vendas_adriano_grupos.values())
+    base_jocelaine_por_rep['ADRIANO L. BORN REPRESENTACOES EIRELI'] = float(sum(vendas_adriano_grupos.values()))
     # Adriano também entra na base PRIMEX para Marco Alan Lopes (com potencializador se aplicável)
     total_comissao_primex += comissao_ext_pg_adriano.get('PRIMEX', 0.0)
 
@@ -1420,11 +1423,27 @@ def calculos_comissoes(request):
     else:
         comissao_jocelaine_base = base_jocelaine_vendas * p('JOCELAINE_BASE', 0.0001)
     comissao_jocelaine = comissao_jocelaine_base + jocelaine_agner
+    # Composição para a tela (mesmo formato do `componentes` dos internos ATM: base × taxa).
+    # A taxa da interna do Agner é a efetiva (varia por grupo e com o bônus da meta).
+    taxa_aux_jocelaine = (comissao_jocelaine_base / base_jocelaine_vendas) if base_jocelaine_vendas else 0.0
+    base_agner_matriz = float(sum(vendas_agner.values())) * proporcao_agner_matriz
+    componentes_jocelaine = [{
+        'descricao': 'Interna do Agner — venda faturada pela Matriz',
+        'base': round(base_agner_matriz, 2),
+        'taxa': round(jocelaine_agner / base_agner_matriz, 6) if base_agner_matriz else 0.0,
+        'valor': round(float(jocelaine_agner), 2),
+    }] + [{
+        'descricao': f'Auxiliar de vendas — {rep}',
+        'base': round(venda, 2),
+        'taxa': taxa_aux_jocelaine,
+        'valor': round(venda * taxa_aux_jocelaine, 2),
+    } for rep, venda in sorted(base_jocelaine_por_rep.items(), key=lambda kv: -kv[1])]
     resultado['JOCELAINE FARIAS BAHU'] = {
         'comissao': round(comissao_jocelaine, 2),
         'base_vendas': round(float(base_jocelaine_vendas), 2),
         'comissao_base': round(float(comissao_jocelaine_base), 2),
         'comissao_interna_agner': round(float(jocelaine_agner), 2),
+        'componentes': componentes_jocelaine,
         'tipo': 'Auxiliar Vendas Matriz CC'
     }
 
