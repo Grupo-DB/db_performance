@@ -1,4 +1,5 @@
 import re
+import datetime as _datetime_mod
 from django.shortcuts import render
 from django.http import JsonResponse
 from rest_framework.decorators import api_view
@@ -222,6 +223,13 @@ engine = create_engine(connection_string)
 # `managerdb/tools/comissoes/` (diag_cidade_nf.py e impacto_cidade.py).
 # ─────────────────────────────────────────────────────────────────────────────
 CORTE_CIDADE_ENTREGA = '2026-07-01'
+
+# REPCOD 54 do ERP: até 09/2026 é tratado como Richard (construtoras, sem comissão de
+# externo); desde 10/2026 é da Jak Lemos, externa normal (decisão do usuário, 03/11/2026).
+# O nome tem o sufixo " - 54" para casar com o Representante cadastrado para as metas.
+JAK_NO_54_DESDE = _datetime_mod.date(2026, 10, 1)
+NOME_JAK_54 = 'JAKLAINY DUARTE LEMOS - 54'
+
 @csrf_exempt
 @api_view(['POST'])
 def consulta_canceladas(request):
@@ -683,8 +691,16 @@ def calculos_comissoes(request):
     # No ERP o 54 continua como Jaklainy, mas para as comissões ele é o Richard (decisão do
     # usuário, 29/09/2026). O sufixo " - NN" separa os dois códigos do Richard, que têm
     # regras diferentes a partir de 09/2026; antes disso a chave sem sufixo pega o 54.
+    #
+    # A partir de 10/2026 o 54 volta a ser da Jak Lemos (decisão do usuário, 03/11/2026):
+    # "tudo que é 54 é da Jak Lemos, nada mais do Richard". Ela é externa normal (taxas,
+    # potencializador da meta individual, dolomita, meta global) com a Marina de interna.
+    # Até 09/2026 fica como estava (Richard), para não mexer em mês já pago.
+    # (_dt_mod: o `import datetime` local fica mais abaixo nesta função e tornaria o nome local.)
+    _inicio_periodo = _dt_mod.datetime.strptime(dataInicio, '%Y-%m-%d').date()
+    jak_no_54 = _inicio_periodo >= JAK_NO_54_DESDE
     NOME_POR_REPCOD = {
-        54:  'RICHARD GONCALVES MACHADO - 54',
+        54:  NOME_JAK_54 if jak_no_54 else 'RICHARD GONCALVES MACHADO - 54',
         111: 'RICHARD GONCALVES MACHADO - 111',
     }
     for _col_nome, _col_cod in (('REPRESENTANTE', 'REPRESENTANTE_CODIGO'),
@@ -937,8 +953,12 @@ def calculos_comissoes(request):
     if marina_interna:
         VINCULO_INT_MATRIZ.pop('RICHARD GONCALVES MACHADO')
         VINCULO_INT_MATRIZ['RICHARD GONCALVES MACHADO - 111'] = _interna_mpa
-        VINCULO_INT_MATRIZ['RICHARD GONCALVES MACHADO - 54'] = _interna_mpa
-        REPS_SEM_COMISSAO_EXTERNA = {'RICHARD GONCALVES MACHADO - 54'}
+        if jak_no_54:
+            # Desde 10/2026 o 54 é da Jak: externa normal, Marina continua de interna.
+            VINCULO_INT_MATRIZ[NOME_JAK_54] = _interna_mpa
+        else:
+            VINCULO_INT_MATRIZ['RICHARD GONCALVES MACHADO - 54'] = _interna_mpa
+            REPS_SEM_COMISSAO_EXTERNA = {'RICHARD GONCALVES MACHADO - 54'}
 
     # Nomes que geram comissão para a Jocelaine (0,01%) — todos com vinc interno
     # e também sem interno (base é todos os externos com interno na metodologia)
