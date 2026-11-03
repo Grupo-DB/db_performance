@@ -956,6 +956,9 @@ def calculos_comissoes(request):
         if jak_no_54:
             # Desde 10/2026 o 54 é da Jak: externa normal, Marina continua de interna.
             VINCULO_INT_MATRIZ[NOME_JAK_54] = _interna_mpa
+            # Desde 10/2026 a Marina também é a interna do Jonathan (carteira principal), que
+            # até então não tinha interno (pedido do comercial, 03/11/2026).
+            VINCULO_INT_MATRIZ['JONATHAN SOARES BUENO'] = _interna_mpa
         else:
             VINCULO_INT_MATRIZ['RICHARD GONCALVES MACHADO - 54'] = _interna_mpa
             REPS_SEM_COMISSAO_EXTERNA = {'RICHARD GONCALVES MACHADO - 54'}
@@ -1079,6 +1082,15 @@ def calculos_comissoes(request):
                     'lancamentos': [],
                     'tipo': 'Vendedor Externo CC'
                 }
+                # Também na tabela da interna, zerado: senão parece que ele nem é dela.
+                if vinc_int:
+                    vendedores_internos_acum[vinc_int]['detalhamento'].append({
+                        'representante_externo': rep_chave,
+                        'comissao_por_grupo': {g: 0.0 for g in GRUPOS_CC},
+                        'vendas_por_grupo': {g: 0.0 for g in GRUPOS_CC},
+                        'comissao': 0.0,
+                        'sem_notas': True,
+                    })
             continue
         vendas = vendas_por_grupo(df_rep)
         chave_meta = f"{periodo_chave}{rep_chave}"
@@ -1166,7 +1178,13 @@ def calculos_comissoes(request):
                 'venda_atm_excluida': round(venda_atm_reps_rs.get(rep_chave, 0.0), 2) if vendas_base_int is not vendas else 0.0,
                 'comissao': round(comissao_int, 2),
             })
-            base_jocelaine_vendas += sum(vendas.values())
+            # Base da Jocelaine (auxiliar de vendas da Matriz): só os externos da Matriz —
+            # os da Helena e do Vagner (Daniel, Guilherme, Glauber, os dois Rodrigos, Luis
+            # Aurélio) + o Adriano Born, somado mais abaixo. As regiões da Marina e o
+            # Darcilei (Alexandra) ficam fora. Antes de 09/2026 só esses dois tinham externo
+            # vinculado, então a base dos meses antigos não muda.
+            if vinc_int in ('HELENA VARGAS MARQUES', 'VAGNER MOREIRA PAZ'):
+                base_jocelaine_vendas += sum(vendas.values())
 
         # Acumula base MPA se for rep MPA
         if any(t in rep_chave for t in REP_MPA_TERMOS):
@@ -1391,10 +1409,13 @@ def calculos_comissoes(request):
         }
 
     # ---- 4. Jocelaine (Auxiliar de Vendas Matriz) ----
-    # A partir de 09/2026 (decisão do usuário, 24/09/2026) a Jocelaine deixa de receber o
-    # 0,01% sobre a base dos externos com interno: fica só a interna do Agner na Matriz.
+    # Interna do Agner na Matriz + % de auxiliar de vendas (JOCELAINE_BASE) sobre a venda dos
+    # externos da Matriz. Em 09/2026 (decisão de 24/09/2026) o % de auxiliar foi tirado; em
+    # 03/11/2026 o comercial corrigiu: ela ganha, e volta a valer desde 10/2026. Setembro
+    # fica como foi calculado.
     JOCELAINE_SEM_BASE_DESDE = datetime.date(2026, 9, 1)
-    if data_inicio_dt >= JOCELAINE_SEM_BASE_DESDE:
+    JOCELAINE_BASE_VOLTA_EM = datetime.date(2026, 10, 1)
+    if JOCELAINE_SEM_BASE_DESDE <= data_inicio_dt < JOCELAINE_BASE_VOLTA_EM:
         comissao_jocelaine_base = 0.0
     else:
         comissao_jocelaine_base = base_jocelaine_vendas * p('JOCELAINE_BASE', 0.0001)
