@@ -594,11 +594,14 @@ def enviar_mensagem_whatsapp(mensagem_id: int, telefone_alternativo: str = ''):
 
         categoria = graph_api.categoria_da_midia(anexo.mime_type, nome)
         mime_envio = anexo.mime_type
+        voz = False
         if categoria == graph_api.CATEGORIA_AUDIO:
             # O arquivo guardado continua sendo o original — é o que a central
             # toca para o atendente, e o navegador dele lê webm sem problema.
             # A conversão vale só para o que sobe à Meta.
             conteudo, mime_envio, nome = audio.preparar_para_whatsapp(conteudo, anexo.mime_type, nome)
+            # Saiu em ogg/opus (gravação do microfone): vai como mensagem de voz.
+            voz = mime_envio == audio.MIME_CONVERTIDO
 
         media_id = graph_api.upload_midia(conteudo, nome, mime_envio, numero=mensagem.conversa.numero)
         anexo.wa_media_id = media_id
@@ -606,7 +609,7 @@ def enviar_mensagem_whatsapp(mensagem_id: int, telefone_alternativo: str = ''):
 
         resposta = graph_api.enviar_midia(
             telefone, media_id, categoria, legenda=texto_para_cliente,
-            nome_arquivo=nome, citando=citando, numero=mensagem.conversa.numero,
+            nome_arquivo=nome, citando=citando, numero=mensagem.conversa.numero, voz=voz,
         )
         _marcar_enviada(mensagem, resposta)
     except Exception as exc:

@@ -184,9 +184,19 @@ def enviar_midia(
     nome_arquivo: str = '',
     citando: str = '',
     numero=None,
+    voz: bool = False,
 ) -> dict:
-    """Envia mídia já hospedada na Meta (`media_id` vindo de `upload_midia`)."""
+    """
+    Envia mídia já hospedada na Meta (`media_id` vindo de `upload_midia`).
+
+    ``voz=True`` manda o áudio como MENSAGEM DE VOZ (``"voice": true``; exige ogg/opus).
+    Sem isso o ogg chega como arquivo de áudio anexo, e quem toca é o player do aparelho:
+    em parte dos celulares (iPhone, versões antigas) o .ogg não abre — "alguns ouvem,
+    outros não" (04/11/2026). Como voz, quem toca é o próprio WhatsApp, em qualquer aparelho.
+    """
     corpo: dict = {'id': media_id}
+    if voz and categoria == CATEGORIA_AUDIO:
+        corpo['voice'] = True
     if legenda and categoria in CATEGORIAS_COM_LEGENDA:
         corpo['caption'] = legenda
     if categoria == CATEGORIA_DOCUMENTO and nome_arquivo:
