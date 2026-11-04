@@ -81,8 +81,8 @@ def precisa_converter(mime: str, conteudo: bytes = b'') -> bool:
 
 def converter_para_opus(conteudo: bytes) -> bytes:
     """
-    Converte qualquer áudio para ogg/opus mono, 32 kbps — a mesma faixa que o
-    próprio WhatsApp usa em mensagem de voz.
+    Converte qualquer áudio para ogg/opus mono no formato da mensagem de voz do
+    próprio WhatsApp (SILK wideband, 20 ms, ~16 kbps).
 
     A entrada vai por arquivo temporário, e não por `pipe:0`: contêiner com índice
     no fim (mp4/mov) exige que o ffmpeg volte no arquivo, e um pipe não permite
@@ -106,7 +106,14 @@ def converter_para_opus(conteudo: bytes) -> bytes:
                 '-vn',                      # descarta capa/arte embutida
                 '-map_metadata', '-1',      # nome de arquivo e tags não vão junto
                 '-ac', '1', '-ar', '48000', # opus é 48kHz; mono basta para voz
-                '-c:a', 'libopus', '-b:a', '32k',
+                # Igual à mensagem de voz que o PRÓPRIO WhatsApp grava (conferido byte a
+                # byte num áudio recebido em 04/11/2026): Opus em modo voz (SILK), banda
+                # larga de 8 kHz, quadros de 20 ms, ~16 kbps. Com o padrão do libopus
+                # (32k, modo música, banda cheia) o arquivo é válido, mas parte dos
+                # celulares não tocava ("não consegui escutar") — sem padrão de aparelho.
+                '-c:a', 'libopus', '-application', 'voip', '-b:a', '16k', '-vbr', 'on',
+                '-cutoff', '8000', '-frame_duration', '20',
+                '-avoid_negative_ts', 'make_zero',
                 '-f', 'ogg', 'pipe:1',
             ],
             input=b'',
