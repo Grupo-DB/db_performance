@@ -299,3 +299,21 @@ class FichaTreinamentoJovemTests(APITestCase):
         self.assertEqual(self.client.get(f"/aprendizes/publico/treinamento/{c['token']}/").data['situacao'], 'CANCELADO')
         self.assertEqual(self.client.get('/aprendizes/jovem-aprendiz/treinamento/convites/').status_code, 401)
         self.assertEqual(self.client.get('/aprendizes/publico/treinamento/naoexiste/').status_code, 404)
+
+    def test_enviar_para_todos_os_aprendizes(self):
+        a = criar_colaborador('ANA APRENDIZ', cargo_nome='Aprendiz Aux Escrit')
+        b = criar_colaborador('BRUNO APRENDIZ', cargo_nome='APRENDIZ DP')
+        criar_colaborador('CARLOS OPERADOR', cargo_nome='Operador')
+        self.client.force_authenticate(self.rh)
+        lista = self.client.get('/aprendizes/jovem-aprendiz/treinamento/convites/aprendizes/').data
+        self.assertEqual([j['nome'] for j in lista], ['ANA APRENDIZ', 'BRUNO APRENDIZ'])
+        corpo = {'treinamento': 'Módulo 4', 'instrutor': 'Ana', 'data_treinamento': '2026-11-04',
+                 'jovens': [{'colaborador': j['colaborador'], 'nome': j['nome'], 'setor': j['setor'], 'telefone': '(55) 98888-0000'} for j in lista]}
+        r = self.client.post('/aprendizes/jovem-aprendiz/treinamento/convites/lote/', corpo, format='json')
+        self.assertEqual((r.status_code, r.data['criados'], len({c['token'] for c in r.data['convites']})), (201, 2, 2), r.data)
+        # De novo, para o mesmo treinamento: não duplica, devolve os mesmos links.
+        r2 = self.client.post('/aprendizes/jovem-aprendiz/treinamento/convites/lote/', corpo, format='json')
+        self.assertEqual((r2.data['criados'], r2.data['reaproveitados']), (0, 2))
+        marcados = self.client.get('/aprendizes/jovem-aprendiz/treinamento/convites/aprendizes/?treinamento=módulo 4').data
+        self.assertTrue(all(j['ja_tem_link'] and j['telefone'] == '55988880000' for j in marcados))
+        self.assertEqual({a.id, b.id}, {j['colaborador'] for j in marcados})
