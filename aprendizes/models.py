@@ -195,3 +195,73 @@ class ConviteAutoavaliacao(models.Model):
         if self.expira_em and self.expira_em < timezone.now():
             return 'VENCIDO'
         return 'ABERTO'
+
+
+# ── Ficha de avaliação do treinamento no Programa Jovem Aprendiz ─────────────────
+# A ficha é a mesma da UNIDB (5 fechadas + 2 abertas, `unidb.convites.PERGUNTAS`), mas
+# fica aqui, com o treinamento digitado pelo RH (os módulos do programa não são turmas
+# da UNIDB). É ANÔNIMA (decisão do usuário, 04/11/2026): o convite é por jovem só para o
+# RH saber quem já respondeu, e a resposta NÃO aponta para o convite.
+
+def _expira_convite_treinamento():
+    return timezone.now() + timedelta(days=30)
+
+
+class AvaliacaoTreinamentoJovem(models.Model):
+    QUALIDADE = [('EXCELENTE', 'Excelente'), ('BOM', 'Bom'), ('REGULAR', 'Regular'), ('RUIM', 'Ruim')]
+    SIM = [('SIM', 'Sim'), ('PARCIALMENTE', 'Parcialmente'), ('NAO', 'Não')]
+    TEMPO = [('ADEQUADO', 'Adequado'), ('MUITO CURTO', 'Muito curto'), ('MUITO LONGO', 'Muito longo')]
+    ORIGEM = [('LINK', 'Pelo celular (link)'), ('DIGITADA', 'Digitada pelo RH')]
+
+    treinamento = models.CharField(max_length=255)
+    instrutor = models.CharField(max_length=255, blank=True, default='')
+    data = models.DateField(null=True, blank=True)
+
+    avaliacao_geral = models.CharField(max_length=15, choices=QUALIDADE, blank=True, default='')
+    conteudo_atendeu = models.CharField(max_length=15, choices=SIM, blank=True, default='')
+    didatica_instrutor = models.CharField(max_length=15, choices=QUALIDADE, blank=True, default='')
+    material_apoio = models.CharField(max_length=15, choices=SIM, blank=True, default='')
+    tempo_duracao = models.CharField(max_length=15, choices=TEMPO, blank=True, default='')
+    pontos_positivos = models.TextField(blank=True, default='')
+    pontos_melhoria = models.TextField(blank=True, default='')
+
+    origem = models.CharField(max_length=10, choices=ORIGEM, default='DIGITADA')
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-data', '-id']
+
+
+class ConviteTreinamentoJovem(models.Model):
+    """
+    Link da ficha do treinamento para UM jovem responder pelo celular. Uma resposta por link,
+    vence em 30 dias, o RH pode cancelar. Guarda quem foi convidado e QUANDO respondeu — não
+    O QUE respondeu: a resposta gravada não tem vínculo com o convite.
+    """
+    token = models.CharField(max_length=40, unique=True, default=_token_convite, db_index=True)
+    treinamento = models.CharField(max_length=255)
+    instrutor = models.CharField(max_length=255, blank=True, default='')
+    data_treinamento = models.DateField(null=True, blank=True)
+    colaborador = models.ForeignKey(Colaborador, null=True, blank=True, on_delete=models.SET_NULL, related_name='convites_treinamento_jovem')
+    nome = models.CharField(max_length=150)
+    setor = models.CharField(max_length=150, blank=True, default='')
+    telefone = models.CharField(max_length=20, blank=True, default='')
+    expira_em = models.DateTimeField(default=_expira_convite_treinamento)
+    cancelado = models.BooleanField(default=False)
+    respondido_em = models.DateTimeField(null=True, blank=True)
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-criado_em']
+
+    @property
+    def situacao(self) -> str:
+        if self.respondido_em:
+            return 'RESPONDIDO'
+        if self.cancelado:
+            return 'CANCELADO'
+        if self.expira_em and self.expira_em < timezone.now():
+            return 'VENCIDO'
+        return 'ABERTO'

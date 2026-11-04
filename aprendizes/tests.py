@@ -242,3 +242,60 @@ class AutoavaliacaoPeloCelularTests(APITestCase):
 
     def test_convites_so_o_rh(self):
         self.assertEqual(self.client.get('/aprendizes/jovem-aprendiz/convites/').status_code, 401)
+
+
+class FichaTreinamentoJovemTests(APITestCase):
+    """Ficha de avaliação do treinamento (a da UNIDB) no Programa Jovem Aprendiz — anônima."""
+    RESPOSTA = {
+        'avaliacao_geral': 'BOM', 'conteudo_atendeu': 'SIM', 'didatica_instrutor': 'EXCELENTE',
+        'material_apoio': 'NAO', 'tempo_duracao': 'ADEQUADO', 'pontos_positivos': 'Prática', 'pontos_melhoria': '',
+    }
+
+    def setUp(self):
+        self.rh = User.objects.create_user('rh', password='x')
+        self.rh.groups.add(Group.objects.create(name='RHGestor'))
+
+    def _convite(self, nome='Carlos Eduardo'):
+        self.client.force_authenticate(self.rh)
+        r = self.client.post('/aprendizes/jovem-aprendiz/treinamento/convites/', {
+            'nome': nome, 'treinamento': 'Módulo 3 — Segurança', 'instrutor': 'Ana', 'data_treinamento': '2026-11-03',
+            'telefone': '(55) 99999-0000'}, format='json')
+        self.client.force_authenticate(None)
+        self.assertEqual(r.status_code, 201, r.data)
+        return r.data
+
+    def test_link_grava_resposta_anonima_uma_vez(self):
+        from .models import AvaliacaoTreinamentoJovem, ConviteTreinamentoJovem
+        c = self._convite()
+        url = f"/aprendizes/publico/treinamento/{c['token']}/"
+        g = self.client.get(url)
+        self.assertEqual((g.status_code, g.data['fechado'], g.data['curso'], len(g.data['perguntas'])),
+                         (200, False, 'Módulo 3 — Segurança', 5))
+        self.assertNotIn('nome', g.data)   # a página não recebe o nome do jovem
+        self.assertEqual(self.client.post(url, {**self.RESPOSTA, 'tempo_duracao': ''}, format='json').status_code, 400)
+        self.assertEqual(self.client.post(url, self.RESPOSTA, format='json').status_code, 201)
+        f = AvaliacaoTreinamentoJovem.objects.get()
+        self.assertEqual((f.treinamento, f.instrutor, str(f.data), f.origem, f.didatica_instrutor),
+                         ('Módulo 3 — Segurança', 'Ana', '2026-11-03', 'LINK', 'EXCELENTE'))
+        self.assertFalse(any('convite' in campo.name for campo in AvaliacaoTreinamentoJovem._meta.get_fields()))
+        self.assertIsNotNone(ConviteTreinamentoJovem.objects.get().respondido_em)
+        self.assertEqual(self.client.post(url, self.RESPOSTA, format='json').status_code, 400)   # segunda vez não
+        self.assertEqual(self.client.get(url).data['situacao'], 'RESPONDIDO')
+        self.assertEqual(c['telefone'], '55999990000')
+
+    def test_rh_digita_ficha_e_lista(self):
+        self.client.force_authenticate(self.rh)
+        self.assertEqual(self.client.post('/aprendizes/jovem-aprendiz/treinamento/', {'treinamento': ''}, format='json').status_code, 400)
+        r = self.client.post('/aprendizes/jovem-aprendiz/treinamento/', {**self.RESPOSTA, 'treinamento': 'Módulo 1', 'data': '2026-10-20'}, format='json')
+        self.assertEqual((r.status_code, r.data['origem']), (201, 'DIGITADA'), r.data)
+        self.assertEqual(len(self.client.get('/aprendizes/jovem-aprendiz/treinamento/').data), 1)
+        self.assertEqual(len(self.client.get('/aprendizes/jovem-aprendiz/treinamento/formulario/').data['perguntas']), 5)
+
+    def test_cancelado_fecha_e_so_o_rh_gera(self):
+        c = self._convite()
+        self.client.force_authenticate(self.rh)
+        self.client.post(f"/aprendizes/jovem-aprendiz/treinamento/convites/{c['id']}/cancelar/")
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get(f"/aprendizes/publico/treinamento/{c['token']}/").data['situacao'], 'CANCELADO')
+        self.assertEqual(self.client.get('/aprendizes/jovem-aprendiz/treinamento/convites/').status_code, 401)
+        self.assertEqual(self.client.get('/aprendizes/publico/treinamento/naoexiste/').status_code, 404)
