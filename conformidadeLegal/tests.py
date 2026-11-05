@@ -1278,6 +1278,22 @@ class RelatorioAnualTests(APITestCase):
         self.assertIn('dezembro de 2024 e novembro de 2025', dados['apresentacao'])
         del d
 
+    def test_resposta_registrada_logo_depois_do_fim_conta(self):
+        # Período fecha em 30/11/2025; a equipe verifica em dezembro, ao preparar o relatório.
+        a = self._req('2.1')
+        b = self._req('2.2')
+        c = self._req('2.3')
+        self._vcl(a, '2025-12-04', 'Verificada depois do fechamento.')
+        self._vcl(b, '2025-10-01', 'Dentro do período.')
+        self._vcl(b, '2025-12-04', 'Mais nova, mas o período tem a sua.')
+        self._vcl(c, '2026-07-01', 'Longe demais: é do relatório seguinte.')
+
+        itens = {i['referencia']: i for s in self._previa()['secoes'] for i in s['itens']}
+        self.assertEqual((itens['2.1']['resposta'], itens['2.1']['apos_periodo'], itens['2.1']['pendente']),
+                         ('Verificada depois do fechamento.', True, False))
+        self.assertEqual((itens['2.2']['resposta'], itens['2.2']['apos_periodo']), ('Dentro do período.', False))
+        self.assertTrue(itens['2.3']['pendente'])
+
     def test_configuracao_salva_e_vazio_volta_ao_padrao(self):
         url = f'/conformidadeLegal/normas/{self.lo.id}/relatorio-anual/?inicio={self.INICIO}&fim={self.FIM}'
         r = self.client.patch(url, {'item': '14', 'licenca': 'LO nº 00893/2024', 'atividade': 'Extração de Calcário',

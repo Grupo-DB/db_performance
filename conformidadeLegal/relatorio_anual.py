@@ -8,7 +8,10 @@ Montado com o que o módulo já guarda:
   - cada condicionante é um `Requisito` (referência = número da condicionante,
     trecho_fonte = texto literal, secao = "Quanto à Atividade");
   - a resposta é a `Verificacao` mais recente DENTRO do período do relatório, e as
-    fotos são os anexos de imagem dela (legenda = "Figura N: …").
+    fotos são os anexos de imagem dela (legenda = "Figura N: …"). Sem nenhuma no
+    período, vale a registrada logo DEPOIS do fim (até `FOLGA_APOS_FIM`): o relatório
+    é preparado com o período já fechado, e quem verifica pela tela de Requisitos
+    grava a data do dia — sem isso, condicionante atendida aparecia sem resposta.
 
 Sai em Word (para a equipe ajustar antes de protocolar) e em PDF, com o mesmo
 conteúdo. Capa e apresentação vêm de `Norma.relatorio_anual`, com padrões tirados
@@ -40,6 +43,9 @@ CAMPOS_CONFIG = ('titulo', 'empresa', 'cnpj', 'municipio', 'atividade', 'process
                  'apresentacao', 'cabecalho', 'data_capa', 'logo')
 # Listas de ids de requisito guardadas junto da configuração.
 LISTAS_CONFIG = ('sem_resposta', 'fora')
+
+# Quanto depois do fim do período uma verificação ainda conta como resposta dele.
+FOLGA_APOS_FIM = relativedelta(months=6)
 LOGO_PADRAO = os.path.join(os.path.dirname(__file__), 'recursos', 'logo_relatorio.png')
 
 APRESENTACAO_PADRAO = (
@@ -198,6 +204,7 @@ class Item:
     resultado: str = ''
     data_resposta: date | None = None
     verificacao_id: int | None = None
+    apos_periodo: bool = False  # resposta registrada depois do fim (dentro da folga)
     fotos: list = field(default_factory=list)
     documentos: list = field(default_factory=list)
     anterior: dict | None = None
@@ -256,6 +263,11 @@ def montar(norma, inicio: date, fim: date, url_de=None) -> dict:
             no_relatorio=req.id not in fora,
         )
         no_periodo = next((v for v in req.verificacoes.all() if inicio <= v.data <= fim), None)
+        if not no_periodo:
+            # verificacoes vem da mais nova para a mais antiga: a última da folga.
+            limite = fim + FOLGA_APOS_FIM
+            no_periodo = next((v for v in req.verificacoes.all() if fim < v.data <= limite), None)
+            item.apos_periodo = no_periodo is not None
         if no_periodo:
             item.resposta = no_periodo.evidencia.strip()
             item.origem_resposta = 'VERIFICACAO'
@@ -336,7 +348,7 @@ def para_json(dados: dict) -> dict:
                 'requisito': i.requisito_id, 'referencia': i.referencia, 'texto': i.texto,
                 'aplicabilidade': i.aplicabilidade, 'resposta': i.resposta, 'origem_resposta': i.origem_resposta,
                 'resultado': i.resultado, 'data_resposta': i.data_resposta.isoformat() if i.data_resposta else None,
-                'verificacao': i.verificacao_id, 'pendente': i.pendente, 'anterior': i.anterior,
+                'verificacao': i.verificacao_id, 'apos_periodo': i.apos_periodo, 'pendente': i.pendente, 'anterior': i.anterior,
                 'sem_resposta_propria': i.sem_resposta_propria, 'no_relatorio': i.no_relatorio,
                 'fotos': [foto(f) for f in i.fotos], 'documentos': [foto(f) for f in i.documentos],
             } for i in s.itens],
