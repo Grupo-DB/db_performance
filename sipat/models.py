@@ -117,5 +117,7 @@ class Sorteio(models.Model):
 
     class Meta:
         ordering = ['-sorteado_em', '-id']
-        # Garante no banco a regra "quem foi sorteado não concorre de novo".
-        unique_together = ('evento', 'participante')
+        # Sem unique(evento, participante) desde 06/11/2026: quem ganha um prêmio do dia
+        # continua concorrendo aos prêmios da semana inteira. Quem pode concorrer a quê
+        # está em regras.concorrentes; a concorrência entre dois sorteios simultâneos é
+        # resolvida travando o evento no `sortear`.

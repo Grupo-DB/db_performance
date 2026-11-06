@@ -1,6 +1,7 @@
 import random
 import secrets
 import unicodedata
+from datetime import date
 
 from django.db import IntegrityError, transaction
 from django.db.models import Prefetch
@@ -195,19 +196,36 @@ class PremioViewSet(viewsets.ModelViewSet):
         turno = str(request.query_params.get('turno') or request.data.get('turno') or '').upper()
         return turno if turno in TURNOS_VALIDOS else ''
 
+    @staticmethod
+    def _data_do_sorteio(request) -> date:
+        """Dia do sorteio escolhido na tela (``data`` AAAA-MM-DD); sem ele, hoje pelo servidor
+        (fuso de Brasília) — o relógio do notebook do projetor não decide sozinho."""
+        bruto = str(request.query_params.get('data') or request.data.get('data') or '').strip()[:10]
+        if not bruto:
+            return timezone.localdate()
+        try:
+            return date.fromisoformat(bruto)
+        except ValueError:
+            raise ValidationError({'data': 'Data do sorteio inválida (use AAAA-MM-DD).'})
+
     @action(detail=True, methods=['get'])
     def concorrentes(self, request, pk=None):
+        """Total da urna; com ``?lista=1``, também quem está nela (a tela mostra antes de sortear)."""
         premio = self.get_object()
-        # O dia é o do servidor (fuso de Brasília): o relógio do notebook do
-        # projetor não decide quem estava presente.
-        qs = concorrentes(premio, self._turno_do_sorteio(request), timezone.localdate())
-        return Response({'total': qs.count()})
+        qs = concorrentes(premio, self._turno_do_sorteio(request), self._data_do_sorteio(request))
+        if not request.query_params.get('lista'):
+            return Response({'total': qs.count()})
+        lista = list(qs.order_by('nome').values('id', 'nome', 'setor', 'matricula'))
+        return Response({'total': len(lista), 'lista': lista})
 
     @action(detail=True, methods=['post'])
     def sortear(self, request, pk=None):
         with transaction.atomic():
             # Trava o prêmio: dois cliques simultâneos não sorteiam a mesma unidade duas vezes.
             premio = Premio.objects.select_for_update().select_related('evento').get(pk=self.get_object().pk)
+            # Trava o evento também: sem o unique(evento, participante), dois prêmios sorteados
+            # ao mesmo tempo poderiam escolher a mesma pessoa para dois prêmios do dia.
+            Evento.objects.select_for_update().get(pk=premio.evento_id)
             validos = premio.sorteios.filter(status=Sorteio.STATUS_GANHADOR).count()
             if validos >= premio.quantidade:
                 return Response({'detail': 'Todas as unidades deste prêmio já foram sorteadas.'},
@@ -216,12 +234,13 @@ class PremioViewSet(viewsets.ModelViewSet):
             if premio.so_presentes_no_turno and not turno:
                 return Response({'detail': 'Escolha o turno do sorteio: este prêmio é só para quem está presente no turno.'},
                                 status=status.HTTP_400_BAD_REQUEST)
-            urna = list(concorrentes(premio, turno, timezone.localdate()).values('id', 'nome'))
+            urna = list(concorrentes(premio, turno, self._data_do_sorteio(request)).values('id', 'nome'))
             if not urna:
                 detalhe = 'Ninguém concorre a este prêmio pela regra definida.'
                 if premio.so_presentes_no_turno:
                     nome_turno = dict(TURNOS)[turno].lower()
-                    detalhe = (f'Ninguém concorre: o prêmio é só para quem tem presença hoje no turno da {nome_turno}. '
+                    dia = self._data_do_sorteio(request).strftime('%d/%m')
+                    detalhe = (f'Ninguém concorre: o prêmio é só para quem tem presença em {dia} no turno da {nome_turno}. '
                                'Confira a lista de presença do turno.')
                 return Response({'detail': detalhe}, status=status.HTTP_400_BAD_REQUEST)
             escolhido = secrets.choice(urna)

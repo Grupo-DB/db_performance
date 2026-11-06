@@ -27,19 +27,25 @@ class ParticipanteSerializer(serializers.ModelSerializer):
     # 'AAAA-MM-DD|M' — compacto porque a tela de presença carrega o evento inteiro.
     presencas = serializers.SerializerMethodField()
     sorteio = serializers.SerializerMethodField()
+    sorteios = serializers.SerializerMethodField()
 
     class Meta:
         model = Participante
-        fields = ['id', 'evento', 'matricula', 'nome', 'setor', 'empresa', 'ativo', 'presencas', 'sorteio']
+        fields = ['id', 'evento', 'matricula', 'nome', 'setor', 'empresa', 'ativo', 'presencas', 'sorteio', 'sorteios']
 
     def get_presencas(self, obj):
         return [f'{p.data.isoformat()}|{p.turno}' for p in obj.presencas.all()]
 
     def get_sorteio(self, obj):
+        """O mais recente — mantido para telas antigas; `sorteios` traz todos."""
         s = next(iter(obj.sorteios.all()), None)
         if not s:
             return None
         return {'id': s.id, 'premio': s.premio.descricao, 'status': s.status}
+
+    def get_sorteios(self, obj):
+        # Desde 06/11 a mesma pessoa pode ganhar um prêmio do dia e um da semana.
+        return [{'id': s.id, 'premio': s.premio.descricao, 'status': s.status} for s in obj.sorteios.all()]
 
 
 class SorteioSerializer(serializers.ModelSerializer):

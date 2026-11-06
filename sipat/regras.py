@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 from django.db.models import Count, Q
 
-from .models import Participante, Premio, Presenca
+from .models import Participante, Premio, Presenca, Sorteio
 
 
 def dias_uteis(inicio: date, fim: date) -> list[str]:
@@ -38,15 +38,28 @@ def ids_semana_inteira(evento) -> set[int]:
     return {l['participante_id'] for l in linhas}
 
 
+def ja_sorteados(premio: Premio):
+    """Quem já saiu da urna para ESTE prêmio (ganhador ou ausente na hora).
+
+    Prêmio da semana inteira: só tira quem já levou um prêmio da semana — ganhar um
+    prêmio do dia não tira ninguém do sorteio da semana (regra do RH, 06/11/2026).
+    Demais prêmios: quem já foi sorteado em qualquer prêmio do evento fica fora.
+    """
+    qs = Sorteio.objects.filter(evento=premio.evento)
+    if premio.regra == Premio.REGRA_SEMANA:
+        qs = qs.filter(premio__regra=Premio.REGRA_SEMANA)
+    return qs.values('participante_id')
+
+
 def concorrentes(premio: Premio, turno_sorteio: str = '', data_sorteio: date | None = None):
     """Participantes que podem ser sorteados para o prêmio agora.
 
     ``turno_sorteio``/``data_sorteio`` são o turno e o dia em que o sorteio está
-    acontecendo; só pesam nos prêmios com ``so_presentes_no_turno``. Sem turno
+    acontecendo (o dia é escolhido na tela; padrão, hoje); só pesam nos prêmios com ``so_presentes_no_turno``. Sem turno
     informado, esses prêmios ficam sem concorrente (a urna não adivinha o turno).
     """
     evento = premio.evento
-    qs = Participante.objects.filter(evento=evento, ativo=True).exclude(sorteios__evento=evento)
+    qs = Participante.objects.filter(evento=evento, ativo=True).exclude(id__in=ja_sorteados(premio))
 
     if premio.regra == Premio.REGRA_SEMANA:
         qs = qs.filter(id__in=ids_semana_inteira(evento))

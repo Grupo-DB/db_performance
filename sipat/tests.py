@@ -113,3 +113,44 @@ class SorteioSipatTests(APITestCase):
     def test_sem_grupo_nao_acessa(self):
         self.client.force_authenticate(User.objects.create_user('x', password='x'))
         self.assertEqual(self.client.get('/sipat/eventos/').status_code, 403)
+
+    def test_ganhador_do_dia_concorre_na_semana(self):
+        """06/11: prêmio do dia não tira ninguém do sorteio da semana; o contrário continua tirando."""
+        self._importar([{'nome': 'A'}, {'nome': 'B'}])
+        a, b = Participante.objects.order_by('id')
+        for d in self.evento.dias:
+            for p in (a, b):
+                Presenca.objects.create(participante=p, data=d, turno='M')
+        dia = Premio.objects.create(evento=self.evento, descricao='Caneca', regra='QUALQUER', quantidade=1)
+        r = self.client.post(f'/sipat/premios/{dia.id}/sortear/')
+        ganhou_dia = r.data['sorteio']['participante']
+
+        tv = Premio.objects.create(evento=self.evento, descricao='TV', categoria='MAIOR', regra='SEMANA', quantidade=2)
+        self.assertEqual(self.client.get(f'/sipat/premios/{tv.id}/concorrentes/').data['total'], 2)
+        ganhou_tv = {self.client.post(f'/sipat/premios/{tv.id}/sortear/').data['sorteio']['participante'] for _ in range(2)}
+        self.assertEqual(ganhou_tv, {a.id, b.id})   # inclusive quem já levou a caneca
+
+        # Quem ganhou TV não concorre a outro prêmio do dia (os dois ganharam: urna vazia).
+        outro = Premio.objects.create(evento=self.evento, descricao='Boné', regra='QUALQUER', quantidade=1)
+        self.assertEqual(self.client.get(f'/sipat/premios/{outro.id}/concorrentes/').data['total'], 0)
+        r = self.client.get(f'/sipat/participantes/{ganhou_dia}/')
+        self.assertEqual(len(r.data['sorteios']), 2)
+
+    def test_data_manual_e_lista_de_concorrentes(self):
+        self._importar([{'nome': 'Zé', 'matricula': '7'}, {'nome': 'Ana'}])
+        ze, ana = Participante.objects.order_by('id')
+        dia = self.evento.dias[2]
+        Presenca.objects.create(participante=ze, data=dia, turno='T')
+        Presenca.objects.create(participante=ana, data=self.evento.dias[0], turno='T')
+        premio = Premio.objects.create(evento=self.evento, descricao='Kit', regra='QUALQUER', so_presentes_no_turno=True)
+        url = f'/sipat/premios/{premio.id}/concorrentes/'
+
+        r = self.client.get(url, {'turno': 'T', 'data': dia, 'lista': 1})
+        self.assertEqual(r.data['total'], 1)
+        self.assertEqual(r.data['lista'][0]['nome'], 'Zé')
+        self.assertEqual(r.data['lista'][0]['matricula'], '7')
+        self.assertNotIn('lista', self.client.get(url, {'turno': 'T', 'data': dia}).data)
+        self.assertEqual(self.client.get(url, {'turno': 'T', 'data': 'xx'}).status_code, 400)
+
+        r = self.client.post(f'/sipat/premios/{premio.id}/sortear/', {'turno': 'T', 'data': self.evento.dias[0]}, format='json')
+        self.assertEqual(r.data['sorteio']['participante'], ana.id)
