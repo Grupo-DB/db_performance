@@ -753,6 +753,10 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             ensaio_ids = data.get('ensaioIds', [])
             ensaio_nome = data.get('ensaio_nome', None)
             limit = int(data.get('limit', 20))
+            # Recorte "Por produto" do histórico (06/11/2026): só amostras do mesmo produto.
+            # Filtrar aqui, e não na tela, porque o limite de N análises vale depois do recorte.
+            produto_id = data.get('produto')
+            excluir_id = data.get('excluir')
 
             if not calculo_descricao and not ensaio_ids and not ensaio_nome:
                 return Response({
@@ -769,7 +773,11 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                     ensaio_ids = [int(id) for id in ensaio_ids]
 
                 # Inicializar queryset
-                analises_filtradas = Analise.objects.all()
+                analises_filtradas = Analise.objects.select_related('amostra__produto_amostra')
+                if produto_id:
+                    analises_filtradas = analises_filtradas.filter(amostra__produto_amostra_id=int(produto_id))
+                if excluir_id:
+                    analises_filtradas = analises_filtradas.exclude(id=int(excluir_id))
 
                 # Filtrar por cálculo se fornecido
                 if calculo_descricao:
@@ -807,6 +815,9 @@ class AnaliseViewSet(viewsets.ModelViewSet):
                     analise_data = {
                         'analise_id': analise.id,
                         'amostra_numero': analise.amostra.numero if analise.amostra else None,
+                        'produto': (analise.amostra.produto_amostra.nome
+                                    if analise.amostra and analise.amostra.produto_amostra else None),
+                        'material': analise.amostra.material if analise.amostra else None,
                         'data_analise': analise.data if hasattr(analise, 'data') else None,
                         'responsavel': None,
                         'digitador': None,
