@@ -14,7 +14,7 @@ from django.conf import settings
 from openai import AzureOpenAI
 from openai import APIError
 import pandas as pd
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 
 from controleQualidade.periodo_listagem import filtro_periodo, limite_periodo
 from controleQualidade.amostra.derivadas import eh_derivada, sem_derivadas
@@ -96,7 +96,8 @@ FILTROS_SUPORTADOS = sorted(
      'aprovada_inicio', 'aprovada_fim', 'finalizada', 'aprovada', 'laudo',
      'usada_laudo', 'estado', 'laboratorio_atual', 'classificacao', 'laboratorio',
      'local_coleta', 'tipo_amostra', 'produto_ids', 'material', 'fornecedor',
-     'finalidade', 'tipo_amostragem', 'tipo', 'subtipo', 'periodo_turno', 'reter']
+     'finalidade', 'tipo_amostragem', 'tipo', 'subtipo', 'periodo_turno', 'reter',
+     'com_imagem']
     + list(CAMPOS_TEXTO_AMOSTRA)
     + [f'{c}_preenchimento' for c in CAMPOS_TEXTO_AMOSTRA]
     + [f'{c}_inicio' for c in CAMPOS_DATA_AMOSTRA]
@@ -1256,6 +1257,14 @@ class AnaliseViewSet(viewsets.ModelViewSet):
         if reter is not None:
             qs = qs.filter(amostra__reter=reter)
 
+        # com_imagem: true = a amostra tem foto anexada, false = não tem. Exists em
+        # vez de join para a análise não repetir uma vez por imagem.
+        com_imagem = data.get('com_imagem')
+        if com_imagem is not None:
+            from controleQualidade.amostra.models import AmostraImagem
+            tem_imagem = Exists(AmostraImagem.objects.filter(amostra_id=OuterRef('amostra_id')))
+            qs = qs.filter(tem_imagem) if com_imagem else qs.exclude(tem_imagem)
+
         return qs.order_by('-id')
 
     @action(detail=False, methods=['post'], url_path='curva-granulometrica')
@@ -1378,6 +1387,7 @@ class AnaliseViewSet(viewsets.ModelViewSet):
             identificacao_complementar, complemento, observacoes
           - periodo_turno: string ou lista (id da opção ou nome, casamento exato)
           - reter: true | false
+          - com_imagem: true | false (amostra tem imagem anexada)
           - datas da amostra, como intervalo <campo>_inicio / <campo>_fim:
             data_entrada, data_coleta, data_descarte, data_envio, data_recebida
         Estatísticas (opcionais):

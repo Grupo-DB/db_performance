@@ -136,6 +136,23 @@ class SorteioSipatTests(APITestCase):
         r = self.client.get(f'/sipat/participantes/{ganhou_dia}/')
         self.assertEqual(len(r.data['sorteios']), 2)
 
+    def test_semana_inteira_e_presente_no_turno_do_sorteio(self):
+        """06/11: semana inteira + "só presentes no turno" = veio todos os dias E está no turno sorteado."""
+        self._importar([{'nome': 'Semana e tarde'}, {'nome': 'Semana só manhã'}, {'nome': 'Só hoje à tarde'}])
+        a, b, c = Participante.objects.order_by('id')
+        hoje = self.evento.dias[-1]
+        for d in self.evento.dias:
+            Presenca.objects.create(participante=a, data=d, turno='M')
+            Presenca.objects.create(participante=b, data=d, turno='M')
+        Presenca.objects.create(participante=a, data=hoje, turno='T')
+        Presenca.objects.create(participante=c, data=hoje, turno='T')
+        tv = Premio.objects.create(evento=self.evento, descricao='TV', categoria='MAIOR', regra='SEMANA',
+                                   so_presentes_no_turno=True)
+        r = self.client.get(f'/sipat/premios/{tv.id}/concorrentes/', {'turno': 'T', 'data': hoje, 'lista': 1})
+        self.assertEqual([x['nome'] for x in r.data['lista']], ['Semana e tarde'])
+        r = self.client.get(f'/sipat/premios/{tv.id}/concorrentes/', {'turno': 'M', 'data': hoje})
+        self.assertEqual(r.data['total'], 2)
+
     def test_data_manual_e_lista_de_concorrentes(self):
         self._importar([{'nome': 'Zé', 'matricula': '7'}, {'nome': 'Ana'}])
         ze, ana = Participante.objects.order_by('id')
