@@ -743,3 +743,42 @@ def serve_catalogo_pdf_inline(request, pk):
     response = FileResponse(catalogo.arquivo.open('rb'), content_type='application/pdf')
     response['Content-Disposition'] = f'inline; filename="{catalogo.titulo}.pdf"'
     return response
+
+
+# ---------------------------------------------------------------------------
+# Visão geral do almoxarifado (SGA) — ver catalogos/almoxarifado.py
+# ---------------------------------------------------------------------------
+
+GRUPOS_ALMOXARIFADO = {'Admin', 'Master', 'comprasClientes', 'comprasCliente', 'comprasGestor'}
+
+
+@api_view(['GET'])
+def almoxarifado_resumo(request):
+    """
+    Cards por grupo de itens, distribuição do valor em estoque e movimentações.
+
+    ?filial=0 (matriz, padrão) | 1 | 3 | … | todas
+    """
+    from . import almoxarifado
+
+    user = request.user
+    if not user.is_authenticated:
+        return Response({'erro': 'Não autenticado.'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not (user.is_superuser or user.groups.filter(name__in=GRUPOS_ALMOXARIFADO).exists()):
+        return Response({'erro': 'Sem acesso ao almoxarifado.'}, status=status.HTTP_403_FORBIDDEN)
+
+    bruto = (request.GET.get('filial') or '0').strip().lower()
+    if bruto == 'todas':
+        filial = None
+    else:
+        try:
+            filial = int(bruto)
+        except ValueError:
+            return Response({'erro': "filial deve ser um número ou 'todas'."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        dados = almoxarifado.resumo(filial)
+        dados['filiais'] = almoxarifado.filiais()
+    except Exception as exc:
+        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+    return Response(dados)

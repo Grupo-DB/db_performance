@@ -5,7 +5,7 @@ from .views import (
     FabricanteViewSet, EquipamentoViewSet, VeiculoViewSet, SecaoViewSet, ItemViewSet,
     PedidoViewSet, PedidoNotificacaoViewSet, AnexoPedidoViewSet, ItemPedidoNaoCatalogadoViewSet,
     CatalogoPDFViewSet, ItemErpCatalogoViewSet, EquipamentoCatalogoViewSet,
-    consultar_produtos, consultar_imagem_produto,
+    consultar_produtos, consultar_imagem_produto, almoxarifado_resumo,
     serve_catalogo_pdf_inline,
 )
 
@@ -30,5 +30,6 @@ urlpatterns = [
     path('pedidos/<int:pedido_pk>/', include(anexo_router.urls)),
     path('erp/produtos/',       consultar_produtos,       name='erp-produtos'),
     path('erp/produto-imagem/', consultar_imagem_produto, name='erp-produto-imagem'),
+    path('erp/almoxarifado/',   almoxarifado_resumo,      name='erp-almoxarifado'),
     path('catalogos-pdf/<int:pk>/inline/', serve_catalogo_pdf_inline, name='catalogo-pdf-inline'),
 ]
