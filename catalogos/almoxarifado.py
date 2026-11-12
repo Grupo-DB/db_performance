@@ -237,7 +237,40 @@ def _item(r) -> dict:
     }
 
 
-def montar_grupos(df: pd.DataFrame) -> list[dict]:
+def montar_arvore(raiz: int, df: pd.DataFrame, grupos: pd.DataFrame) -> list[dict]:
+    """Subgrupos da raiz em árvore, como a tela "Grupos dos Itens" do SGA.
+
+    Cada nó soma os itens dele e de todos os descendentes. Entram também os
+    subgrupos sem item (o SGA mostra todos); bloqueado só entra se tiver item.
+    """
+    nome, _, pai = arvore(grupos)
+    bloq = {int(c) for c, b in zip(grupos.GALMCOD, grupos.GALMBLOQ) if str(b or '').upper() == 'S'}
+    filhos: dict[int, list[int]] = {}
+    for cod, p in pai.items():
+        if p and p != cod:
+            filhos.setdefault(p, []).append(cod)
+
+    def descendentes(cod, visto):
+        tudo = {cod}
+        for f in filhos.get(cod, []):
+            if f not in visto:
+                visto.add(f)
+                tudo |= descendentes(f, visto)
+        return tudo
+
+    def no(cod, visto):
+        sub = df[df.GALM.isin(descendentes(cod, set(visto)))]
+        ramos = [n for f in sorted(filhos.get(cod, []), key=lambda c: nome.get(c, ''))
+                 if f not in visto and (n := no(f, visto | {f})) is not None]
+        if cod in bloq and sub.empty:
+            return None
+        return {'codigo': cod, 'nome': nome.get(cod, f'Grupo {cod}'), **_contas(sub), 'filhos': ramos}
+
+    raiz_no = no(raiz, {raiz})
+    return raiz_no['filhos'] if raiz_no else []
+
+
+def montar_grupos(df: pd.DataFrame, grupos: pd.DataFrame | None = None) -> list[dict]:
     """Cards: uma entrada por raiz, com subgrupos e os itens abaixo do mínimo."""
     saida = []
     for (cod, nome_raiz), g in df.groupby(['RAIZ', 'RAIZ_NOME']):
@@ -260,6 +293,7 @@ def montar_grupos(df: pd.DataFrame) -> list[dict]:
             'nome': nome_raiz,
             **_contas(g),
             'subgrupos': subgrupos,
+            'arvore': montar_arvore(int(cod), g, grupos) if grupos is not None else [],
             'itens_criticos': [_item(r) for r in criticos.itertuples()],
         })
     saida.sort(key=lambda x: -x['valor'])
@@ -321,7 +355,7 @@ def resumo(filial: int | None) -> dict:
         mov = _ler(_SQL_MOVIMENTOS.format(filtro_filial=filtro_mov),
                    desde=hoje - timedelta(days=DIAS_MOVIMENTO - 1), **params)
 
-        cards = montar_grupos(itens)
+        cards = montar_grupos(itens, grupos)
         recorte = itens[itens.RAIZ.isin([c['codigo'] for c in cards])]
         return {
             'filial': filial,

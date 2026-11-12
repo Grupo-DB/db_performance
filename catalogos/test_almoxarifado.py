@@ -87,3 +87,21 @@ class AlmoxarifadoTests(SimpleTestCase):
         self.assertEqual(m['saidas'][-2], 20.0)
         self.assertEqual(len(m['ultimas']), 2)
         self.assertEqual(m['ultimas'][0]['tipo'], 'Entrada (nota)')
+
+
+class ArvoreSubgruposTests(SimpleTestCase):
+    GRUPOS = pd.concat([GRUPOS, pd.DataFrame([
+        {'GALMCOD': 13, 'GALMNOME': 'ELETRICAS', 'GALMGALMPAI': 10, 'GALMBLOQ': 'N'},   # vazio: entra
+        {'GALMCOD': 14, 'GALMNOME': 'VELHAS', 'GALMGALMPAI': 10, 'GALMBLOQ': 'S'},      # bloqueado vazio: sai
+    ])], ignore_index=True)
+
+    def test_arvore_com_netos_soma_descendentes(self):
+        df = a.preparar_itens(pd.DataFrame([item(1, 12, 2, 5), item(2, 11, 9, 5)]), self.GRUPOS)
+        g = a.montar_grupos(df, self.GRUPOS)[0]
+        nomes = [n['nome'] for n in g['arvore']]
+        self.assertEqual(nomes, ['ELETRICAS', 'MANUAIS'])
+        manuais = g['arvore'][1]
+        self.assertEqual((manuais['com_minimo'], manuais['abaixo_minimo']), (2, 1))
+        self.assertEqual([n['nome'] for n in manuais['filhos']], ['CHAVES'])
+        self.assertEqual(manuais['filhos'][0]['abaixo_minimo'], 1)
+        self.assertEqual(g['arvore'][0]['itens'], 0)
