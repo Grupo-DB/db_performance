@@ -342,3 +342,40 @@ class PedidoNotificacao(models.Model):
 
     def __str__(self):
         return f"{self.get_tipo_display()} - {self.pedido.numero_referencia}"
+
+
+# ── Almoxarifado: parâmetros que deixaram de vir do SGA (12/11/2026) ─────────
+
+class MinimoEstoque(models.Model):
+    """Estoque mínimo por item e filial, controlado no app (antes era QESTQESTMIN do SGA)."""
+    ORIGENS = [('app', 'Cadastrado no app'), ('sga', 'Importado do SGA')]
+
+    item = models.IntegerField(db_index=True, help_text='ESTQCOD do SGA')
+    filial = models.IntegerField(default=0, help_text='FILCOD do SGA; 0 = matriz')
+    minimo = models.DecimalField(max_digits=14, decimal_places=3, validators=[MinValueValidator(Decimal('0'))])
+    origem = models.CharField(max_length=3, choices=ORIGENS, default='app')
+    alterado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    alterado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Estoque mínimo'
+        verbose_name_plural = 'Estoques mínimos'
+        unique_together = ('item', 'filial')
+
+    def __str__(self):
+        return f'Item {self.item} / filial {self.filial}: {self.minimo}'
+
+
+class PrazoAtencaoGrupo(models.Model):
+    """Dias de cobertura que acendem o "atenção" num grupo de itens; vale para os subgrupos sem prazo próprio."""
+    grupo = models.IntegerField(unique=True, help_text='GALMCOD do SGA')
+    dias = models.PositiveIntegerField()
+    alterado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    alterado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Prazo de atenção do grupo'
+        verbose_name_plural = 'Prazos de atenção dos grupos'
+
+    def __str__(self):
+        return f'Grupo {self.grupo}: {self.dias} dias'

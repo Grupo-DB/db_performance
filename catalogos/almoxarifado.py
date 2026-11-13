@@ -1,10 +1,18 @@
 """
 Visão geral do almoxarifado: estoque do SGA agrupado por GRUPO DE ITENS.
 
-Lê só do ERP (somente leitura) e devolve, por grupo-raiz de GRUPOALMOXARIFADO:
-itens, itens com saldo, valor em estoque e a situação contra o estoque mínimo
-(QUANTESTOQUE.QESTQESTMIN). Mais as movimentações dos últimos dias
-(MOVESTOQUE) e o detalhe de cada grupo (subgrupos e itens abaixo do mínimo).
+Lê saldo, custo, árvore de grupos e movimentações do ERP (somente leitura) e
+devolve, por grupo-raiz de GRUPOALMOXARIFADO: itens, itens com saldo, valor em
+estoque e a situação contra o estoque mínimo. Mais as movimentações dos últimos
+dias (MOVESTOQUE) e o detalhe de cada grupo (subgrupos e listas de itens).
+
+Desde 13/11/2026 o ESTOQUE MÍNIMO é do app (models.MinimoEstoque, por item e
+filial), não mais QESTQESTMIN do SGA — o SGA só serve para a importação inicial
+(importar_minimos_sga). E entrou o ATENÇÃO: item que ainda não está abaixo do
+mínimo mas cujo saldo cobre só até o prazo do grupo pelo consumo médio
+(requisições dos últimos DIAS_CONSUMO dias). Prazo por grupo em
+models.PrazoAtencaoGrupo, herdado pelos subgrupos; sem cadastro: 45 dias para
+embalagens e 7 para o resto (pedido do almoxarifado em 12/11/2026).
 
 Regras levantadas no SGA em 11/11/2026:
 
@@ -34,6 +42,10 @@ from pedidosVenda.erp import engine
 EMPRESA = 1
 CACHE_SEG = 600
 DIAS_MOVIMENTO = 30
+DIAS_CONSUMO = 90          # janela do consumo médio diário
+PRAZO_PADRAO = 7           # dias de cobertura que acendem o atenção
+PRAZO_EMBALAGEM = 45       # grupo cujo nome começa com EMBALAG (e os de baixo); a raiz
+                           # "MATERIA PRIMA / EMBALAGEM" não, senão a matéria-prima herdava
 MAX_ITENS_CRITICOS = 150
 
 # Raízes que não são almoxarifado: produto acabado, serviço, imobilizado e
@@ -93,13 +105,12 @@ _SQL_FILIAIS = text("""
     SELECT FILCOD, FILNOME FROM FILIAL WHERE FILEMP = :emp
 """)
 
-# Itens com a linha de saldo da(s) filial(is). Item sem linha em QUANTESTOQUE
+# Itens com a linha de saldo da(s) filial(is). O mínimo NÃO vem daqui: é do app. Item sem linha em QUANTESTOQUE
 # entra com saldo zero (LEFT JOIN) — conta como item do grupo, sem saldo.
 _SQL_ITENS = """
     SELECT ESTQCOD, ESTQNOME, ESTQREF, ESTQGALM, ESPSIGLA,
            COALESCE(QESTQFIL, -1)    FIL,
            COALESCE(QESTQESTOQUE, 0) SALDO,
-           COALESCE(QESTQESTMIN, 0)  MINIMO,
            COALESCE(QESTQESTMAX, 0)  MAXIMO,
            COALESCE(QESTQCUSTO, 0)   CUSTO
     FROM ESTOQUE
@@ -107,6 +118,21 @@ _SQL_ITENS = """
     LEFT JOIN QUANTESTOQUE ON QESTQESTQ = ESTQCOD AND QESTQEMP = :emp
          AND QESTQREF = 0 AND QESTQTIPO = 0 {filtro_filial}
 """
+
+# Consumo = requisições do almoxarifado (tipo 2) líquidas de devolução. Acerto
+# (3) é inventário e saída por nota (6) é venda/transferência: não entram.
+_SQL_CONSUMO = """
+    SELECT MESTQESTQ ESTQ, -SUM(MESTQQUANT) CONSUMO
+    FROM MOVESTOQUE
+    WHERE MESTQEMP = :emp AND MESTQDATA >= :desde AND MESTQREFTIPO = 2 {filtro_filial}
+    GROUP BY MESTQESTQ
+"""
+
+_SQL_MINIMOS_SGA = text("""
+    SELECT QESTQESTQ ESTQ, QESTQFIL FIL, QESTQESTMIN MINIMO, ESTQGALM
+    FROM QUANTESTOQUE JOIN ESTOQUE ON ESTQCOD = QESTQESTQ
+    WHERE QESTQEMP = :emp AND QESTQREF = 0 AND QESTQTIPO = 0 AND QESTQESTMIN > 0
+""")
 
 _SQL_MOVIMENTOS = """
     SELECT MESTQDATA DATA, MESTQREFTIPO TIPO, MESTQESTQ ESTQ, MESTQQUANT QUANT,
@@ -158,6 +184,48 @@ def arvore(grupos: pd.DataFrame) -> tuple[dict, dict, dict]:
     return nome, raiz, pai
 
 
+def filhos_por_grupo(pai: dict) -> dict[int, list[int]]:
+    filhos: dict[int, list[int]] = {}
+    for cod, p in pai.items():
+        if p and p != cod:
+            filhos.setdefault(p, []).append(cod)
+    return filhos
+
+
+def descendentes(cod: int, filhos: dict) -> set[int]:
+    """O grupo e todos abaixo dele (à prova de ciclo no cadastro)."""
+    tudo, pilha = {cod}, [cod]
+    while pilha:
+        for f in filhos.get(pilha.pop(), []):
+            if f not in tudo:
+                tudo.add(f)
+                pilha.append(f)
+    return tudo
+
+
+def prazos_por_grupo(grupos: pd.DataFrame, configurados: dict[int, int] | None = None) -> dict[int, tuple[int, bool]]:
+    """(dias, é_próprio) de cada grupo: o cadastrado nele ou no ancestral mais
+    próximo; sem cadastro na linha, 45 se ele ou um ancestral se chama EMBALAGEM…, senão 7."""
+    nome, _, pai = arvore(grupos)
+    configurados = configurados or {}
+    saida = {}
+    for cod in nome:
+        atual, visto, dias, embalagem = cod, set(), None, False
+        while atual and atual not in visto:
+            visto.add(atual)
+            if dias is None and atual in configurados:
+                dias = configurados[atual]
+            if nome.get(atual, '').strip().upper().startswith('EMBALAG'):
+                embalagem = True
+            if pai.get(atual) == atual:
+                break
+            atual = pai.get(atual)
+        if dias is None:
+            dias = PRAZO_EMBALAGEM if embalagem else PRAZO_PADRAO
+        saida[cod] = (int(dias), cod in configurados)
+    return saida
+
+
 def _filho_da_raiz(cod: int, raiz: int, pai: dict) -> int:
     """O subgrupo de 1º nível (filho direto da raiz) onde o grupo `cod` cai."""
     atual, visto = cod, set()
@@ -167,12 +235,23 @@ def _filho_da_raiz(cod: int, raiz: int, pai: dict) -> int:
     return atual
 
 
-def preparar_itens(itens: pd.DataFrame, grupos: pd.DataFrame) -> pd.DataFrame:
-    """Uma linha por item (filiais somadas), com raiz/subgrupo e as contas do card."""
+def preparar_itens(itens: pd.DataFrame, grupos: pd.DataFrame,
+                   minimos: dict[int, float] | None = None,
+                   consumo: dict[int, float] | None = None,
+                   prazos: dict[int, int] | None = None) -> pd.DataFrame:
+    """Uma linha por item (filiais somadas), com raiz/subgrupo e as contas do card.
+
+    `minimos` (item → mínimo da visão, já somado entre filiais quando é "todas")
+    vem do app; sem ele (testes) vale a coluna MINIMO. `consumo` é a quantidade
+    requisitada em DIAS_CONSUMO dias por item; `prazos` os cadastrados por grupo.
+    """
     nome, raiz, pai = arvore(grupos)
     bloqueados = {int(c) for c, b in zip(grupos.GALMCOD, grupos.GALMBLOQ) if str(b or '').upper() == 'S'}
+    prazo = prazos_por_grupo(grupos, prazos)
 
     df = itens.copy()
+    if 'MINIMO' not in df:
+        df['MINIMO'] = 0.0
     for col in ('SALDO', 'MINIMO', 'MAXIMO', 'CUSTO'):
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
     df.loc[df.CUSTO.abs() > CUSTO_UNITARIO_MAX, 'CUSTO'] = 0.0
@@ -181,21 +260,34 @@ def preparar_itens(itens: pd.DataFrame, grupos: pd.DataFrame) -> pd.DataFrame:
     # Filiais somadas: saldo, mínimo e valor somam; custo vira médio ponderado.
     df = (df.groupby(['ESTQCOD', 'ESTQNOME', 'ESTQREF', 'ESTQGALM', 'ESPSIGLA'], dropna=False, as_index=False)
             .agg(SALDO=('SALDO', 'sum'), MINIMO=('MINIMO', 'sum'), MAXIMO=('MAXIMO', 'sum'), VALOR=('VALOR', 'sum')))
+    if minimos is not None:
+        df['MINIMO'] = df.ESTQCOD.map(lambda c: float(minimos.get(int(c), 0.0)))
 
     df['GALM'] = df.ESTQGALM.map(lambda c: int(_num(c)))
+    df['GALM_NOME'] = df.GALM.map(lambda c: nome.get(c, f'Grupo {c}'))
     df['RAIZ'] = df.GALM.map(lambda c: raiz.get(c, c))
     df['RAIZ_NOME'] = df.RAIZ.map(lambda c: nome.get(c, f'Grupo {c}'))
     df['SUB'] = [_filho_da_raiz(g, r, pai) for g, r in zip(df.GALM, df.RAIZ)]
     df['SUB_NOME'] = df.SUB.map(lambda c: nome.get(c, f'Grupo {c}'))
 
     df = df[~df.RAIZ_NOME.str.upper().isin(RAIZES_FORA)]
-    df = df[~df.RAIZ.isin(bloqueados)]
+    df = df[~df.RAIZ.isin(bloqueados)].copy()
+
+    consumo = consumo or {}
+    df['CONSUMO_DIA'] = df.ESTQCOD.map(lambda c: max(0.0, _num(consumo.get(int(c), 0.0))) / DIAS_CONSUMO)
+    df['PRAZO'] = df.GALM.map(lambda c: prazo.get(c, (PRAZO_PADRAO, False))[0])
+    # Cobertura em dias pelo consumo médio; sem consumo, não dá para projetar.
+    df['COBERTURA_DIAS'] = (df.SALDO.clip(lower=0) / df.CONSUMO_DIA).where(df.CONSUMO_DIA > 0)
 
     df['TEM_SALDO'] = df.SALDO > 0
     df['TEM_MIN'] = df.MINIMO > 0
     df['NO_MIN'] = df.TEM_MIN & (df.SALDO >= df.MINIMO)
     df['ABAIXO'] = df.TEM_MIN & (df.SALDO < df.MINIMO)
     df['ZERADO'] = df.TEM_MIN & (df.SALDO <= 0)
+    # Atenção: tem saldo, ainda não está abaixo do mínimo, mas acaba dentro do
+    # prazo do grupo. Saldo zero sem mínimo é item comprado sob demanda, não
+    # estoque prestes a acabar (na matriz, 13/11: 1.265 itens com eles, 18 sem).
+    df['ATENCAO'] = ~df.ABAIXO & df.TEM_SALDO & (df.CONSUMO_DIA > 0) & (df.COBERTURA_DIAS <= df.PRAZO)
     return df
 
 
@@ -210,6 +302,7 @@ def _contas(df: pd.DataFrame) -> dict:
         'com_minimo': com_min,
         'no_minimo': no_min,
         'abaixo_minimo': int(df.ABAIXO.sum()),
+        'atencao': int(df.ATENCAO.sum()) if 'ATENCAO' in df else 0,
         'zerados': int(df.ZERADO.sum()),
         # Sem mínimo entre os que importam: os que têm saldo (item morto sem
         # saldo e sem mínimo não é pendência de cadastro).
@@ -223,59 +316,72 @@ def _contas(df: pd.DataFrame) -> dict:
 
 def _item(r) -> dict:
     falta = max(0.0, float(r.MINIMO) - float(r.SALDO))
+    consumo = float(getattr(r, 'CONSUMO_DIA', 0.0) or 0.0)
+    cob = getattr(r, 'COBERTURA_DIAS', None)
+    cob = None if cob is None or pd.isna(cob) else round(float(cob), 1)
+    if r.ABAIXO:
+        sit = 'abaixo'
+    elif getattr(r, 'ATENCAO', False):
+        sit = 'atencao'
+    elif r.TEM_MIN:
+        sit = 'ok'
+    else:
+        sit = 'sem_minimo'
     return {
         'codigo': int(r.ESTQCOD),
         'nome': str(r.ESTQNOME or '').strip(),
-        'referencia': str(r.ESTQREF or '').strip(),
         'unidade': str(r.ESPSIGLA or '').strip(),
+        'grupo': r.RAIZ_NOME,
         'subgrupo': r.SUB_NOME,
+        'grupo_item': getattr(r, 'GALM_NOME', r.SUB_NOME),
         'saldo': round(float(r.SALDO), 3),
         'minimo': round(float(r.MINIMO), 3),
-        'maximo': round(float(r.MAXIMO), 3),
         'falta': round(falta, 3),
         'cobertura': round(100.0 * float(r.SALDO) / float(r.MINIMO), 1) if r.MINIMO else None,
+        'consumo_dia': round(consumo, 3),
+        'cobertura_dias': cob,
+        'prazo': int(getattr(r, 'PRAZO', PRAZO_PADRAO)),
+        'valor': round(float(r.VALOR), 2),
+        'situacao': sit,
     }
 
 
-def montar_arvore(raiz: int, df: pd.DataFrame, grupos: pd.DataFrame) -> list[dict]:
+def montar_arvore(raiz: int, df: pd.DataFrame, grupos: pd.DataFrame,
+                  prazos: dict[int, int] | None = None) -> list[dict]:
     """Subgrupos da raiz em árvore, como a tela "Grupos dos Itens" do SGA.
 
     Cada nó soma os itens dele e de todos os descendentes. Entram também os
     subgrupos sem item (o SGA mostra todos); bloqueado só entra se tiver item.
+    Cada nó leva o prazo de atenção efetivo e se é próprio ou herdado.
     """
     nome, _, pai = arvore(grupos)
     bloq = {int(c) for c, b in zip(grupos.GALMCOD, grupos.GALMBLOQ) if str(b or '').upper() == 'S'}
-    filhos: dict[int, list[int]] = {}
-    for cod, p in pai.items():
-        if p and p != cod:
-            filhos.setdefault(p, []).append(cod)
-
-    def descendentes(cod, visto):
-        tudo = {cod}
-        for f in filhos.get(cod, []):
-            if f not in visto:
-                visto.add(f)
-                tudo |= descendentes(f, visto)
-        return tudo
+    filhos = filhos_por_grupo(pai)
+    prazo = prazos_por_grupo(grupos, prazos)
 
     def no(cod, visto):
-        sub = df[df.GALM.isin(descendentes(cod, set(visto)))]
+        sub = df[df.GALM.isin(descendentes(cod, filhos))]
         ramos = [n for f in sorted(filhos.get(cod, []), key=lambda c: nome.get(c, ''))
                  if f not in visto and (n := no(f, visto | {f})) is not None]
         if cod in bloq and sub.empty:
             return None
-        return {'codigo': cod, 'nome': nome.get(cod, f'Grupo {cod}'), **_contas(sub), 'filhos': ramos}
+        dias, proprio = prazo.get(cod, (PRAZO_PADRAO, False))
+        return {'codigo': cod, 'nome': nome.get(cod, f'Grupo {cod}'), **_contas(sub),
+                'prazo': dias, 'prazo_proprio': proprio, 'filhos': ramos}
 
     raiz_no = no(raiz, {raiz})
     return raiz_no['filhos'] if raiz_no else []
 
 
-def montar_grupos(df: pd.DataFrame, grupos: pd.DataFrame | None = None) -> list[dict]:
+def montar_grupos(df: pd.DataFrame, grupos: pd.DataFrame | None = None,
+                  prazos: dict[int, int] | None = None) -> list[dict]:
     """Cards: uma entrada por raiz, com subgrupos e os itens abaixo do mínimo."""
     saida = []
+    prazo = prazos_por_grupo(grupos, prazos) if grupos is not None else {}
     for (cod, nome_raiz), g in df.groupby(['RAIZ', 'RAIZ_NOME']):
         if not g.TEM_SALDO.any() and not g.TEM_MIN.any():
             continue  # grupo sem nada em estoque nem mínimo: card vazio
+        prazo_raiz = prazo.get(int(cod), (PRAZO_PADRAO, False))
         subgrupos = []
         for (scod, snome), s in g.groupby(['SUB', 'SUB_NOME']):
             if not s.TEM_SALDO.any() and not s.TEM_MIN.any():
@@ -293,7 +399,9 @@ def montar_grupos(df: pd.DataFrame, grupos: pd.DataFrame | None = None) -> list[
             'nome': nome_raiz,
             **_contas(g),
             'subgrupos': subgrupos,
-            'arvore': montar_arvore(int(cod), g, grupos) if grupos is not None else [],
+            'prazo': prazo_raiz[0],
+            'prazo_proprio': prazo_raiz[1],
+            'arvore': montar_arvore(int(cod), g, grupos, prazos) if grupos is not None else [],
             'itens_criticos': [_item(r) for r in criticos.itertuples()],
         })
     saida.sort(key=lambda x: -x['valor'])
@@ -338,31 +446,176 @@ def montar_movimentos(mov: pd.DataFrame, itens: pd.DataFrame, hoje: date) -> dic
     return vazio
 
 
-def resumo(filial: int | None) -> dict:
-    """Payload da tela. `filial` None = todas somadas."""
-    chave = f'almox:resumo:{"todas" if filial is None else filial}'
+# ── Dados do app (mínimos e prazos) ─────────────────────────────────────────
 
-    def calcular():
+def _versao() -> str:
+    """Muda a cada edição de mínimo/prazo, para o resumo em cache não ficar velho."""
+    v = cache.get('almox:versao')
+    if v is None:
+        v = '0'
+        cache.set('almox:versao', v, None)
+    return v
+
+
+def invalidar() -> None:
+    cache.set('almox:versao', pd.Timestamp.now().isoformat(), None)
+
+
+def minimos_app(filial: int | None) -> dict[int, float]:
+    """item → mínimo da visão; em "todas", a soma das filiais."""
+    from .models import MinimoEstoque
+    qs = MinimoEstoque.objects.all()
+    if filial is not None:
+        qs = qs.filter(filial=filial)
+    saida: dict[int, float] = {}
+    for item, minimo in qs.values_list('item', 'minimo'):
+        saida[item] = saida.get(item, 0.0) + float(minimo)
+    return saida
+
+
+def prazos_app() -> dict[int, int]:
+    from .models import PrazoAtencaoGrupo
+    return dict(PrazoAtencaoGrupo.objects.values_list('grupo', 'dias'))
+
+
+# ── Leitura do ERP em cache (o que é do app entra por cima a cada pedido) ────
+
+def _erp(filial: int | None) -> dict:
+    def ler():
         hoje = date.today()
-        filtro = '' if filial is None else 'AND QESTQFIL = :fil'
         params = {'emp': EMPRESA}
         if filial is not None:
             params['fil'] = filial
-        grupos = _ler(_SQL_GRUPOS)
-        itens = preparar_itens(_ler(_SQL_ITENS.format(filtro_filial=filtro), **params), grupos)
+        f_q = '' if filial is None else 'AND QESTQFIL = :fil'
+        f_m = '' if filial is None else 'AND MESTQFIL = :fil'
+        consumo = _ler(_SQL_CONSUMO.format(filtro_filial=f_m), desde=hoje - timedelta(days=DIAS_CONSUMO), **params)
+        return {
+            'grupos': _ler(_SQL_GRUPOS),
+            'itens': _ler(_SQL_ITENS.format(filtro_filial=f_q), **params),
+            'consumo': {int(e): _num(c) for e, c in zip(consumo.ESTQ, consumo.CONSUMO)},
+            'mov': _ler(_SQL_MOVIMENTOS.format(filtro_filial=f_m),
+                        desde=hoje - timedelta(days=DIAS_MOVIMENTO - 1), **params),
+            'lido_em': pd.Timestamp.now().isoformat(timespec='seconds'),
+        }
+    return _cacheado(f'almox:erp:{"todas" if filial is None else filial}', CACHE_SEG, ler)
 
-        filtro_mov = '' if filial is None else 'AND MESTQFIL = :fil'
-        mov = _ler(_SQL_MOVIMENTOS.format(filtro_filial=filtro_mov),
-                   desde=hoje - timedelta(days=DIAS_MOVIMENTO - 1), **params)
 
-        cards = montar_grupos(itens, grupos)
+def _preparado(filial: int | None) -> tuple[pd.DataFrame, dict, dict]:
+    erp = _erp(filial)
+    prazos = prazos_app()
+    df = preparar_itens(erp['itens'], erp['grupos'], minimos_app(filial), erp['consumo'], prazos)
+    return df, erp, prazos
+
+
+def resumo(filial: int | None) -> dict:
+    """Payload da tela. `filial` None = todas somadas."""
+    chave = f'almox:resumo:{"todas" if filial is None else filial}:{_versao()}'
+
+    def calcular():
+        itens, erp, prazos = _preparado(filial)
+        cards = montar_grupos(itens, erp['grupos'], prazos)
         recorte = itens[itens.RAIZ.isin([c['codigo'] for c in cards])]
         return {
             'filial': filial,
-            'atualizado_em': pd.Timestamp.now().isoformat(timespec='seconds'),
+            'atualizado_em': erp['lido_em'],
+            'dias_consumo': DIAS_CONSUMO,
+            'prazo_padrao': PRAZO_PADRAO,
             'totais': _contas(recorte),
             'grupos': cards,
-            'movimentos': montar_movimentos(mov, recorte, hoje),
+            'movimentos': montar_movimentos(erp['mov'], recorte, date.today()),
         }
 
     return _cacheado(chave, CACHE_SEG, calcular)
+
+
+LISTAS = ('abaixo', 'atencao', 'sem_minimo', 'todos')
+
+
+def filtrar_itens(df: pd.DataFrame, grupos: pd.DataFrame, grupo: int | None, lista: str) -> pd.DataFrame:
+    """Itens de um grupo (qualquer nível, com descendentes) ou de todos, por lista."""
+    if grupo is not None:
+        _, _, pai = arvore(grupos)
+        df = df[df.GALM.isin(descendentes(grupo, filhos_por_grupo(pai)))]
+    if lista == 'abaixo':
+        df = df[df.ABAIXO].assign(_ORD=lambda d: d.SALDO / d.MINIMO).sort_values(['_ORD', 'ESTQNOME'])
+    elif lista == 'atencao':
+        df = df[df.ATENCAO].sort_values(['COBERTURA_DIAS', 'ESTQNOME'])
+    elif lista == 'sem_minimo':
+        df = df[df.TEM_SALDO & ~df.TEM_MIN].sort_values(['ESTQNOME'])
+    else:
+        # "Todos" sem item morto: sem saldo, sem mínimo e sem consumo não interessa.
+        df = df[df.TEM_SALDO | df.TEM_MIN | (df.CONSUMO_DIA > 0)].sort_values(['ESTQNOME'])
+    return df
+
+
+def listar_itens(filial: int | None, grupo: int | None, lista: str) -> dict:
+    df, erp, _ = _preparado(filial)
+    sel = filtrar_itens(df, erp['grupos'], grupo, lista)
+    return {'filial': filial, 'grupo': grupo, 'lista': lista, 'total': int(len(sel)),
+            'itens': [_item(r) for r in sel.itertuples()]}
+
+
+# ── Edição (mínimos e prazos) ──────────────────────────────────────────────
+
+def salvar_minimos(filial: int, itens: list[dict], usuario) -> int:
+    """[{codigo, minimo}] da filial; mínimo vazio ou zero apaga o cadastro."""
+    from decimal import Decimal, InvalidOperation
+    from .models import MinimoEstoque
+    feitos = 0
+    for linha in itens:
+        try:
+            codigo = int(linha['codigo'])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError('Cada item precisa do código.')
+        bruto = linha.get('minimo')
+        try:
+            minimo = Decimal(str(bruto)) if bruto not in (None, '') else Decimal('0')
+        except InvalidOperation:
+            raise ValueError(f'Mínimo inválido no item {codigo}.')
+        if minimo < 0:
+            raise ValueError(f'Mínimo negativo no item {codigo}.')
+        if minimo == 0:
+            MinimoEstoque.objects.filter(item=codigo, filial=filial).delete()
+        else:
+            MinimoEstoque.objects.update_or_create(
+                item=codigo, filial=filial,
+                defaults={'minimo': minimo, 'origem': 'app', 'alterado_por': usuario})
+        feitos += 1
+    invalidar()
+    return feitos
+
+
+def salvar_prazo(grupo: int, dias: int | None, usuario) -> None:
+    """Prazo próprio do grupo; vazio volta a herdar do grupo de cima."""
+    from .models import PrazoAtencaoGrupo
+    if dias in (None, ''):
+        PrazoAtencaoGrupo.objects.filter(grupo=grupo).delete()
+    else:
+        dias = int(dias)
+        if not 1 <= dias <= 365:
+            raise ValueError('O prazo vai de 1 a 365 dias.')
+        PrazoAtencaoGrupo.objects.update_or_create(grupo=grupo, defaults={'dias': dias, 'alterado_por': usuario})
+    invalidar()
+
+
+def importar_minimos_sga(usuario) -> int:
+    """Ponto de partida: copia QESTQESTMIN do SGA onde o app ainda não tem mínimo
+    (item × filial). Não sobrescreve nada já cadastrado no app."""
+    from decimal import Decimal
+    from .models import MinimoEstoque
+    grupos = _ler(_SQL_GRUPOS)
+    nome, raiz, _ = arvore(grupos)
+    sga = _ler(_SQL_MINIMOS_SGA, emp=EMPRESA)
+    existentes = set(MinimoEstoque.objects.values_list('item', 'filial'))
+    novos = []
+    for r in sga.itertuples():
+        chave = (int(r.ESTQ), int(_num(r.FIL)))
+        r_nome = nome.get(raiz.get(int(_num(r.ESTQGALM)), 0), '').upper()
+        if chave in existentes or r_nome in RAIZES_FORA:
+            continue
+        existentes.add(chave)
+        novos.append(MinimoEstoque(item=chave[0], filial=chave[1], minimo=Decimal(str(round(_num(r.MINIMO), 3))),
+                                   origem='sga', alterado_por=usuario))
+    MinimoEstoque.objects.bulk_create(novos, batch_size=500)
+    invalidar()
+    return len(novos)

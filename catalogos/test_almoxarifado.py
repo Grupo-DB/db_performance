@@ -105,3 +105,78 @@ class ArvoreSubgruposTests(SimpleTestCase):
         self.assertEqual([n['nome'] for n in manuais['filhos']], ['CHAVES'])
         self.assertEqual(manuais['filhos'][0]['abaixo_minimo'], 1)
         self.assertEqual(g['arvore'][0]['itens'], 0)
+
+
+class AtencaoTests(SimpleTestCase):
+    """Atenção = não está abaixo do mínimo, mas a cobertura pelo consumo cabe no prazo do grupo."""
+    GRUPOS = pd.concat([GRUPOS, pd.DataFrame([
+        {'GALMCOD': 40, 'GALMNOME': 'MATERIA PRIMA / EMBALAGEM', 'GALMGALMPAI': 0, 'GALMBLOQ': 'N'},
+        {'GALMCOD': 41, 'GALMNOME': 'EMBALAGEM', 'GALMGALMPAI': 40, 'GALMBLOQ': 'N'},
+        {'GALMCOD': 42, 'GALMNOME': 'BIG BAG', 'GALMGALMPAI': 41, 'GALMBLOQ': 'N'},
+        {'GALMCOD': 43, 'GALMNOME': 'MATERIA PRIMA', 'GALMGALMPAI': 40, 'GALMBLOQ': 'N'},
+    ])], ignore_index=True)
+
+    def test_prazo_padrao_embalagem_e_heranca(self):
+        p = a.prazos_por_grupo(self.GRUPOS)
+        self.assertEqual(p[12], (7, False))
+        self.assertEqual(p[42], (45, False))          # neto de EMBALAGEM herda 45
+        self.assertEqual(p[43], (7, False))           # matéria prima não é embalagem
+        p = a.prazos_por_grupo(self.GRUPOS, {11: 20, 42: 60})
+        self.assertEqual(p[12], (20, False))          # herdou do pai cadastrado
+        self.assertEqual(p[11], (20, True))
+        self.assertEqual(p[42], (60, True))
+
+    def test_atencao_pela_cobertura(self):
+        consumo = {1: 90.0, 2: 90.0, 3: 900.0, 4: 0.0}   # em 90 dias → 1/dia, 1/dia, 10/dia, 0
+        df = a.preparar_itens(pd.DataFrame([
+            item(1, 12, 5, 0),      # 5 dias de cobertura ≤ 7 → atenção (mesmo sem mínimo)
+            item(2, 12, 30, 0),     # 30 dias → ok
+            item(3, 42, 300, 10),   # 30 dias ≤ 45 (embalagem) → atenção
+            item(4, 12, 1, 0),      # sem consumo → não projeta
+            item(5, 12, 1, 5),      # abaixo do mínimo: não conta como atenção
+            item(6, 12, 0, 0),      # zerado sem mínimo = compra sob demanda: não é atenção
+        ]), self.GRUPOS, consumo={**consumo, 6: 90.0})
+        at = dict(zip(df.ESTQCOD, df.ATENCAO))
+        self.assertEqual(at, {1: True, 2: False, 3: True, 4: False, 5: False, 6: False})
+        g = {x['codigo']: x for x in a.montar_grupos(df, self.GRUPOS)}
+        self.assertEqual(g[10]['atencao'], 1)
+        self.assertEqual(g[40]['atencao'], 1)
+        self.assertEqual(g[40]['prazo'], 7)
+        self.assertEqual(g[40]['arvore'][0]['prazo'], 45)
+
+    def test_minimos_do_app_substituem_a_coluna(self):
+        df = a.preparar_itens(pd.DataFrame([dict(item(1, 12, 5, 99), MINIMO=99)]), self.GRUPOS, minimos={1: 10})
+        self.assertEqual(df.iloc[0].MINIMO, 10)
+        self.assertTrue(df.iloc[0].ABAIXO)
+
+    def test_listas_por_grupo(self):
+        df = a.preparar_itens(pd.DataFrame([item(1, 12, 1, 5), item(2, 12, 9, 5), item(3, 11, 2, 0), item(4, 11, 0, 0)]),
+                              self.GRUPOS, consumo={3: 90.0})
+        self.assertEqual(list(a.filtrar_itens(df, self.GRUPOS, 11, 'abaixo').ESTQCOD), [1])  # neto entra
+        self.assertEqual(list(a.filtrar_itens(df, self.GRUPOS, None, 'atencao').ESTQCOD), [3])
+        self.assertEqual(sorted(a.filtrar_itens(df, self.GRUPOS, 10, 'todos').ESTQCOD), [1, 2, 3])  # 4 é morto
+        self.assertEqual(a._item(next(a.filtrar_itens(df, self.GRUPOS, None, 'atencao').itertuples()))['situacao'], 'atencao')
+
+
+from django.contrib.auth.models import User
+from django.test import TestCase
+
+
+class EdicaoTests(TestCase):
+    def test_salvar_e_apagar_minimo(self):
+        from catalogos.models import MinimoEstoque, PrazoAtencaoGrupo
+        u = User.objects.create(username='almox')
+        a.salvar_minimos(0, [{'codigo': 1, 'minimo': '10,5'.replace(',', '.')}, {'codigo': 2, 'minimo': 3}], u)
+        a.salvar_minimos(3, [{'codigo': 1, 'minimo': 4}], u)
+        self.assertEqual(a.minimos_app(0), {1: 10.5, 2: 3.0})
+        self.assertEqual(a.minimos_app(None), {1: 14.5, 2: 3.0})
+        a.salvar_minimos(0, [{'codigo': 2, 'minimo': None}], u)
+        self.assertFalse(MinimoEstoque.objects.filter(item=2).exists())
+        with self.assertRaises(ValueError):
+            a.salvar_minimos(0, [{'codigo': 1, 'minimo': -1}], u)
+        a.salvar_prazo(1703, 45, u)
+        self.assertEqual(a.prazos_app(), {1703: 45})
+        a.salvar_prazo(1703, None, u)
+        self.assertFalse(PrazoAtencaoGrupo.objects.exists())
+        with self.assertRaises(ValueError):
+            a.salvar_prazo(1, 0, u)

@@ -750,6 +750,36 @@ def serve_catalogo_pdf_inline(request, pk):
 # ---------------------------------------------------------------------------
 
 GRUPOS_ALMOXARIFADO = {'Admin', 'Master', 'comprasClientes', 'comprasCliente', 'comprasGestor'}
+# Quem altera estoque mínimo e prazo de atenção (o resto só consulta).
+GRUPOS_ALMOXARIFADO_EDITAR = {'Admin', 'Master', 'comprasGestor'}
+
+
+def _almox_acesso(request, editar=False):
+    """None se pode; senão a Response de erro."""
+    user = request.user
+    if not user.is_authenticated:
+        return Response({'erro': 'Não autenticado.'}, status=status.HTTP_401_UNAUTHORIZED)
+    grupos = GRUPOS_ALMOXARIFADO_EDITAR if editar else GRUPOS_ALMOXARIFADO
+    if not (user.is_superuser or user.groups.filter(name__in=grupos).exists()):
+        msg = 'Sem permissão para alterar o almoxarifado.' if editar else 'Sem acesso ao almoxarifado.'
+        return Response({'erro': msg}, status=status.HTTP_403_FORBIDDEN)
+    return None
+
+
+def _almox_pode_editar(user) -> bool:
+    return user.is_superuser or user.groups.filter(name__in=GRUPOS_ALMOXARIFADO_EDITAR).exists()
+
+
+def _almox_filial(bruto):
+    """(filial, erro): None = todas."""
+    bruto = (bruto if bruto is not None else '0')
+    bruto = str(bruto).strip().lower()
+    if bruto == 'todas':
+        return None, None
+    try:
+        return int(bruto), None
+    except ValueError:
+        return None, Response({'erro': "filial deve ser um número ou 'todas'."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['GET'])
@@ -761,24 +791,97 @@ def almoxarifado_resumo(request):
     """
     from . import almoxarifado
 
-    user = request.user
-    if not user.is_authenticated:
-        return Response({'erro': 'Não autenticado.'}, status=status.HTTP_401_UNAUTHORIZED)
-    if not (user.is_superuser or user.groups.filter(name__in=GRUPOS_ALMOXARIFADO).exists()):
-        return Response({'erro': 'Sem acesso ao almoxarifado.'}, status=status.HTTP_403_FORBIDDEN)
-
-    bruto = (request.GET.get('filial') or '0').strip().lower()
-    if bruto == 'todas':
-        filial = None
-    else:
-        try:
-            filial = int(bruto)
-        except ValueError:
-            return Response({'erro': "filial deve ser um número ou 'todas'."}, status=status.HTTP_400_BAD_REQUEST)
+    if (erro := _almox_acesso(request)):
+        return erro
+    filial, erro = _almox_filial(request.GET.get('filial'))
+    if erro:
+        return erro
 
     try:
-        dados = almoxarifado.resumo(filial)
+        dados = dict(almoxarifado.resumo(filial))
         dados['filiais'] = almoxarifado.filiais()
     except Exception as exc:
         return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+    dados['pode_editar'] = _almox_pode_editar(request.user)
     return Response(dados)
+
+
+@api_view(['GET'])
+def almoxarifado_itens(request):
+    """
+    Lista de itens: ?filial=0|…|todas &grupo=<GALMCOD, qualquer nível; vazio = todos>
+    &lista=abaixo|atencao|sem_minimo|todos
+    """
+    from . import almoxarifado
+
+    if (erro := _almox_acesso(request)):
+        return erro
+    filial, erro = _almox_filial(request.GET.get('filial'))
+    if erro:
+        return erro
+    lista = (request.GET.get('lista') or 'todos').strip()
+    if lista not in almoxarifado.LISTAS:
+        return Response({'erro': f"lista deve ser uma de: {', '.join(almoxarifado.LISTAS)}."}, status=status.HTTP_400_BAD_REQUEST)
+    grupo = request.GET.get('grupo') or None
+    try:
+        grupo = int(grupo) if grupo is not None else None
+    except ValueError:
+        return Response({'erro': 'grupo deve ser um número.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        return Response(almoxarifado.listar_itens(filial, grupo, lista))
+    except Exception as exc:
+        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+@api_view(['POST'])
+def almoxarifado_minimos(request):
+    """Grava mínimos da filial: {"filial": 0, "itens": [{"codigo": 123, "minimo": 10}]}; mínimo 0/vazio apaga."""
+    from . import almoxarifado
+
+    if (erro := _almox_acesso(request, editar=True)):
+        return erro
+    filial, erro = _almox_filial(request.data.get('filial'))
+    if erro:
+        return erro
+    if filial is None:
+        return Response({'erro': 'Escolha uma filial para alterar o mínimo (não dá em "todas").'}, status=status.HTTP_400_BAD_REQUEST)
+    itens = request.data.get('itens')
+    if not isinstance(itens, list) or not itens:
+        return Response({'erro': 'Mande a lista de itens.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        feitos = almoxarifado.salvar_minimos(filial, itens, request.user)
+    except ValueError as exc:
+        return Response({'erro': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'gravados': feitos})
+
+
+@api_view(['POST'])
+def almoxarifado_importar_minimos(request):
+    """Copia os mínimos do SGA onde o app ainda não tem (não sobrescreve)."""
+    from . import almoxarifado
+
+    if (erro := _almox_acesso(request, editar=True)):
+        return erro
+    try:
+        criados = almoxarifado.importar_minimos_sga(request.user)
+    except Exception as exc:
+        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+    return Response({'importados': criados})
+
+
+@api_view(['POST'])
+def almoxarifado_prazo(request):
+    """Prazo de atenção do grupo: {"grupo": 1703, "dias": 45}; dias vazio = volta a herdar."""
+    from . import almoxarifado
+
+    if (erro := _almox_acesso(request, editar=True)):
+        return erro
+    try:
+        grupo = int(request.data.get('grupo'))
+    except (TypeError, ValueError):
+        return Response({'erro': 'grupo deve ser um número.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        almoxarifado.salvar_prazo(grupo, request.data.get('dias'), request.user)
+    except ValueError as exc:
+        return Response({'erro': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'ok': True})
