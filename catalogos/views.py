@@ -770,6 +770,12 @@ def _almox_pode_editar(user) -> bool:
     return user.is_superuser or user.groups.filter(name__in=GRUPOS_ALMOXARIFADO_EDITAR).exists()
 
 
+def _almox_fonte(request):
+    """Fonte do mínimo: sga (padrão) | manager."""
+    fonte = (request.GET.get('fonte') or 'sga').strip().lower()
+    return fonte if fonte in ('sga', 'manager') else 'sga'
+
+
 def _almox_filial(bruto):
     """(filial, erro): None = todas."""
     bruto = (bruto if bruto is not None else '0')
@@ -788,6 +794,7 @@ def almoxarifado_resumo(request):
     Cards por grupo de itens, distribuição do valor em estoque e movimentações.
 
     ?filial=0 (matriz, padrão) | 1 | 3 | … | todas
+    &fonte=sga (padrão) | manager — de onde vem o estoque mínimo
     """
     from . import almoxarifado
 
@@ -798,7 +805,7 @@ def almoxarifado_resumo(request):
         return erro
 
     try:
-        dados = dict(almoxarifado.resumo(filial))
+        dados = dict(almoxarifado.resumo(filial, _almox_fonte(request)))
         dados['filiais'] = almoxarifado.filiais()
     except Exception as exc:
         return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
@@ -810,7 +817,7 @@ def almoxarifado_resumo(request):
 def almoxarifado_itens(request):
     """
     Lista de itens: ?filial=0|…|todas &grupo=<GALMCOD, qualquer nível; vazio = todos>
-    &lista=abaixo|atencao|sem_minimo|todos
+    &lista=abaixo|atencao|sem_minimo|todos &fonte=sga|manager
     """
     from . import almoxarifado
 
@@ -828,14 +835,14 @@ def almoxarifado_itens(request):
     except ValueError:
         return Response({'erro': 'grupo deve ser um número.'}, status=status.HTTP_400_BAD_REQUEST)
     try:
-        return Response(almoxarifado.listar_itens(filial, grupo, lista))
+        return Response(almoxarifado.listar_itens(filial, grupo, lista, _almox_fonte(request)))
     except Exception as exc:
         return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
 
 
 @api_view(['POST'])
 def almoxarifado_minimos(request):
-    """Grava mínimos da filial: {"filial": 0, "itens": [{"codigo": 123, "minimo": 10}]}; mínimo 0/vazio apaga."""
+    """Grava mínimos do Manager na filial: {"filial": 0, "itens": [{"codigo": 123, "minimo": 10}]}; vazio apaga (volta ao do SGA)."""
     from . import almoxarifado
 
     if (erro := _almox_acesso(request, editar=True)):
@@ -853,20 +860,6 @@ def almoxarifado_minimos(request):
     except ValueError as exc:
         return Response({'erro': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response({'gravados': feitos})
-
-
-@api_view(['POST'])
-def almoxarifado_importar_minimos(request):
-    """Copia os mínimos do SGA onde o app ainda não tem (não sobrescreve)."""
-    from . import almoxarifado
-
-    if (erro := _almox_acesso(request, editar=True)):
-        return erro
-    try:
-        criados = almoxarifado.importar_minimos_sga(request.user)
-    except Exception as exc:
-        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
-    return Response({'importados': criados})
 
 
 @api_view(['POST'])

@@ -144,10 +144,19 @@ class AtencaoTests(SimpleTestCase):
         self.assertEqual(g[40]['prazo'], 7)
         self.assertEqual(g[40]['arvore'][0]['prazo'], 45)
 
-    def test_minimos_do_app_substituem_a_coluna(self):
-        df = a.preparar_itens(pd.DataFrame([dict(item(1, 12, 5, 99), MINIMO=99)]), self.GRUPOS, minimos={1: 10})
-        self.assertEqual(df.iloc[0].MINIMO, 10)
-        self.assertTrue(df.iloc[0].ABAIXO)
+    def test_minimo_do_manager_substitui_o_do_sga_por_filial(self):
+        linhas = pd.DataFrame([dict(item(1, 12, 5, 99), FIL=0), dict(item(1, 12, 5, 7), FIL=3),
+                               dict(item(2, 12, 5, 8), FIL=0)])
+        sga = a.preparar_itens(linhas, self.GRUPOS).set_index('ESTQCOD')
+        self.assertEqual(sga.loc[1].MINIMO, 106)
+        self.assertFalse(sga.loc[1].MIN_MANAGER)
+        # Manager só tem o item 1 na matriz (10) e zera o item 2: filial 3 segue com o do SGA.
+        man = a.preparar_itens(linhas, self.GRUPOS, minimos={(1, 0): 10, (2, 0): 0}).set_index('ESTQCOD')
+        self.assertEqual(man.loc[1].MINIMO, 17)
+        self.assertEqual(man.loc[1].MINIMO_SGA, 106)
+        self.assertTrue(man.loc[1].MIN_MANAGER)
+        self.assertTrue(man.loc[1].ABAIXO)
+        self.assertFalse(man.loc[2].TEM_MIN)
 
     def test_listas_por_grupo(self):
         df = a.preparar_itens(pd.DataFrame([item(1, 12, 1, 5), item(2, 12, 9, 5), item(3, 11, 2, 0), item(4, 11, 0, 0)]),
@@ -168,10 +177,11 @@ class EdicaoTests(TestCase):
         u = User.objects.create(username='almox')
         a.salvar_minimos(0, [{'codigo': 1, 'minimo': '10,5'.replace(',', '.')}, {'codigo': 2, 'minimo': 3}], u)
         a.salvar_minimos(3, [{'codigo': 1, 'minimo': 4}], u)
-        self.assertEqual(a.minimos_app(0), {1: 10.5, 2: 3.0})
-        self.assertEqual(a.minimos_app(None), {1: 14.5, 2: 3.0})
-        a.salvar_minimos(0, [{'codigo': 2, 'minimo': None}], u)
+        self.assertEqual(a.minimos_app(0), {(1, 0): 10.5, (2, 0): 3.0})
+        self.assertEqual(a.minimos_app(None), {(1, 0): 10.5, (2, 0): 3.0, (1, 3): 4.0})
+        a.salvar_minimos(0, [{'codigo': 2, 'minimo': None}, {'codigo': 1, 'minimo': 0}], u)
         self.assertFalse(MinimoEstoque.objects.filter(item=2).exists())
+        self.assertEqual(a.minimos_app(0), {(1, 0): 0.0})  # zero fica gravado: anula o do SGA
         with self.assertRaises(ValueError):
             a.salvar_minimos(0, [{'codigo': 1, 'minimo': -1}], u)
         a.salvar_prazo(1703, 45, u)

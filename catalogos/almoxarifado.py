@@ -6,9 +6,10 @@ devolve, por grupo-raiz de GRUPOALMOXARIFADO: itens, itens com saldo, valor em
 estoque e a situação contra o estoque mínimo. Mais as movimentações dos últimos
 dias (MOVESTOQUE) e o detalhe de cada grupo (subgrupos e listas de itens).
 
-Desde 13/11/2026 o ESTOQUE MÍNIMO é do app (models.MinimoEstoque, por item e
-filial), não mais QESTQESTMIN do SGA — o SGA só serve para a importação inicial
-(importar_minimos_sga). E entrou o ATENÇÃO: item que ainda não está abaixo do
+ESTOQUE MÍNIMO (13/11/2026): por padrão vale o do SGA (QESTQESTMIN). Com
+?fonte=manager vale o cadastrado no Manager (models.MinimoEstoque, por item e
+filial) onde existir — item × filial sem cadastro continua com o do SGA. Mínimo
+0 gravado no Manager anula o do SGA. E entrou o ATENÇÃO: item que ainda não está abaixo do
 mínimo mas cujo saldo cobre só até o prazo do grupo pelo consumo médio
 (requisições dos últimos DIAS_CONSUMO dias). Prazo por grupo em
 models.PrazoAtencaoGrupo, herdado pelos subgrupos; sem cadastro: 45 dias para
@@ -105,12 +106,13 @@ _SQL_FILIAIS = text("""
     SELECT FILCOD, FILNOME FROM FILIAL WHERE FILEMP = :emp
 """)
 
-# Itens com a linha de saldo da(s) filial(is). O mínimo NÃO vem daqui: é do app. Item sem linha em QUANTESTOQUE
+# Itens com a linha de saldo da(s) filial(is), com o mínimo do SGA. Item sem linha em QUANTESTOQUE
 # entra com saldo zero (LEFT JOIN) — conta como item do grupo, sem saldo.
 _SQL_ITENS = """
     SELECT ESTQCOD, ESTQNOME, ESTQREF, ESTQGALM, ESPSIGLA,
            COALESCE(QESTQFIL, -1)    FIL,
            COALESCE(QESTQESTOQUE, 0) SALDO,
+           COALESCE(QESTQESTMIN, 0)  MINIMO,
            COALESCE(QESTQESTMAX, 0)  MAXIMO,
            COALESCE(QESTQCUSTO, 0)   CUSTO
     FROM ESTOQUE
@@ -128,11 +130,6 @@ _SQL_CONSUMO = """
     GROUP BY MESTQESTQ
 """
 
-_SQL_MINIMOS_SGA = text("""
-    SELECT QESTQESTQ ESTQ, QESTQFIL FIL, QESTQESTMIN MINIMO, ESTQGALM
-    FROM QUANTESTOQUE JOIN ESTOQUE ON ESTQCOD = QESTQESTQ
-    WHERE QESTQEMP = :emp AND QESTQREF = 0 AND QESTQTIPO = 0 AND QESTQESTMIN > 0
-""")
 
 _SQL_MOVIMENTOS = """
     SELECT MESTQDATA DATA, MESTQREFTIPO TIPO, MESTQESTQ ESTQ, MESTQQUANT QUANT,
@@ -236,13 +233,14 @@ def _filho_da_raiz(cod: int, raiz: int, pai: dict) -> int:
 
 
 def preparar_itens(itens: pd.DataFrame, grupos: pd.DataFrame,
-                   minimos: dict[int, float] | None = None,
+                   minimos: dict[tuple[int, int], float] | None = None,
                    consumo: dict[int, float] | None = None,
                    prazos: dict[int, int] | None = None) -> pd.DataFrame:
     """Uma linha por item (filiais somadas), com raiz/subgrupo e as contas do card.
 
-    `minimos` (item → mínimo da visão, já somado entre filiais quando é "todas")
-    vem do app; sem ele (testes) vale a coluna MINIMO. `consumo` é a quantidade
+    MINIMO vem do SGA. `minimos` ((item, filial) → mínimo do Manager) substitui o
+    do SGA naquele item × filial; o resto continua com o do SGA. MINIMO_SGA guarda
+    o do SGA para a tela mostrar os dois. `consumo` é a quantidade
     requisitada em DIAS_CONSUMO dias por item; `prazos` os cadastrados por grupo.
     """
     nome, raiz, pai = arvore(grupos)
@@ -256,12 +254,21 @@ def preparar_itens(itens: pd.DataFrame, grupos: pd.DataFrame,
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
     df.loc[df.CUSTO.abs() > CUSTO_UNITARIO_MAX, 'CUSTO'] = 0.0
     df['VALOR'] = df.SALDO.clip(lower=0) * df.CUSTO
+    df['MINIMO_SGA'] = df.MINIMO
+    df['MIN_MANAGER'] = False
+    if minimos is not None:
+        if 'FIL' not in df:
+            df['FIL'] = 0
+        fil = pd.to_numeric(df.FIL, errors='coerce').fillna(-1).astype(int)
+        cod = pd.to_numeric(df.ESTQCOD, errors='coerce').fillna(-1).astype(int)
+        chaves = list(zip(cod, fil))
+        df['MIN_MANAGER'] = [k in minimos for k in chaves]
+        df['MINIMO'] = [float(minimos[k]) if k in minimos else m for k, m in zip(chaves, df.MINIMO)]
 
     # Filiais somadas: saldo, mínimo e valor somam; custo vira médio ponderado.
     df = (df.groupby(['ESTQCOD', 'ESTQNOME', 'ESTQREF', 'ESTQGALM', 'ESPSIGLA'], dropna=False, as_index=False)
-            .agg(SALDO=('SALDO', 'sum'), MINIMO=('MINIMO', 'sum'), MAXIMO=('MAXIMO', 'sum'), VALOR=('VALOR', 'sum')))
-    if minimos is not None:
-        df['MINIMO'] = df.ESTQCOD.map(lambda c: float(minimos.get(int(c), 0.0)))
+            .agg(SALDO=('SALDO', 'sum'), MINIMO=('MINIMO', 'sum'), MINIMO_SGA=('MINIMO_SGA', 'sum'),
+                 MIN_MANAGER=('MIN_MANAGER', 'any'), MAXIMO=('MAXIMO', 'sum'), VALOR=('VALOR', 'sum')))
 
     df['GALM'] = df.ESTQGALM.map(lambda c: int(_num(c)))
     df['GALM_NOME'] = df.GALM.map(lambda c: nome.get(c, f'Grupo {c}'))
@@ -336,6 +343,8 @@ def _item(r) -> dict:
         'grupo_item': getattr(r, 'GALM_NOME', r.SUB_NOME),
         'saldo': round(float(r.SALDO), 3),
         'minimo': round(float(r.MINIMO), 3),
+        'minimo_sga': round(float(getattr(r, 'MINIMO_SGA', r.MINIMO)), 3),
+        'minimo_manager': bool(getattr(r, 'MIN_MANAGER', False)),
         'falta': round(falta, 3),
         'cobertura': round(100.0 * float(r.SALDO) / float(r.MINIMO), 1) if r.MINIMO else None,
         'consumo_dia': round(consumo, 3),
@@ -461,16 +470,16 @@ def invalidar() -> None:
     cache.set('almox:versao', pd.Timestamp.now().isoformat(), None)
 
 
-def minimos_app(filial: int | None) -> dict[int, float]:
-    """item → mínimo da visão; em "todas", a soma das filiais."""
+FONTES = ('sga', 'manager')
+
+
+def minimos_app(filial: int | None) -> dict[tuple[int, int], float]:
+    """(item, filial) → mínimo cadastrado no Manager; filial None = todas."""
     from .models import MinimoEstoque
     qs = MinimoEstoque.objects.all()
     if filial is not None:
         qs = qs.filter(filial=filial)
-    saida: dict[int, float] = {}
-    for item, minimo in qs.values_list('item', 'minimo'):
-        saida[item] = saida.get(item, 0.0) + float(minimo)
-    return saida
+    return {(int(i), int(f)): float(m) for i, f, m in qs.values_list('item', 'filial', 'minimo')}
 
 
 def prazos_app() -> dict[int, int]:
@@ -500,23 +509,25 @@ def _erp(filial: int | None) -> dict:
     return _cacheado(f'almox:erp:{"todas" if filial is None else filial}', CACHE_SEG, ler)
 
 
-def _preparado(filial: int | None) -> tuple[pd.DataFrame, dict, dict]:
+def _preparado(filial: int | None, fonte: str = 'sga') -> tuple[pd.DataFrame, dict, dict]:
     erp = _erp(filial)
     prazos = prazos_app()
-    df = preparar_itens(erp['itens'], erp['grupos'], minimos_app(filial), erp['consumo'], prazos)
+    minimos = minimos_app(filial) if fonte == 'manager' else None
+    df = preparar_itens(erp['itens'], erp['grupos'], minimos, erp['consumo'], prazos)
     return df, erp, prazos
 
 
-def resumo(filial: int | None) -> dict:
-    """Payload da tela. `filial` None = todas somadas."""
-    chave = f'almox:resumo:{"todas" if filial is None else filial}:{_versao()}'
+def resumo(filial: int | None, fonte: str = 'sga') -> dict:
+    """Payload da tela. `filial` None = todas somadas; `fonte` do mínimo: sga | manager."""
+    chave = f'almox:resumo:{"todas" if filial is None else filial}:{fonte}:{_versao()}'
 
     def calcular():
-        itens, erp, prazos = _preparado(filial)
+        itens, erp, prazos = _preparado(filial, fonte)
         cards = montar_grupos(itens, erp['grupos'], prazos)
         recorte = itens[itens.RAIZ.isin([c['codigo'] for c in cards])]
         return {
             'filial': filial,
+            'fonte': fonte,
             'atualizado_em': erp['lido_em'],
             'dias_consumo': DIAS_CONSUMO,
             'prazo_padrao': PRAZO_PADRAO,
@@ -548,17 +559,18 @@ def filtrar_itens(df: pd.DataFrame, grupos: pd.DataFrame, grupo: int | None, lis
     return df
 
 
-def listar_itens(filial: int | None, grupo: int | None, lista: str) -> dict:
-    df, erp, _ = _preparado(filial)
+def listar_itens(filial: int | None, grupo: int | None, lista: str, fonte: str = 'sga') -> dict:
+    df, erp, _ = _preparado(filial, fonte)
     sel = filtrar_itens(df, erp['grupos'], grupo, lista)
-    return {'filial': filial, 'grupo': grupo, 'lista': lista, 'total': int(len(sel)),
+    return {'filial': filial, 'fonte': fonte, 'grupo': grupo, 'lista': lista, 'total': int(len(sel)),
             'itens': [_item(r) for r in sel.itertuples()]}
 
 
 # ── Edição (mínimos e prazos) ──────────────────────────────────────────────
 
 def salvar_minimos(filial: int, itens: list[dict], usuario) -> int:
-    """[{codigo, minimo}] da filial; mínimo vazio ou zero apaga o cadastro."""
+    """[{codigo, minimo}] da filial no Manager. Vazio apaga (volta a valer o do
+    SGA); 0 grava zero, que anula o mínimo do SGA naquele item."""
     from decimal import Decimal, InvalidOperation
     from .models import MinimoEstoque
     feitos = 0
@@ -569,12 +581,12 @@ def salvar_minimos(filial: int, itens: list[dict], usuario) -> int:
             raise ValueError('Cada item precisa do código.')
         bruto = linha.get('minimo')
         try:
-            minimo = Decimal(str(bruto)) if bruto not in (None, '') else Decimal('0')
+            minimo = Decimal(str(bruto)) if bruto not in (None, '') else None
         except InvalidOperation:
             raise ValueError(f'Mínimo inválido no item {codigo}.')
-        if minimo < 0:
+        if minimo is not None and minimo < 0:
             raise ValueError(f'Mínimo negativo no item {codigo}.')
-        if minimo == 0:
+        if minimo is None:
             MinimoEstoque.objects.filter(item=codigo, filial=filial).delete()
         else:
             MinimoEstoque.objects.update_or_create(
@@ -596,26 +608,3 @@ def salvar_prazo(grupo: int, dias: int | None, usuario) -> None:
             raise ValueError('O prazo vai de 1 a 365 dias.')
         PrazoAtencaoGrupo.objects.update_or_create(grupo=grupo, defaults={'dias': dias, 'alterado_por': usuario})
     invalidar()
-
-
-def importar_minimos_sga(usuario) -> int:
-    """Ponto de partida: copia QESTQESTMIN do SGA onde o app ainda não tem mínimo
-    (item × filial). Não sobrescreve nada já cadastrado no app."""
-    from decimal import Decimal
-    from .models import MinimoEstoque
-    grupos = _ler(_SQL_GRUPOS)
-    nome, raiz, _ = arvore(grupos)
-    sga = _ler(_SQL_MINIMOS_SGA, emp=EMPRESA)
-    existentes = set(MinimoEstoque.objects.values_list('item', 'filial'))
-    novos = []
-    for r in sga.itertuples():
-        chave = (int(r.ESTQ), int(_num(r.FIL)))
-        r_nome = nome.get(raiz.get(int(_num(r.ESTQGALM)), 0), '').upper()
-        if chave in existentes or r_nome in RAIZES_FORA:
-            continue
-        existentes.add(chave)
-        novos.append(MinimoEstoque(item=chave[0], filial=chave[1], minimo=Decimal(str(round(_num(r.MINIMO), 3))),
-                                   origem='sga', alterado_por=usuario))
-    MinimoEstoque.objects.bulk_create(novos, batch_size=500)
-    invalidar()
-    return len(novos)
