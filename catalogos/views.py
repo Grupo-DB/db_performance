@@ -814,10 +814,31 @@ def almoxarifado_resumo(request):
 
 
 @api_view(['GET'])
+def almoxarifado_foto(request, cod):
+    """Foto do item (ESTOQUEFOTO do SGA) reduzida: ?lado=360 (64 a 1200). {imagem: data URL | null}."""
+    from . import almoxarifado
+
+    if (erro := _almox_acesso(request)):
+        return erro
+    try:
+        lado = int(request.GET.get('lado') or almoxarifado.FOTO_LADO_PADRAO)
+    except ValueError:
+        return Response({'erro': 'lado deve ser um número.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        jpg = almoxarifado.foto_item(int(cod), lado)
+    except Exception as exc:
+        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+    resp = Response({'codigo': int(cod),
+                     'imagem': f'data:image/jpeg;base64,{base64.b64encode(jpg).decode()}' if jpg else None})
+    resp['Cache-Control'] = 'private, max-age=3600'
+    return resp
+
+
+@api_view(['GET'])
 def almoxarifado_itens(request):
     """
     Lista de itens: ?filial=0|…|todas &grupo=<GALMCOD, qualquer nível; vazio = todos>
-    &lista=abaixo|atencao|sem_minimo|todos &fonte=sga|manager
+    &lista=abaixo|atencao|sem_minimo|em_compra|sem_foto|todos &fonte=sga|manager
     """
     from . import almoxarifado
 

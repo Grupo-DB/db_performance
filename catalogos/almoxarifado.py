@@ -28,9 +28,33 @@ Regras levantadas no SGA em 11/11/2026:
   almoxarifado, 3 = acerto/inventário, 6 = saída por nota (venda/transferência),
   8 = só custo (quantidade zero). MESTQQUANT tem sinal; MESTQCUSTO é o valor
   total da linha, também com sinal.
+
+COMPRA EM ANDAMENTO (16/11/2026): cada item mostra as requisições de compra
+abertas e em que pé está o processo. Regras do dicionário do SGA
+(DICIONARIO_COLUNA):
+
+- PENDENCIACOMPRA é a requisição (PCOMCOD = número mostrado ao usuário;
+  PCOMSIT 0 pendente, 1 concluída, 2 cancelada, 3 bloqueada) e
+  ITEMPENDENCIACOMPRA o item (IPCOMSIT 0 pendente, 1 coleta de preço, 2 ordem
+  de compra, 3 comprado/recebido, 4 cancelado, 5 desclassificado). Aberto =
+  item 0/1/2 em requisição 0/3. A filial é a da requisição (PCOMFIL).
+- PROCESSOCOMPRA é a coleta/ordem (PCOSIT 0 coleta, 1 ordem, 2 coleta
+  desclassificada, 3 coleta cancelada, 4 contrato; PCOSITAPROV 0 pendente,
+  1 aprovada, 2 reprovada, 9 não se aplica). ITEMPROCESSOCOMPRA.IPCOIPCOM liga
+  ao item da requisição; IPCOQUANTFAT é o que já entrou por nota.
+- Previsão de entrega = IPCOMDATA + IPCOMPRAZO dias (o que o SGA mostra no
+  acompanhamento); sem prazo no item vale o da ordem (IPCOPRENT/PCOPRENT sobre
+  PCODATAPED). Mais da metade das ordens abertas não tem prazo nenhum: aí não
+  há previsão nem "atrasada". Ordem já recebida por inteiro não conta.
+- PCOMSITAPROV (aprovação da requisição) está sempre 0 — a empresa não usa.
+
+FOTO (16/11/2026): a foto do item fica em ESTOQUEFOTO.ESTQFFOTO (BMP no banco,
+~2 a 5 MB cada; 3.288 itens têm). A lista marca quem tem (só a chave, leitura
+leve) e a foto vem sob demanda reduzida para JPEG (miniatura ~12 KB, cache 1 dia).
 """
 from __future__ import annotations
 
+import logging
 import math
 from datetime import date, timedelta
 
@@ -39,6 +63,8 @@ from django.core.cache import cache
 from sqlalchemy import text
 
 from pedidosVenda.erp import engine
+
+logger = logging.getLogger(__name__)
 
 EMPRESA = 1
 CACHE_SEG = 600
@@ -138,6 +164,49 @@ _SQL_MOVIMENTOS = """
     WHERE MESTQEMP = :emp AND MESTQDATA >= :desde AND MESTQREFTIPO IN (1, 2, 3, 6)
       AND MESTQQUANT <> 0 {filtro_filial}
 """
+
+
+# Itens de requisição de compra em aberto, com a ordem (se já houver) e quantas
+# coletas de preço estão abertas. Uma linha por item de requisição.
+_SQL_COMPRAS = """
+    SELECT I.IPCOMITEM ESTQ, PC.PCOMFIL FIL, PC.PCOMCOD REQ, PC.PCOMDATA DATA_REQ,
+           I.IPCOMQUANT QUANT, I.IPCOMSIT SIT, PC.PCOMPRIORIDADE PRIORIDADE,
+           COALESCE(FR.FUNNOME, '') REQUISITANTE, COALESCE(FC.FUNNOME, '') COMPRADOR,
+           O.PCOCOD ORDEM, O.PCODATAORDEM DATA_ORDEM, O.PCOSITAPROV APROV_ORDEM,
+           COALESCE(O.FORNOME, '') FORNECEDOR, O.IPCOQUANT QUANT_ORDEM,
+           O.IPCOQUANTFAT QUANT_RECEBIDA, O.IPCOQUANTCANC QUANT_CANCELADA,
+           CASE WHEN COALESCE(NULLIF(I.IPCOMPRAZO, 0), NULLIF(O.IPCOPRENT, 0), NULLIF(O.PCOPRENT, 0)) IS NOT NULL
+                THEN DATEADD(day, COALESCE(NULLIF(I.IPCOMPRAZO, 0), NULLIF(O.IPCOPRENT, 0), NULLIF(O.PCOPRENT, 0)),
+                             CASE WHEN I.IPCOMDATA > '19000101' THEN I.IPCOMDATA ELSE O.PCODATAPED END) END PREVISAO,
+           (SELECT COUNT(*) FROM ITEMPROCESSOCOMPRA IC JOIN PROCESSOCOMPRA C ON C.PCOCOD = IC.IPCOPCO
+             WHERE IC.IPCOIPCOM = I.IPCOMCOD AND C.PCOSIT = 0) COLETAS
+    FROM ITEMPENDENCIACOMPRA I
+    JOIN PENDENCIACOMPRA PC ON PC.PCOMCOD = I.IPCOMPCOM
+    LEFT JOIN FUNCIONARIO FR ON FR.FUNCOD = COALESCE(NULLIF(I.IPCOMFUNREQ, 0), PC.PCOMFUNREQ)
+    LEFT JOIN FUNCIONARIO FC ON FC.FUNCOD = PC.PCOMCOMPRADOR
+    OUTER APPLY (
+        SELECT TOP 1 P.PCOCOD, P.PCODATAORDEM, P.PCOSITAPROV, F.FORNOME, P.PCODATAPED, P.PCOPRENT,
+               IP.IPCOQUANT, IP.IPCOQUANTFAT, IP.IPCOQUANTCANC, IP.IPCOPRENT
+        FROM ITEMPROCESSOCOMPRA IP
+        JOIN PROCESSOCOMPRA P ON P.PCOCOD = IP.IPCOPCO
+        LEFT JOIN FORNECEDOR F ON F.FORCOD = P.PCOFOR
+        WHERE IP.IPCOIPCOM = I.IPCOMCOD AND P.PCOSIT IN (1, 4)
+        ORDER BY P.PCODATAORDEM DESC
+    ) O
+    WHERE PC.PCOMEMP = :emp AND I.IPCOMSIT IN (0, 1, 2) AND PC.PCOMSIT IN (0, 3)
+      AND I.IPCOMITEM > 0 {filtro_filial}
+"""
+
+# Só a chave: ler o BLOB de 3 mil fotos levaria minutos. Abaixo de 100 bytes não é imagem.
+_SQL_FOTOS = "SELECT ESTQFESTQ ESTQ FROM ESTOQUEFOTO WHERE DATALENGTH(ESTQFFOTO) > 100"
+_SQL_FOTO = text("SELECT TOP 1 ESTQFFOTO FROM ESTOQUEFOTO WHERE ESTQFESTQ = :cod")
+FOTO_LADO_PADRAO = 360
+FOTO_LADO_MAX = 1200
+
+ETAPAS_COMPRA = {0: ('requisicao', 'Requisição pendente'),
+                 1: ('coleta', 'Em coleta de preço'),
+                 2: ('ordem', 'Ordem de compra')}
+ORDEM_ETAPA = {'requisicao': 0, 'coleta': 1, 'ordem': 2}
 
 
 def _ler(sql, **params) -> pd.DataFrame:
@@ -298,6 +367,92 @@ def preparar_itens(itens: pd.DataFrame, grupos: pd.DataFrame,
     return df
 
 
+def _data_iso(v) -> str | None:
+    if v is None or pd.isna(v):
+        return None
+    d = pd.Timestamp(v)
+    return None if d.year < 1901 else d.date().isoformat()
+
+
+def montar_compras(df: pd.DataFrame, hoje: date) -> dict[int, list[dict]]:
+    """Requisições de compra em aberto por item (ESTQCOD), mais adiantada primeiro."""
+    por_item: dict[int, list[dict]] = {}
+    for r in df.itertuples():
+        sit = int(_num(r.SIT))
+        if sit not in ETAPAS_COMPRA:
+            continue
+        etapa, rotulo = ETAPAS_COMPRA[sit]
+        quant = _num(r.QUANT)
+        detalhe = []
+        ordem = None if pd.isna(r.ORDEM) else int(r.ORDEM)
+        previsao = _data_iso(r.PREVISAO) if sit == 2 else None
+        recebido = 0.0
+        if sit == 2 and ordem:
+            pedido = _num(r.QUANT_ORDEM) - _num(r.QUANT_CANCELADA)
+            recebido = _num(r.QUANT_RECEBIDA)
+            if pedido > 0 and recebido >= pedido:
+                continue        # já entrou tudo por nota; o SGA só não virou o item ainda
+            quant = max(pedido - recebido, 0.0) if pedido > 0 else quant
+            aprov = None if pd.isna(r.APROV_ORDEM) else int(r.APROV_ORDEM)
+            if aprov == 0:
+                detalhe.append('aguardando aprovação')
+            elif aprov == 2:
+                detalhe.append('ordem reprovada')
+            if recebido > 0:
+                detalhe.append('entrega parcial')
+        elif sit == 1:
+            n = int(_num(r.COLETAS))
+            if n:
+                detalhe.append(f'{n} cotaç{"ão" if n == 1 else "ões"}')
+        atrasada = bool(previsao and previsao < hoje.isoformat())
+        if atrasada:
+            detalhe.append('entrega atrasada')
+        urgente = int(_num(r.PRIORIDADE)) == 1
+        por_item.setdefault(int(r.ESTQ), []).append({
+            'requisicao': int(r.REQ),
+            'data': _data_iso(r.DATA_REQ),
+            'filial': int(_num(r.FIL)),
+            'quantidade': round(quant, 3),
+            'etapa': etapa,
+            'etapa_rotulo': rotulo,
+            'detalhe': ', '.join(detalhe),
+            'urgente': urgente,
+            'ordem': ordem if sit == 2 else None,
+            'data_ordem': _data_iso(r.DATA_ORDEM) if sit == 2 else None,
+            'fornecedor': str(r.FORNECEDOR or '').strip() if sit == 2 else '',
+            'previsao': previsao,
+            'atrasada': atrasada,
+            'recebido': round(recebido, 3),
+            'requisitante': str(r.REQUISITANTE or '').strip(),
+            'comprador': str(r.COMPRADOR or '').strip(),
+        })
+    for lista in por_item.values():
+        lista.sort(key=lambda c: (-ORDEM_ETAPA[c['etapa']], c['data'] or ''))
+    return por_item
+
+
+def resumo_compra(compras: list[dict] | None) -> dict:
+    """Campos do item: etapa mais adiantada, quantidade em compra, texto curto."""
+    if not compras:
+        return {'compras': [], 'em_compra': 0.0, 'compra_etapa': None, 'compra_texto': ''}
+    topo = compras[0]
+    texto = topo['etapa_rotulo']
+    if topo['ordem']:
+        texto += f" {topo['ordem']}"
+    else:
+        texto += f" (req. {topo['requisicao']})"
+    if topo['detalhe']:
+        texto += f" — {topo['detalhe']}"
+    if len(compras) > 1:
+        texto += f" (+{len(compras) - 1})"
+    return {
+        'compras': compras,
+        'em_compra': round(sum(c['quantidade'] for c in compras), 3),
+        'compra_etapa': topo['etapa'],
+        'compra_texto': texto,
+    }
+
+
 def _contas(df: pd.DataFrame) -> dict:
     com_min = int(df.TEM_MIN.sum())
     no_min = int(df.NO_MIN.sum())
@@ -314,6 +469,11 @@ def _contas(df: pd.DataFrame) -> dict:
         # Sem mínimo entre os que importam: os que têm saldo (item morto sem
         # saldo e sem mínimo não é pendência de cadastro).
         'sem_minimo': int((df.TEM_SALDO & ~df.TEM_MIN).sum()),
+        'em_compra': int(df.EM_COMPRA.sum()) if 'EM_COMPRA' in df else 0,
+        # Foto só interessa para item de estoque: os que têm saldo.
+        'com_foto': int((df.TEM_SALDO & df.TEM_FOTO).sum()) if 'TEM_FOTO' in df else 0,
+        'sem_foto': int((df.TEM_SALDO & ~df.TEM_FOTO).sum()) if 'TEM_FOTO' in df else 0,
+        'abaixo_em_compra': int((df.ABAIXO & df.EM_COMPRA).sum()) if 'EM_COMPRA' in df else 0,
         'valor': round(float(df.VALOR.sum()), 2),
         'percentual': pct,
         'situacao': chave,
@@ -352,6 +512,8 @@ def _item(r) -> dict:
         'prazo': int(getattr(r, 'PRAZO', PRAZO_PADRAO)),
         'valor': round(float(r.VALOR), 2),
         'situacao': sit,
+        'tem_foto': bool(getattr(r, 'TEM_FOTO', False)),
+        **resumo_compra(getattr(r, 'COMPRAS', None)),
     }
 
 
@@ -504,9 +666,61 @@ def _erp(filial: int | None) -> dict:
             'consumo': {int(e): _num(c) for e, c in zip(consumo.ESTQ, consumo.CONSUMO)},
             'mov': _ler(_SQL_MOVIMENTOS.format(filtro_filial=f_m),
                         desde=hoje - timedelta(days=DIAS_MOVIMENTO - 1), **params),
+            'compras': _ler_compras(filial, hoje),
+            'fotos': _ler_fotos(),
             'lido_em': pd.Timestamp.now().isoformat(timespec='seconds'),
         }
     return _cacheado(f'almox:erp:{"todas" if filial is None else filial}', CACHE_SEG, ler)
+
+
+def _ler_compras(filial: int | None, hoje: date) -> dict[int, list[dict]]:
+    """Compra em andamento é informação extra: se a consulta falhar, a tela segue sem ela."""
+    params = {'emp': EMPRESA}
+    if filial is not None:
+        params['fil'] = filial
+    try:
+        df = _ler(_SQL_COMPRAS.format(filtro_filial='' if filial is None else 'AND PC.PCOMFIL = :fil'), **params)
+    except Exception:
+        logger.exception('almoxarifado: falha ao ler requisições de compra')
+        return {}
+    return montar_compras(df, hoje)
+
+
+def _ler_fotos() -> set[int] | None:
+    try:
+        return {int(c) for c in _ler(_SQL_FOTOS).ESTQ}
+    except Exception:
+        logger.exception('almoxarifado: falha ao ler a lista de fotos')
+        return None
+
+
+def miniatura(raw: bytes, lado: int = FOTO_LADO_PADRAO) -> bytes | None:
+    """BMP (ou outro formato do PIL) → JPEG com o maior lado ≤ `lado`."""
+    from io import BytesIO
+    from PIL import Image
+    try:
+        img = Image.open(BytesIO(bytes(raw)))
+        img.thumbnail((lado, lado))
+        if img.mode not in ('RGB', 'L'):
+            img = img.convert('RGB')
+        buf = BytesIO()
+        img.save(buf, format='JPEG', quality=82, optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def foto_item(cod: int, lado: int = FOTO_LADO_PADRAO) -> bytes | None:
+    """Foto do item em JPEG reduzido, com cache de 1 dia (None = sem foto)."""
+    lado = max(64, min(int(lado), FOTO_LADO_MAX))
+    chave = f'almox:foto:{cod}:{lado}'
+    valor = cache.get(chave)
+    if valor is None:
+        with engine().connect() as conn:
+            raw = conn.execute(_SQL_FOTO, {'cod': cod}).scalar()
+        valor = (miniatura(raw, lado) if raw else None) or b''
+        cache.set(chave, valor, 86400)
+    return valor or None
 
 
 def _preparado(filial: int | None, fonte: str = 'sga') -> tuple[pd.DataFrame, dict, dict]:
@@ -514,7 +728,22 @@ def _preparado(filial: int | None, fonte: str = 'sga') -> tuple[pd.DataFrame, di
     prazos = prazos_app()
     minimos = minimos_app(filial) if fonte == 'manager' else None
     df = preparar_itens(erp['itens'], erp['grupos'], minimos, erp['consumo'], prazos)
+    juntar_compras(df, erp.get('compras') or {})
+    juntar_fotos(df, erp.get('fotos'))
     return df, erp, prazos
+
+
+def juntar_fotos(df: pd.DataFrame, fotos: set[int] | None) -> pd.DataFrame:
+    """fotos None = não deu para ler: a coluna nem entra (a tela não marca nada)."""
+    if fotos is not None:
+        df['TEM_FOTO'] = [int(c) in fotos for c in df.ESTQCOD]
+    return df
+
+
+def juntar_compras(df: pd.DataFrame, compras: dict[int, list[dict]]) -> pd.DataFrame:
+    df['COMPRAS'] = [compras.get(int(c)) for c in df.ESTQCOD]
+    df['EM_COMPRA'] = df.COMPRAS.map(bool)
+    return df
 
 
 def resumo(filial: int | None, fonte: str = 'sga') -> dict:
@@ -539,7 +768,7 @@ def resumo(filial: int | None, fonte: str = 'sga') -> dict:
     return _cacheado(chave, CACHE_SEG, calcular)
 
 
-LISTAS = ('abaixo', 'atencao', 'sem_minimo', 'todos')
+LISTAS = ('abaixo', 'atencao', 'sem_minimo', 'em_compra', 'sem_foto', 'todos')
 
 
 def filtrar_itens(df: pd.DataFrame, grupos: pd.DataFrame, grupo: int | None, lista: str) -> pd.DataFrame:
@@ -553,6 +782,12 @@ def filtrar_itens(df: pd.DataFrame, grupos: pd.DataFrame, grupo: int | None, lis
         df = df[df.ATENCAO].sort_values(['COBERTURA_DIAS', 'ESTQNOME'])
     elif lista == 'sem_minimo':
         df = df[df.TEM_SALDO & ~df.TEM_MIN].sort_values(['ESTQNOME'])
+    elif lista == 'sem_foto':
+        df = df[df.TEM_SALDO & ~df.TEM_FOTO] if 'TEM_FOTO' in df else df.iloc[0:0]
+        df = df.sort_values(['ESTQNOME'])
+    elif lista == 'em_compra':
+        df = df[df.EM_COMPRA] if 'EM_COMPRA' in df else df.iloc[0:0]
+        df = df.sort_values(['ESTQNOME'])
     else:
         # "Todos" sem item morto: sem saldo, sem mínimo e sem consumo não interessa.
         df = df[df.TEM_SALDO | df.TEM_MIN | (df.CONSUMO_DIA > 0)].sort_values(['ESTQNOME'])
