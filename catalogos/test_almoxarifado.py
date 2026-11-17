@@ -214,6 +214,28 @@ class CompraEmAndamentoTests(SimpleTestCase):
         self.assertEqual((contas['em_compra'], contas['abaixo_em_compra']), (1, 1))
         self.assertEqual(a._item(next(df[df.ESTQCOD == 1].itertuples()))['compra_etapa'], 'requisicao')
 
+    def test_cotacoes_da_coleta(self):
+        def cot(proc, forn, unit, pcooc=0, prazo=float('nan')):
+            return {'IPCOM': 900, 'PROCESSO': proc, 'DATA': pd.Timestamp('2026-11-16'), 'FORNECEDOR': forn + ' ',
+                    'QUANT': 2.0, 'UNIT': unit, 'TOTAL': unit * 2, 'DESCONTO': 0.0, 'PRAZO': prazo,
+                    'PAGAMENTO': 'A VISTA', 'TIPO_FRETE': 2, 'FRETE': 0.0, 'PCOOC': pcooc}
+        cots = a.montar_cotacoes(pd.DataFrame([
+            cot(10, 'SEM RESPOSTA', 0.0),
+            cot(11, 'CARO', 150.0, prazo=5.0),
+            cot(12, 'BARATO', 96.0),
+            cot(13, 'DESCLASSIFICADO', 50.0, pcooc=12),
+        ]))
+        lista = cots[900]
+        self.assertEqual([c['fornecedor'] for c in lista], ['BARATO', 'CARO', 'DESCLASSIFICADO', 'SEM RESPOSTA'])
+        self.assertEqual([c['melhor'] for c in lista], [True, False, False, False])
+        self.assertEqual((lista[0]['total'], lista[1]['prazo_dias'], lista[0]['frete']), (192.0, 5, 'CIF (fornecedor)'))
+        self.assertEqual((lista[3]['unitario'], lista[3]['respondida']), (None, False))
+
+        df = pd.DataFrame([self.linha(2, 102, 1, IPCOM=900, COLETAS=4)])
+        coleta = a.montar_compras(df, date(2026, 11, 16), cots)[2][0]
+        self.assertEqual(len(coleta['cotacoes']), 4)
+        self.assertEqual(coleta['detalhe'], '4 cotações, 3 respondidas')
+
 
 class FotoTests(SimpleTestCase):
     """Marca quem tem foto no SGA (ESTOQUEFOTO) e reduz a foto para a tela."""

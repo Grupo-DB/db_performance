@@ -171,7 +171,7 @@ _SQL_MOVIMENTOS = """
 # Itens de requisição de compra em aberto, com a ordem (se já houver) e quantas
 # coletas de preço estão abertas. Uma linha por item de requisição.
 _SQL_COMPRAS = """
-    SELECT I.IPCOMITEM ESTQ, PC.PCOMFIL FIL, PC.PCOMCOD REQ, PC.PCOMDATA DATA_REQ,
+    SELECT I.IPCOMCOD IPCOM, I.IPCOMITEM ESTQ, PC.PCOMFIL FIL, PC.PCOMCOD REQ, PC.PCOMDATA DATA_REQ,
            I.IPCOMQUANT QUANT, I.IPCOMSIT SIT, PC.PCOMPRIORIDADE PRIORIDADE,
            COALESCE(FR.FUNNOME, '') REQUISITANTE, COALESCE(FC.FUNNOME, '') COMPRADOR,
            O.PCOCOD ORDEM, O.PCODATAORDEM DATA_ORDEM, O.PCOSITAPROV APROV_ORDEM,
@@ -199,6 +199,29 @@ _SQL_COMPRAS = """
       AND I.IPCOMITEM > 0 {filtro_filial}
       AND (PC.PCOMDATA >= :desde OR O.PCODATAORDEM >= :desde)
 """
+
+# Cotações das coletas de preço abertas (PCOSIT 0) dos itens de requisição em coleta.
+# Uma linha por fornecedor consultado; IPCOUNIT 0 = fornecedor ainda não respondeu.
+# IPCOPCOOC positivo e diferente do próprio processo = item desclassificado nessa
+# proposta (o comprador escolheu outro fornecedor do mesmo grupo PCOGRP).
+_SQL_COTACOES = """
+    SELECT IP.IPCOIPCOM IPCOM, P.PCOCOD PROCESSO, P.PCODATA DATA, COALESCE(F.FORNOME, '') FORNECEDOR,
+           IP.IPCOQUANT QUANT, IP.IPCOUNIT UNIT, IP.IPCOTOTAL TOTAL, IP.IPCODESCONTO DESCONTO,
+           COALESCE(NULLIF(IP.IPCOPRENT, 0), NULLIF(P.PCOPRENT, 0)) PRAZO,
+           COALESCE(P.PCODESCPAG, '') PAGAMENTO, P.PCOTIPOFRETE TIPO_FRETE, P.PCOFRETE FRETE,
+           IP.IPCOPCOOC PCOOC
+    FROM ITEMPROCESSOCOMPRA IP
+    JOIN PROCESSOCOMPRA P ON P.PCOCOD = IP.IPCOPCO
+    JOIN ITEMPENDENCIACOMPRA I ON I.IPCOMCOD = IP.IPCOIPCOM
+    JOIN PENDENCIACOMPRA PC ON PC.PCOMCOD = I.IPCOMPCOM
+    LEFT JOIN FORNECEDOR F ON F.FORCOD = P.PCOFOR
+    WHERE P.PCOSIT = 0 AND I.IPCOMSIT = 1 AND PC.PCOMEMP = :emp AND PC.PCOMSIT IN (0, 3)
+      AND I.IPCOMITEM > 0 AND PC.PCOMDATA >= :desde {filtro_filial}
+"""
+
+# PCOTIPOFRETE (DICIONARIO_COLUNA)
+TIPOS_FRETE = {1: 'Terceiros', 2: 'CIF (fornecedor)', 3: 'FOB (nosso)', 4: 'Sem frete',
+               5: 'Próprio fornecedor', 6: 'Próprio nosso'}
 
 # Só a chave: ler o BLOB de 3 mil fotos levaria minutos. Abaixo de 100 bytes não é imagem.
 _SQL_FOTOS = "SELECT ESTQFESTQ ESTQ FROM ESTOQUEFOTO WHERE DATALENGTH(ESTQFFOTO) > 100"
@@ -381,8 +404,43 @@ def _data_iso(v) -> str | None:
     return None if d.year < 1901 else d.date().isoformat()
 
 
-def montar_compras(df: pd.DataFrame, hoje: date) -> dict[int, list[dict]]:
+def montar_cotacoes(df: pd.DataFrame) -> dict[int, list[dict]]:
+    """Cotações por item de requisição (IPCOMCOD): respondidas pelo menor preço, depois as sem resposta."""
+    por_req: dict[int, list[dict]] = {}
+    for r in df.itertuples():
+        unit = _num(r.UNIT)
+        pcooc = int(_num(r.PCOOC))
+        processo = int(r.PROCESSO)
+        prazo = None if pd.isna(r.PRAZO) else int(r.PRAZO)
+        tipo_frete = int(_num(r.TIPO_FRETE))
+        por_req.setdefault(int(r.IPCOM), []).append({
+            'processo': processo,
+            'data': _data_iso(r.DATA),
+            'fornecedor': str(r.FORNECEDOR or '').strip(),
+            'quantidade': round(_num(r.QUANT), 3),
+            'unitario': round(unit, 4) if unit > 0 else None,
+            'total': round(_num(r.TOTAL) - _num(r.DESCONTO), 2) if unit > 0 else None,
+            'prazo_dias': prazo,
+            'pagamento': str(r.PAGAMENTO or '').strip(),
+            'frete': TIPOS_FRETE.get(tipo_frete, ''),
+            'frete_valor': round(_num(r.FRETE), 2) or None,
+            'respondida': unit > 0,
+            'desclassificada': pcooc > 0 and pcooc != processo,
+            'melhor': False,
+        })
+    for lista in por_req.values():
+        validas = [c for c in lista if c['respondida'] and not c['desclassificada']]
+        if validas:
+            min(validas, key=lambda c: c['unitario'])['melhor'] = True
+        lista.sort(key=lambda c: (not c['respondida'], c['desclassificada'],
+                                  c['unitario'] or 0, c['fornecedor']))
+    return por_req
+
+
+def montar_compras(df: pd.DataFrame, hoje: date,
+                   cotacoes: dict[int, list[dict]] | None = None) -> dict[int, list[dict]]:
     """Requisições de compra em aberto por item (ESTQCOD), mais adiantada primeiro."""
+    cotacoes = cotacoes or {}
     por_item: dict[int, list[dict]] = {}
     for r in df.itertuples():
         sit = int(_num(r.SIT))
@@ -407,10 +465,17 @@ def montar_compras(df: pd.DataFrame, hoje: date) -> dict[int, list[dict]]:
                 detalhe.append('ordem reprovada')
             if recebido > 0:
                 detalhe.append('entrega parcial')
-        elif sit == 1:
-            n = int(_num(r.COLETAS))
+        cots: list[dict] = []
+        if sit == 1:
+            ipcom = getattr(r, 'IPCOM', None)
+            cots = cotacoes.get(int(ipcom), []) if ipcom is not None and not pd.isna(ipcom) else []
+            n = len(cots) or int(_num(r.COLETAS))
             if n:
                 detalhe.append(f'{n} cotaç{"ão" if n == 1 else "ões"}')
+            resp = sum(1 for c in cots if c['respondida'])
+            if cots:
+                detalhe.append('nenhuma respondida' if not resp else
+                               f'{resp} respondida{"s" if resp > 1 else ""}')
         atrasada = bool(previsao and previsao < hoje.isoformat())
         if atrasada:
             detalhe.append('entrega atrasada')
@@ -432,6 +497,7 @@ def montar_compras(df: pd.DataFrame, hoje: date) -> dict[int, list[dict]]:
             'recebido': round(recebido, 3),
             'requisitante': str(r.REQUISITANTE or '').strip(),
             'comprador': str(r.COMPRADOR or '').strip(),
+            'cotacoes': cots,
         })
     for lista in por_item.values():
         lista.sort(key=lambda c: (-ORDEM_ETAPA[c['etapa']], c['data'] or ''))
@@ -686,11 +752,17 @@ def _ler_compras(filial: int | None, hoje: date) -> dict[int, list[dict]]:
     if filial is not None:
         params['fil'] = filial
     try:
-        df = _ler(_SQL_COMPRAS.format(filtro_filial='' if filial is None else 'AND PC.PCOMFIL = :fil'), **params)
+        filtro = '' if filial is None else 'AND PC.PCOMFIL = :fil'
+        df = _ler(_SQL_COMPRAS.format(filtro_filial=filtro), **params)
     except Exception:
         logger.exception('almoxarifado: falha ao ler requisições de compra')
         return {}
-    return montar_compras(df, hoje)
+    try:
+        cotacoes = montar_cotacoes(_ler(_SQL_COTACOES.format(filtro_filial=filtro), **params))
+    except Exception:
+        logger.exception('almoxarifado: falha ao ler cotações')
+        cotacoes = {}
+    return montar_compras(df, hoje, cotacoes)
 
 
 def _ler_fotos() -> set[int] | None:
