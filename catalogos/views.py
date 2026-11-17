@@ -791,6 +791,17 @@ def _almox_filial(bruto):
         return None, Response({'erro': "filial deve ser um número ou 'todas'."}, status=status.HTTP_400_BAD_REQUEST)
 
 
+def _almox_periodo(request):
+    """((desde, ate), erro) do consumo médio: ?consumo_desde=&consumo_ate= (AAAA-MM-DD)."""
+    from . import almoxarifado
+    try:
+        return almoxarifado.periodo_consumo(_cat_data(request.GET.get('consumo_desde')),
+                                            _cat_data(request.GET.get('consumo_ate'))), None
+    except ValueError as exc:
+        msg = str(exc) if 'consumo' in str(exc) else 'Datas do consumo inválidas (use AAAA-MM-DD).'
+        return None, Response({'erro': msg}, status=status.HTTP_400_BAD_REQUEST)
+
+
 @api_view(['GET'])
 def almoxarifado_resumo(request):
     """
@@ -798,6 +809,7 @@ def almoxarifado_resumo(request):
 
     ?filial=0 (matriz, padrão) | 1 | 3 | … | todas
     &fonte=sga (padrão) | manager — de onde vem o estoque mínimo
+    &consumo_desde=&consumo_ate= (AAAA-MM-DD) — período do consumo médio (padrão 90 dias)
     """
     from . import almoxarifado
 
@@ -806,9 +818,12 @@ def almoxarifado_resumo(request):
     filial, erro = _almox_filial(request.GET.get('filial'))
     if erro:
         return erro
+    periodo, erro = _almox_periodo(request)
+    if erro:
+        return erro
 
     try:
-        dados = dict(almoxarifado.resumo(filial, _almox_fonte(request)))
+        dados = dict(almoxarifado.resumo(filial, _almox_fonte(request), periodo))
         dados['filiais'] = almoxarifado.filiais()
     except Exception as exc:
         return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
@@ -842,6 +857,7 @@ def almoxarifado_itens(request):
     """
     Lista de itens: ?filial=0|…|todas &grupo=<GALMCOD, qualquer nível; vazio = todos>
     &lista=abaixo|atencao|sem_minimo|em_compra|sem_foto|todos &fonte=sga|manager
+    &consumo_desde=&consumo_ate= (AAAA-MM-DD) — período do consumo médio
     """
     from . import almoxarifado
 
@@ -859,7 +875,10 @@ def almoxarifado_itens(request):
     except ValueError:
         return Response({'erro': 'grupo deve ser um número.'}, status=status.HTTP_400_BAD_REQUEST)
     try:
-        return Response(almoxarifado.listar_itens(filial, grupo, lista, _almox_fonte(request)))
+        periodo, erro = _almox_periodo(request)
+        if erro:
+            return erro
+        return Response(almoxarifado.listar_itens(filial, grupo, lista, _almox_fonte(request), periodo))
     except Exception as exc:
         return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
 

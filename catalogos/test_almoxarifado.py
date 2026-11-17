@@ -144,6 +144,26 @@ class AtencaoTests(SimpleTestCase):
         self.assertEqual(g[40]['prazo'], 7)
         self.assertEqual(g[40]['arvore'][0]['prazo'], 45)
 
+    def test_consumo_pelo_periodo_escolhido(self):
+        # 90 un em 30 dias = 3/dia: saldo 15 dura 5 dias → atenção; em 90 dias seria 1/dia (15 d, ok).
+        linhas = pd.DataFrame([item(1, 12, 15, 0)])
+        df30 = a.preparar_itens(linhas, self.GRUPOS, consumo={1: 90.0}, dias_consumo=30, consumo_valor={1: 450.0})
+        r = df30.iloc[0]
+        self.assertEqual((r.CONSUMO, r.CONSUMO_DIA, r.COBERTURA_DIAS, bool(r.ATENCAO)), (90.0, 3.0, 5.0, True))
+        it = a._item(next(df30.itertuples()))
+        self.assertEqual((it['consumo'], it['consumo_valor'], it['consumo_dia']), (90.0, 450.0, 3.0))
+        self.assertEqual(a._contas(df30)['consumo_valor'], 450.0)
+        self.assertFalse(a.preparar_itens(linhas, self.GRUPOS, consumo={1: 90.0}).iloc[0].ATENCAO)
+
+    def test_periodo_do_consumo(self):
+        hoje = date(2026, 11, 17)
+        self.assertEqual(a.periodo_consumo(hoje=hoje), (date(2026, 8, 20), hoje))      # 90 dias com hoje
+        self.assertEqual(a.periodo_consumo(date(2026, 1, 1), date(2026, 3, 31), hoje),
+                         (date(2026, 1, 1), date(2026, 3, 31)))
+        for d, f in ((date(2026, 3, 1), date(2026, 2, 1)), (None, date(2026, 11, 18)), (date(2024, 1, 1), None)):
+            with self.assertRaises(ValueError):
+                a.periodo_consumo(d, f, hoje)
+
     def test_minimo_do_manager_substitui_o_do_sga_por_filial(self):
         linhas = pd.DataFrame([dict(item(1, 12, 5, 99), FIL=0), dict(item(1, 12, 5, 7), FIL=3),
                                dict(item(2, 12, 5, 8), FIL=0)])

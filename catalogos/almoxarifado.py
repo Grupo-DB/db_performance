@@ -71,7 +71,8 @@ logger = logging.getLogger(__name__)
 EMPRESA = 1
 CACHE_SEG = 600
 DIAS_MOVIMENTO = 30
-DIAS_CONSUMO = 90          # janela do consumo médio diário
+DIAS_CONSUMO = 90          # janela padrão do consumo médio diário
+DIAS_CONSUMO_MAX = 731     # período escolhido na tela: até 2 anos
 PRAZO_PADRAO = 7           # dias de cobertura que acendem o atenção
 PRAZO_EMBALAGEM = 45       # grupo cujo nome começa com EMBALAG (e os de baixo); a raiz
                            # "MATERIA PRIMA / EMBALAGEM" não, senão a matéria-prima herdava
@@ -152,9 +153,10 @@ _SQL_ITENS = """
 # Consumo = requisições do almoxarifado (tipo 2) líquidas de devolução. Acerto
 # (3) é inventário e saída por nota (6) é venda/transferência: não entram.
 _SQL_CONSUMO = """
-    SELECT MESTQESTQ ESTQ, -SUM(MESTQQUANT) CONSUMO
+    SELECT MESTQESTQ ESTQ, -SUM(MESTQQUANT) CONSUMO, -SUM(MESTQCUSTO) CONSUMO_VALOR
     FROM MOVESTOQUE
-    WHERE MESTQEMP = :emp AND MESTQDATA >= :desde AND MESTQREFTIPO = 2 {filtro_filial}
+    WHERE MESTQEMP = :emp AND MESTQDATA >= :desde AND MESTQDATA < :ate
+      AND MESTQREFTIPO = 2 {filtro_filial}
     GROUP BY MESTQESTQ
 """
 
@@ -334,13 +336,16 @@ def _filho_da_raiz(cod: int, raiz: int, pai: dict) -> int:
 def preparar_itens(itens: pd.DataFrame, grupos: pd.DataFrame,
                    minimos: dict[tuple[int, int], float] | None = None,
                    consumo: dict[int, float] | None = None,
-                   prazos: dict[int, int] | None = None) -> pd.DataFrame:
+                   prazos: dict[int, int] | None = None,
+                   dias_consumo: int = DIAS_CONSUMO,
+                   consumo_valor: dict[int, float] | None = None) -> pd.DataFrame:
     """Uma linha por item (filiais somadas), com raiz/subgrupo e as contas do card.
 
     MINIMO vem do SGA. `minimos` ((item, filial) → mínimo do Manager) substitui o
     do SGA naquele item × filial; o resto continua com o do SGA. MINIMO_SGA guarda
     o do SGA para a tela mostrar os dois. `consumo` é a quantidade
-    requisitada em DIAS_CONSUMO dias por item; `prazos` os cadastrados por grupo.
+    requisitada no período por item (`dias_consumo` dias, padrão DIAS_CONSUMO) e
+    `consumo_valor` o custo dela; `prazos` os cadastrados por grupo.
     """
     nome, raiz, pai = arvore(grupos)
     bloqueados = {int(c) for c, b in zip(grupos.GALMCOD, grupos.GALMBLOQ) if str(b or '').upper() == 'S'}
@@ -379,8 +384,11 @@ def preparar_itens(itens: pd.DataFrame, grupos: pd.DataFrame,
     df = df[~df.RAIZ_NOME.str.upper().isin(RAIZES_FORA)]
     df = df[~df.RAIZ.isin(bloqueados)].copy()
 
-    consumo = consumo or {}
-    df['CONSUMO_DIA'] = df.ESTQCOD.map(lambda c: max(0.0, _num(consumo.get(int(c), 0.0))) / DIAS_CONSUMO)
+    consumo, consumo_valor = consumo or {}, consumo_valor or {}
+    dias_consumo = max(1, int(dias_consumo))
+    df['CONSUMO'] = df.ESTQCOD.map(lambda c: max(0.0, _num(consumo.get(int(c), 0.0))))
+    df['CONSUMO_VALOR'] = df.ESTQCOD.map(lambda c: max(0.0, _num(consumo_valor.get(int(c), 0.0))))
+    df['CONSUMO_DIA'] = df.CONSUMO / dias_consumo
     df['PRAZO'] = df.GALM.map(lambda c: prazo.get(c, (PRAZO_PADRAO, False))[0])
     # Cobertura em dias pelo consumo médio; sem consumo, não dá para projetar.
     df['COBERTURA_DIAS'] = (df.SALDO.clip(lower=0) / df.CONSUMO_DIA).where(df.CONSUMO_DIA > 0)
@@ -548,6 +556,7 @@ def _contas(df: pd.DataFrame) -> dict:
         'sem_foto': int((df.TEM_SALDO & ~df.TEM_FOTO).sum()) if 'TEM_FOTO' in df else 0,
         'abaixo_em_compra': int((df.ABAIXO & df.EM_COMPRA).sum()) if 'EM_COMPRA' in df else 0,
         'valor': round(float(df.VALOR.sum()), 2),
+        'consumo_valor': round(float(df.CONSUMO_VALOR.sum()), 2) if 'CONSUMO_VALOR' in df else 0.0,
         'percentual': pct,
         'situacao': chave,
         'situacao_rotulo': rotulo,
@@ -580,6 +589,8 @@ def _item(r) -> dict:
         'minimo_manager': bool(getattr(r, 'MIN_MANAGER', False)),
         'falta': round(falta, 3),
         'cobertura': round(100.0 * float(r.SALDO) / float(r.MINIMO), 1) if r.MINIMO else None,
+        'consumo': round(float(getattr(r, 'CONSUMO', 0.0) or 0.0), 3),
+        'consumo_valor': round(float(getattr(r, 'CONSUMO_VALOR', 0.0) or 0.0), 2),
         'consumo_dia': round(consumo, 3),
         'cobertura_dias': cob,
         'prazo': int(getattr(r, 'PRAZO', PRAZO_PADRAO)),
@@ -732,11 +743,9 @@ def _erp(filial: int | None) -> dict:
             params['fil'] = filial
         f_q = '' if filial is None else 'AND QESTQFIL = :fil'
         f_m = '' if filial is None else 'AND MESTQFIL = :fil'
-        consumo = _ler(_SQL_CONSUMO.format(filtro_filial=f_m), desde=hoje - timedelta(days=DIAS_CONSUMO), **params)
         return {
             'grupos': _ler(_SQL_GRUPOS),
             'itens': _ler(_SQL_ITENS.format(filtro_filial=f_q), **params),
-            'consumo': {int(e): _num(c) for e, c in zip(consumo.ESTQ, consumo.CONSUMO)},
             'mov': _ler(_SQL_MOVIMENTOS.format(filtro_filial=f_m),
                         desde=hoje - timedelta(days=DIAS_MOVIMENTO - 1), **params),
             'compras': _ler_compras(filial, hoje),
@@ -744,6 +753,36 @@ def _erp(filial: int | None) -> dict:
             'lido_em': pd.Timestamp.now().isoformat(timespec='seconds'),
         }
     return _cacheado(f'almox:erp:{"todas" if filial is None else filial}', CACHE_SEG, ler)
+
+
+def periodo_consumo(desde: date | None = None, ate: date | None = None,
+                    hoje: date | None = None) -> tuple[date, date]:
+    """(desde, ate) inclusivos. Padrão: os últimos DIAS_CONSUMO dias até hoje.
+    ValueError se vier invertido, no futuro ou maior que DIAS_CONSUMO_MAX."""
+    hoje = hoje or date.today()
+    ate = ate or hoje
+    desde = desde or (ate - timedelta(days=DIAS_CONSUMO - 1))
+    if ate > hoje:
+        raise ValueError('O fim do período do consumo não pode passar de hoje.')
+    if desde > ate:
+        raise ValueError('O início do período do consumo vem depois do fim.')
+    if (ate - desde).days + 1 > DIAS_CONSUMO_MAX:
+        raise ValueError('O período do consumo vai até 2 anos.')
+    return desde, ate
+
+
+def _consumo(filial: int | None, desde: date, ate: date) -> dict:
+    """{quant: {item: q}, valor: {item: R$}} das requisições do período (cache próprio)."""
+    def ler():
+        params = {'emp': EMPRESA, 'desde': desde, 'ate': ate + timedelta(days=1)}
+        if filial is not None:
+            params['fil'] = filial
+        f_m = '' if filial is None else 'AND MESTQFIL = :fil'
+        df = _ler(_SQL_CONSUMO.format(filtro_filial=f_m), **params)
+        return {'quant': {int(e): _num(c) for e, c in zip(df.ESTQ, df.CONSUMO)},
+                'valor': {int(e): _num(v) for e, v in zip(df.ESTQ, df.CONSUMO_VALOR)}}
+    chave = f'almox:consumo:{"todas" if filial is None else filial}:{desde.isoformat()}:{ate.isoformat()}'
+    return _cacheado(chave, CACHE_SEG, ler)
 
 
 def _ler_compras(filial: int | None, hoje: date) -> dict[int, list[dict]]:
@@ -802,11 +841,16 @@ def foto_item(cod: int, lado: int = FOTO_LADO_PADRAO) -> bytes | None:
     return valor or None
 
 
-def _preparado(filial: int | None, fonte: str = 'sga') -> tuple[pd.DataFrame, dict, dict]:
+def _preparado(filial: int | None, fonte: str = 'sga',
+               periodo: tuple[date, date] | None = None) -> tuple[pd.DataFrame, dict, dict]:
+    """`periodo` (desde, ate) do consumo médio; None = os últimos DIAS_CONSUMO dias."""
     erp = _erp(filial)
     prazos = prazos_app()
     minimos = minimos_app(filial) if fonte == 'manager' else None
-    df = preparar_itens(erp['itens'], erp['grupos'], minimos, erp['consumo'], prazos)
+    desde, ate = periodo or periodo_consumo()
+    cons = _consumo(filial, desde, ate)
+    df = preparar_itens(erp['itens'], erp['grupos'], minimos, cons['quant'], prazos,
+                        dias_consumo=(ate - desde).days + 1, consumo_valor=cons['valor'])
     juntar_compras(df, erp.get('compras') or {})
     juntar_fotos(df, erp.get('fotos'))
     return df, erp, prazos
@@ -825,19 +869,24 @@ def juntar_compras(df: pd.DataFrame, compras: dict[int, list[dict]]) -> pd.DataF
     return df
 
 
-def resumo(filial: int | None, fonte: str = 'sga') -> dict:
-    """Payload da tela. `filial` None = todas somadas; `fonte` do mínimo: sga | manager."""
-    chave = f'almox:resumo:{"todas" if filial is None else filial}:{fonte}:{_versao()}'
+def resumo(filial: int | None, fonte: str = 'sga', periodo: tuple[date, date] | None = None) -> dict:
+    """Payload da tela. `filial` None = todas somadas; `fonte` do mínimo: sga | manager;
+    `periodo` (desde, ate) do consumo médio (padrão: últimos DIAS_CONSUMO dias)."""
+    desde, ate = periodo or periodo_consumo()
+    chave = (f'almox:resumo:{"todas" if filial is None else filial}:{fonte}:'
+             f'{desde.isoformat()}:{ate.isoformat()}:{_versao()}')
 
     def calcular():
-        itens, erp, prazos = _preparado(filial, fonte)
+        itens, erp, prazos = _preparado(filial, fonte, (desde, ate))
         cards = montar_grupos(itens, erp['grupos'], prazos)
         recorte = itens[itens.RAIZ.isin([c['codigo'] for c in cards])]
         return {
             'filial': filial,
             'fonte': fonte,
             'atualizado_em': erp['lido_em'],
-            'dias_consumo': DIAS_CONSUMO,
+            'dias_consumo': (ate - desde).days + 1,
+            'consumo_desde': desde.isoformat(),
+            'consumo_ate': ate.isoformat(),
             'dias_compra': DIAS_COMPRA,
             'prazo_padrao': PRAZO_PADRAO,
             'totais': _contas(recorte),
@@ -874,8 +923,9 @@ def filtrar_itens(df: pd.DataFrame, grupos: pd.DataFrame, grupo: int | None, lis
     return df
 
 
-def listar_itens(filial: int | None, grupo: int | None, lista: str, fonte: str = 'sga') -> dict:
-    df, erp, _ = _preparado(filial, fonte)
+def listar_itens(filial: int | None, grupo: int | None, lista: str, fonte: str = 'sga',
+                 periodo: tuple[date, date] | None = None) -> dict:
+    df, erp, _ = _preparado(filial, fonte, periodo)
     sel = filtrar_itens(df, erp['grupos'], grupo, lista)
     return {'filial': filial, 'fonte': fonte, 'grupo': grupo, 'lista': lista, 'total': int(len(sel)),
             'itens': [_item(r) for r in sel.itertuples()]}
