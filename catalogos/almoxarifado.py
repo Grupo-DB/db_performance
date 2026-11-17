@@ -46,6 +46,8 @@ abertas e em que pé está o processo. Regras do dicionário do SGA
   acompanhamento); sem prazo no item vale o da ordem (IPCOPRENT/PCOPRENT sobre
   PCODATAPED). Mais da metade das ordens abertas não tem prazo nenhum: aí não
   há previsão nem "atrasada". Ordem já recebida por inteiro não conta.
+- Só entram os dos últimos DIAS_COMPRA (30) dias: requisição aberta no período
+  ou ordem emitida no período (17/11/2026).
 - PCOMSITAPROV (aprovação da requisição) está sempre 0 — a empresa não usa.
 
 FOTO (16/11/2026): a foto do item fica em ESTOQUEFOTO.ESTQFFOTO (BMP no banco,
@@ -195,6 +197,7 @@ _SQL_COMPRAS = """
     ) O
     WHERE PC.PCOMEMP = :emp AND I.IPCOMSIT IN (0, 1, 2) AND PC.PCOMSIT IN (0, 3)
       AND I.IPCOMITEM > 0 {filtro_filial}
+      AND (PC.PCOMDATA >= :desde OR O.PCODATAORDEM >= :desde)
 """
 
 # Só a chave: ler o BLOB de 3 mil fotos levaria minutos. Abaixo de 100 bytes não é imagem.
@@ -202,6 +205,10 @@ _SQL_FOTOS = "SELECT ESTQFESTQ ESTQ FROM ESTOQUEFOTO WHERE DATALENGTH(ESTQFFOTO)
 _SQL_FOTO = text("SELECT TOP 1 ESTQFFOTO FROM ESTOQUEFOTO WHERE ESTQFESTQ = :cod")
 FOTO_LADO_PADRAO = 360
 FOTO_LADO_MAX = 1200
+
+# Só o que andou nos últimos N dias: requisição aberta OU ordem emitida nesse
+# período (pedido de 17/11/2026 — ordem velha esquecida no SGA poluía a lista).
+DIAS_COMPRA = 30
 
 ETAPAS_COMPRA = {0: ('requisicao', 'Requisição pendente'),
                  1: ('coleta', 'Em coleta de preço'),
@@ -675,7 +682,7 @@ def _erp(filial: int | None) -> dict:
 
 def _ler_compras(filial: int | None, hoje: date) -> dict[int, list[dict]]:
     """Compra em andamento é informação extra: se a consulta falhar, a tela segue sem ela."""
-    params = {'emp': EMPRESA}
+    params = {'emp': EMPRESA, 'desde': hoje - timedelta(days=DIAS_COMPRA)}
     if filial is not None:
         params['fil'] = filial
     try:
@@ -759,6 +766,7 @@ def resumo(filial: int | None, fonte: str = 'sga') -> dict:
             'fonte': fonte,
             'atualizado_em': erp['lido_em'],
             'dias_consumo': DIAS_CONSUMO,
+            'dias_compra': DIAS_COMPRA,
             'prazo_padrao': PRAZO_PADRAO,
             'totais': _contas(recorte),
             'grupos': cards,
