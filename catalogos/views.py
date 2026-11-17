@@ -1002,3 +1002,68 @@ def almoxarifado_prazo(request):
     except ValueError as exc:
         return Response({'erro': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response({'ok': True})
+
+
+# ---------------------------------------------------------------------------
+# Painel de Insumos de produção — ver catalogos/almox_insumos.py
+# ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+def almoxarifado_insumos(request):
+    """Painel: ?filial=0|…|todas &dias=30|90|180|365 &fonte=sga|manager."""
+    from . import almox_insumos
+
+    if (erro := _almox_acesso(request)):
+        return erro
+    filial, erro = _almox_filial(request.GET.get('filial'))
+    if erro:
+        return erro
+    try:
+        dias = int(request.GET.get('dias') or almox_insumos.DIAS_PADRAO)
+    except ValueError:
+        dias = 0
+    if dias not in almox_insumos.DIAS_OPCOES:
+        return Response({'erro': f'dias deve ser um de: {", ".join(map(str, almox_insumos.DIAS_OPCOES))}.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        dados = almox_insumos.painel(filial, dias, _almox_fonte(request))
+        dados['filiais'] = almox_insumos.ax.filiais()
+    except Exception as exc:
+        logger.exception('painel de insumos')
+        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+    dados['pode_editar'] = _almox_pode_editar(request.user)
+    return Response(dados)
+
+
+@api_view(['POST', 'PUT'])
+def almoxarifado_insumos_monitorados(request):
+    """POST {"tipo": "grupo"|"item", "codigo": 1702} inclui; PUT {"ids": [3, 1, 2]} reordena."""
+    from . import almox_insumos
+
+    if (erro := _almox_acesso(request, editar=True)):
+        return erro
+    if request.method == 'PUT':
+        ids = request.data.get('ids')
+        if not isinstance(ids, list):
+            return Response({'erro': 'Mande a lista de ids.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            almox_insumos.reordenar([int(i) for i in ids])
+        except (TypeError, ValueError):
+            return Response({'erro': 'ids devem ser números.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'ok': True})
+    try:
+        r = almox_insumos.incluir(str(request.data.get('tipo') or ''), request.data.get('codigo'), request.user)
+    except ValueError as exc:
+        return Response({'erro': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(r, status=status.HTTP_201_CREATED if r['criado'] else status.HTTP_200_OK)
+
+
+@api_view(['DELETE'])
+def almoxarifado_insumos_monitorado(request, pk):
+    from . import almox_insumos
+
+    if (erro := _almox_acesso(request, editar=True)):
+        return erro
+    if not almox_insumos.remover(int(pk)):
+        return Response({'erro': 'Não está no painel.'}, status=status.HTTP_404_NOT_FOUND)
+    return Response(status=status.HTTP_204_NO_CONTENT)

@@ -379,3 +379,23 @@ class PrazoAtencaoGrupo(models.Model):
 
     def __str__(self):
         return f'Grupo {self.grupo}: {self.dias} dias'
+
+
+class InsumoMonitorado(models.Model):
+    """O que aparece no painel de Insumos (17/11/2026): um grupo do SGA (com os subgrupos) ou um item avulso."""
+    TIPOS = [('grupo', 'Grupo de itens'), ('item', 'Item')]
+
+    tipo = models.CharField(max_length=5, choices=TIPOS)
+    codigo = models.IntegerField(help_text='GALMCOD (grupo) ou ESTQCOD (item) do SGA')
+    ordem = models.PositiveIntegerField(default=0)
+    incluido_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    incluido_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Insumo monitorado'
+        verbose_name_plural = 'Insumos monitorados'
+        unique_together = ('tipo', 'codigo')
+        ordering = ('ordem', 'id')
+
+    def __str__(self):
+        return f'{self.get_tipo_display()} {self.codigo}'
