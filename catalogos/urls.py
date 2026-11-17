@@ -6,7 +6,8 @@ from .views import (
     PedidoViewSet, PedidoNotificacaoViewSet, AnexoPedidoViewSet, ItemPedidoNaoCatalogadoViewSet,
     CatalogoPDFViewSet, ItemErpCatalogoViewSet, EquipamentoCatalogoViewSet,
     consultar_produtos, consultar_imagem_produto, almoxarifado_resumo,
-    almoxarifado_itens, almoxarifado_foto, almoxarifado_minimos, almoxarifado_prazo,
+    almoxarifado_itens, almoxarifado_foto, almoxarifado_catalogo,
+    almoxarifado_catalogo_opcoes, almoxarifado_catalogo_item, almoxarifado_minimos, almoxarifado_prazo,
     serve_catalogo_pdf_inline,
 )
 
@@ -34,6 +35,9 @@ urlpatterns = [
     path('erp/almoxarifado/',   almoxarifado_resumo,      name='erp-almoxarifado'),
     path('erp/almoxarifado/itens/',   almoxarifado_itens,   name='erp-almoxarifado-itens'),
     path('erp/almoxarifado/foto/<int:cod>/', almoxarifado_foto, name='erp-almoxarifado-foto'),
+    path('erp/almoxarifado/catalogo/', almoxarifado_catalogo, name='erp-almoxarifado-catalogo'),
+    path('erp/almoxarifado/catalogo/opcoes/', almoxarifado_catalogo_opcoes, name='erp-almoxarifado-catalogo-opcoes'),
+    path('erp/almoxarifado/catalogo/<int:cod>/', almoxarifado_catalogo_item, name='erp-almoxarifado-catalogo-item'),
     path('erp/almoxarifado/minimos/', almoxarifado_minimos, name='erp-almoxarifado-minimos'),
     path('erp/almoxarifado/prazos/',  almoxarifado_prazo,   name='erp-almoxarifado-prazos'),
     path('catalogos-pdf/<int:pk>/inline/', serve_catalogo_pdf_inline, name='catalogo-pdf-inline'),

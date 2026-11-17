@@ -1,4 +1,5 @@
 import base64
+import logging
 import os
 import threading
 from email.mime.image import MIMEImage
@@ -26,6 +27,8 @@ from .models import (
     Fabricante, Equipamento, Veiculo, Secao, Item, Pedido, ItemPedido, AnexoPedido,
     ItemPedidoNaoCatalogado, PedidoNotificacao, CatalogoPDF, ItemErpCatalogo, EquipamentoCatalogo,
 )
+logger = logging.getLogger(__name__)
+
 from .serializers import (
     FabricanteSerializer, EquipamentoSerializer,
     VeiculoListSerializer, VeiculoDetailSerializer, VeiculoCreateUpdateSerializer,
@@ -858,6 +861,106 @@ def almoxarifado_itens(request):
     try:
         return Response(almoxarifado.listar_itens(filial, grupo, lista, _almox_fonte(request)))
     except Exception as exc:
+        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+def _cat_data(bruto):
+    from datetime import date as _d
+    bruto = (bruto or '').strip()
+    if not bruto:
+        return None
+    return _d.fromisoformat(bruto[:10])
+
+
+def _cat_int(request, nome):
+    v = (request.GET.get(nome) or '').strip()
+    return int(v) if v else None
+
+
+def _cat_filtros(request):
+    """Filtros comuns do catálogo (ValueError se algum vier torto)."""
+    return {
+        'desde': _cat_data(request.GET.get('desde')),
+        'ate': _cat_data(request.GET.get('ate')),
+        'cc': _cat_int(request, 'cc'),
+        'eqp': _cat_int(request, 'eqp'),
+        'req': _cat_int(request, 'req'),
+    }
+
+
+@api_view(['GET'])
+def almoxarifado_catalogo(request):
+    """
+    Catálogo de itens: ?filial=0|…|todas &q=<nome/código/referência> &grupo=<GALMCOD>
+    &saldo=com|sem &situacao=abaixo|atencao|ok|sem_minimo &foto=com|sem &compra=com|sem
+    &baixa=com|sem &parados=1 &desde=&ate=(AAAA-MM-DD, padrão 90 dias) &cc=&eqp=&req=
+    &ordem=nome|codigo|saldo|valor|baixado|custo_baixado|ultima_baixa|vezes &pagina=&por_pagina=
+    """
+    from . import almox_catalogo
+
+    if (erro := _almox_acesso(request)):
+        return erro
+    filial, erro = _almox_filial(request.GET.get('filial'))
+    if erro:
+        return erro
+    g = request.GET
+    try:
+        filtros = _cat_filtros(request)
+        grupo = _cat_int(request, 'grupo')
+        pagina = int(g.get('pagina') or 1)
+        por_pagina = int(g.get('por_pagina') or 48)
+    except ValueError:
+        return Response({'erro': 'Filtro inválido (números e datas AAAA-MM-DD).'}, status=status.HTTP_400_BAD_REQUEST)
+    ordem = (g.get('ordem') or 'nome').strip()
+    if ordem not in almox_catalogo.ORDENS:
+        ordem = 'nome'
+    try:
+        return Response(almox_catalogo.listar(
+            filial, q=(g.get('q') or '').strip()[:120], grupo=grupo,
+            saldo=(g.get('saldo') or '').strip(), situacao=(g.get('situacao') or '').strip(),
+            foto=(g.get('foto') or '').strip(), compra=(g.get('compra') or '').strip(),
+            baixa=(g.get('baixa') or '').strip(), parados=g.get('parados') in ('1', 'true', 'sim'),
+            ordem=ordem, pagina=pagina, por_pagina=por_pagina, fonte=_almox_fonte(request), **filtros))
+    except Exception as exc:
+        logger.exception('catálogo do almoxarifado')
+        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+@api_view(['GET'])
+def almoxarifado_catalogo_opcoes(request):
+    """Opções dos filtros: centros de custo, equipamentos e requisitantes usados nas baixas, e os grupos."""
+    from . import almox_catalogo
+
+    if (erro := _almox_acesso(request)):
+        return erro
+    filial, erro = _almox_filial(request.GET.get('filial'))
+    if erro:
+        return erro
+    try:
+        return Response(almox_catalogo.opcoes(filial))
+    except Exception as exc:
+        logger.exception('opções do catálogo do almoxarifado')
+        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+@api_view(['GET'])
+def almoxarifado_catalogo_item(request, cod):
+    """Para onde foi o item: baixas no período (?desde&ate&cc&eqp&req&filial), por destino e por mês."""
+    from . import almox_catalogo
+
+    if (erro := _almox_acesso(request)):
+        return erro
+    filial, erro = _almox_filial(request.GET.get('filial'))
+    if erro:
+        return erro
+    try:
+        filtros = _cat_filtros(request)
+    except ValueError:
+        return Response({'erro': 'Filtro inválido (números e datas AAAA-MM-DD).'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        return Response(almox_catalogo.detalhe(int(cod), filial, fonte=_almox_fonte(request), **filtros))
+    except Exception as exc:
+        logger.exception('detalhe do catálogo do almoxarifado')
         return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
 
 
