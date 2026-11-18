@@ -1028,6 +1028,25 @@ def almoxarifado_prazo(request):
 # ---------------------------------------------------------------------------
 
 @api_view(['GET'])
+def almoxarifado_indicadores(request):
+    """Painel de indicadores: ?filial=0|…|todas &fonte=sga|manager."""
+    from . import almox_indicadores
+
+    if (erro := _almox_acesso(request)):
+        return erro
+    filial, erro = _almox_filial(request.GET.get('filial'))
+    if erro:
+        return erro
+    try:
+        dados = dict(almox_indicadores.indicadores(filial, _almox_fonte(request)))
+        dados['filiais'] = almox_indicadores.ax.filiais()
+    except Exception as exc:
+        logger.exception('indicadores do almoxarifado')
+        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+    return Response(dados)
+
+
+@api_view(['GET'])
 def almoxarifado_insumos(request):
     """Painel: ?filial=0|…|todas &dias=30|90|180|365 &fonte=sga|manager."""
     from . import almox_insumos
