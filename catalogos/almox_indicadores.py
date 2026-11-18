@@ -12,12 +12,15 @@ tela do Almoxarifado. Por cima disso, o que só existe aqui:
 - % sem foto = sem foto ÷ itens COM SALDO (item sem saldo não é estoque).
 - % sem mínimo = com saldo e sem mínimo ÷ com saldo.
 - Consumo de 12 meses (requisições tipo 2 líquidas, como no resto do
-  almoxarifado) → curva ABC (A até 80% do consumo, B até 95%, C o resto),
-  giro (consumo 12 m ÷ valor em estoque) e cobertura em dias.
-- Idade do estoque: dias desde a última requisição do item (MOVESTOQUE tipo 2
-  com quantidade negativa), só itens com saldo, em faixas. Sem requisição
-  nenhuma = "nunca saiu" (item comprado e nunca usado, ou só vendido/transferido).
-- Entradas (tipo 1, nota) × consumo (tipo 2) mês a mês, 12 meses.
+  almoxarifado), giro (consumo 12 m ÷ valor em estoque) e cobertura em dias.
+- Parado: item com saldo sem requisição (MOVESTOQUE tipo 2 com quantidade
+  negativa) há mais de 1 ano, ou que nunca saiu.
+- Movimentações dos últimos 30 dias (a mesma leitura da Visão Geral), por dia e
+  por grupo-raiz, para o gráfico filtrar por grupo; e as últimas movimentações.
+
+18/11 (tarde): a pedido, saíram idade do estoque, curva ABC, valor por grupo,
+entradas × consumo mensal e os cards de parado e giro; entraram a distribuição
+do valor por grupo (pizza) e as movimentações da Visão Geral.
 """
 from __future__ import annotations
 
@@ -27,7 +30,6 @@ import pandas as pd
 
 from . import almoxarifado as ax
 
-MESES = 12
 TOP = 10
 FAIXAS_IDADE = (  # (até N dias, chave, rótulo); None = sem limite
     (30, 'ate30', 'Até 30 dias'),
@@ -46,28 +48,9 @@ _SQL_ULTIMA_SAIDA = """
     GROUP BY MESTQESTQ
 """
 
-# Por item para dar para cortar no mesmo recorte de grupos da tela.
-_SQL_MENSAL = """
-    SELECT YEAR(MESTQDATA) ANO, MONTH(MESTQDATA) MES, MESTQREFTIPO TIPO, MESTQESTQ ESTQ,
-           SUM(MESTQCUSTO) VALOR
-    FROM MOVESTOQUE
-    WHERE MESTQEMP = :emp AND MESTQREFTIPO IN (1, 2) AND MESTQDATA >= :desde {filtro_filial}
-    GROUP BY YEAR(MESTQDATA), MONTH(MESTQDATA), MESTQREFTIPO, MESTQESTQ
-"""
-
 
 def _pct(parte: int | float, todo: int | float) -> float | None:
     return round(100.0 * parte / todo, 1) if todo else None
-
-
-def inicio_meses(hoje: date, meses: int = MESES) -> date:
-    """Dia 1º do mês que abre a janela de `meses` meses terminando no mês de hoje."""
-    m = hoje.month - (meses - 1)
-    a = hoje.year
-    while m <= 0:
-        m += 12
-        a -= 1
-    return date(a, m, 1)
 
 
 # ── Montagem (funções puras) ────────────────────────────────────────────────
@@ -96,40 +79,6 @@ def juntar_extras(df: pd.DataFrame, consumo12: dict[int, float], ultima: dict[in
     return df
 
 
-def curva_abc(df: pd.DataFrame) -> dict:
-    """Classes pelo consumo de 12 meses (só itens que tiveram consumo)."""
-    c = df[df.CONSUMO12 > 0].sort_values('CONSUMO12', ascending=False)
-    total = float(c.CONSUMO12.sum())
-    saida = {k: {'itens': 0, 'valor': 0.0, 'valor_estoque': 0.0} for k in ('A', 'B', 'C')}
-    if not total:
-        return {'total': 0.0, 'classes': saida}
-    acum = c.CONSUMO12.cumsum() / total
-    # A inclui o item que cruza os 80% (o primeiro já pode passar disso sozinho).
-    anterior = acum.shift(fill_value=0.0)
-    classe = ['A' if a < 0.80 else 'B' if a < 0.95 else 'C' for a in anterior]
-    for k, v, e in zip(classe, c.CONSUMO12, c.VALOR):
-        saida[k]['itens'] += 1
-        saida[k]['valor'] += float(v)
-        saida[k]['valor_estoque'] += float(e)
-    for k in saida:
-        saida[k]['valor'] = round(saida[k]['valor'], 2)
-        saida[k]['valor_estoque'] = round(saida[k]['valor_estoque'], 2)
-        saida[k]['pct_itens'] = _pct(saida[k]['itens'], len(c))
-        saida[k]['pct_valor'] = _pct(saida[k]['valor'], total)
-    return {'total': round(total, 2), 'itens': int(len(c)), 'classes': saida}
-
-
-def idade(df: pd.DataFrame) -> list[dict]:
-    com = df[df.TEM_SALDO]
-    total = float(com.VALOR.sum())
-    linhas = []
-    for chave, rotulo in [(c, r) for _, c, r in FAIXAS_IDADE] + [NUNCA]:
-        g = com[com.FAIXA == chave]
-        linhas.append({'faixa': chave, 'rotulo': rotulo, 'itens': int(len(g)),
-                       'valor': round(float(g.VALOR.sum()), 2), 'pct_valor': _pct(float(g.VALOR.sum()), total)})
-    return linhas
-
-
 def por_grupo(df: pd.DataFrame) -> list[dict]:
     linhas = []
     for (cod, nome), g in df.groupby(['RAIZ', 'RAIZ_NOME']):
@@ -155,26 +104,47 @@ def por_grupo(df: pd.DataFrame) -> list[dict]:
     return linhas
 
 
-def mensal(mov: pd.DataFrame, codigos: set[int], hoje: date) -> list[dict]:
-    """Entradas por nota e consumo por requisição, R$, mês a mês (meses vazios inclusos)."""
-    ini = inicio_meses(hoje)
-    chaves = []
-    a, m = ini.year, ini.month
-    while (a, m) <= (hoje.year, hoje.month):
-        chaves.append((a, m))
-        m += 1
-        if m > 12:
-            m, a = 1, a + 1
-    ent, con = {}, {}
-    if not mov.empty:
-        mv = mov.copy()
-        mv['VALOR'] = pd.to_numeric(mv.VALOR, errors='coerce').fillna(0.0)
-        mv = mv[mv.ESTQ.astype(int).isin(codigos) & (mv.VALOR.abs() < ax.CUSTO_UNITARIO_MAX * 10)]
-        for (ano, mes, tipo), v in mv.groupby(['ANO', 'MES', 'TIPO']).VALOR.sum().items():
-            alvo = ent if int(tipo) == 1 else con
-            alvo[(int(ano), int(mes))] = float(v) if int(tipo) == 1 else -float(v)
-    return [{'mes': f'{a}-{m:02d}', 'entradas': round(ent.get((a, m), 0.0), 2),
-             'consumo': round(max(0.0, con.get((a, m), 0.0)), 2)} for a, m in chaves]
+ULTIMAS = 15  # por grupo: a tabela filtra por grupo e precisa de linhas de cada um
+
+
+def movimentos(mov: pd.DataFrame, df: pd.DataFrame, hoje: date) -> dict:
+    """Entradas × saídas por dia (R$) nos últimos 30 dias, no total e por grupo-raiz,
+    e as últimas movimentações. Mesmas regras de almoxarifado.montar_movimentos."""
+    dias = [hoje - timedelta(days=i) for i in range(ax.DIAS_MOVIMENTO - 1, -1, -1)]
+    saida = {'dias': [d.isoformat() for d in dias], 'grupos': {}, 'ultimas': []}
+    if mov.empty or df.empty:
+        return saida
+    m = mov.copy()
+    m['QUANT'] = pd.to_numeric(m.QUANT, errors='coerce').fillna(0.0)
+    m['VALOR'] = pd.to_numeric(m.VALOR, errors='coerce').fillna(0.0).abs()
+    m.loc[m.VALOR > ax.CUSTO_UNITARIO_MAX * 10, 'VALOR'] = 0.0
+    m['DIA'] = pd.to_datetime(m.DATA).dt.date
+    info = df.drop_duplicates('ESTQCOD').set_index('ESTQCOD')
+    m = m[m.ESTQ.isin(info.index)]
+    if m.empty:
+        return saida
+    m['RAIZ'] = [int(info.at[e, 'RAIZ']) for e in m.ESTQ]
+    m['SENTIDO'] = ['entradas' if q > 0 else 'saidas' for q in m.QUANT]
+    soma = m.groupby(['RAIZ', 'SENTIDO', 'DIA']).VALOR.sum()
+    for raiz in sorted(m.RAIZ.unique()):
+        saida['grupos'][str(raiz)] = {
+            sentido: [round(float(soma.get((raiz, sentido, d), 0.0)), 2) for d in dias]
+            for sentido in ('entradas', 'saidas')}
+    # As 15 mais recentes de cada grupo (inclui as 15 mais recentes no geral).
+    ult = m.sort_values('DATA', ascending=False).groupby('RAIZ', sort=False).head(ULTIMAS)
+    saida['ultimas'] = [{
+        'data': pd.Timestamp(r.DATA).date().isoformat(),
+        'tipo': ax.TIPOS_MOVIMENTO.get(int(r.TIPO), str(r.TIPO)),
+        'entrada': bool(r.QUANT > 0),
+        'codigo': int(r.ESTQ),
+        'item': str(info.at[r.ESTQ, 'ESTQNOME'] or '').strip(),
+        'grupo_codigo': int(r.RAIZ),
+        'grupo': info.at[r.ESTQ, 'RAIZ_NOME'],
+        'quantidade': round(abs(float(r.QUANT)), 3),
+        'unidade': str(info.at[r.ESTQ, 'ESPSIGLA'] or '').strip(),
+        'valor': round(float(r.VALOR), 2),
+    } for r in ult.itertuples()]
+    return saida
 
 
 def _linha_item(r, **extra) -> dict:
@@ -185,6 +155,7 @@ def _linha_item(r, **extra) -> dict:
 
 
 def montar(df: pd.DataFrame, mov: pd.DataFrame, hoje: date) -> dict:
+    """`mov` = MOVESTOQUE dos últimos 30 dias (almoxarifado._erp)."""
     c = ax._contas(df)
     valor = c['valor']
     consumo12 = float(df.CONSUMO12.sum())
@@ -205,9 +176,7 @@ def montar(df: pd.DataFrame, mov: pd.DataFrame, hoje: date) -> dict:
             'pct_valor_parado': _pct(float(parados.VALOR.sum()), valor),
         },
         'grupos': por_grupo(df),
-        'idade': idade(df),
-        'abc': curva_abc(df),
-        'mensal': mensal(mov, set(int(x) for x in df.ESTQCOD), hoje),
+        'movimentos': movimentos(mov, df, hoje),
         'top_valor': [_linha_item(r) for r in com_saldo.nlargest(TOP, 'VALOR').itertuples()],
         'top_consumo': [_linha_item(r) for r in df[df.CONSUMO12 > 0].nlargest(TOP, 'CONSUMO12').itertuples()],
         'top_parados': [_linha_item(r, dias_parado=None if pd.isna(r.DIAS_PARADO) else int(r.DIAS_PARADO))
@@ -224,9 +193,7 @@ def _ler_extras(filial: int | None, hoje: date) -> dict:
             params['fil'] = filial
         f_m = '' if filial is None else 'AND MESTQFIL = :fil'
         ult = ax._ler(_SQL_ULTIMA_SAIDA.format(filtro_filial=f_m), **params)
-        mov = ax._ler(_SQL_MENSAL.format(filtro_filial=f_m), desde=inicio_meses(hoje), **params)
-        return {'ultima': {int(e): pd.Timestamp(u).date() for e, u in zip(ult.ESTQ, ult.ULTIMA) if pd.notna(u)},
-                'mov': mov}
+        return {'ultima': {int(e): pd.Timestamp(u).date() for e, u in zip(ult.ESTQ, ult.ULTIMA) if pd.notna(u)}}
     return ax._cacheado(f'almox:indicadores:extras:{"todas" if filial is None else filial}:{hoje.isoformat()}',
                         ax.CACHE_SEG, ler)
 
@@ -241,7 +208,7 @@ def indicadores(filial: int | None, fonte: str = 'sga') -> dict:
         cons12 = ax._consumo(filial, hoje - timedelta(days=364), hoje)['valor']
         extras = _ler_extras(filial, hoje)
         df = juntar_extras(df, cons12, extras['ultima'], hoje)
-        return {'filial': filial, 'fonte': fonte, 'atualizado_em': erp['lido_em'], 'meses': MESES,
-                'parado_dias': PARADO_DIAS, **montar(df, extras['mov'], hoje)}
+        return {'filial': filial, 'fonte': fonte, 'atualizado_em': erp['lido_em'],
+                'parado_dias': PARADO_DIAS, **montar(df, erp['mov'], hoje)}
 
     return ax._cacheado(chave, ax.CACHE_SEG, calcular)
