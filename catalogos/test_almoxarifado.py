@@ -226,6 +226,21 @@ class CompraEmAndamentoTests(SimpleTestCase):
         self.assertEqual(r['compra_texto'], 'Ordem de compra 500 — aguardando aprovação, entrega parcial, entrega atrasada (+1)')
         self.assertEqual(a.resumo_compra(None)['compra_etapa'], None)
 
+    def test_nota_so_pre_lancada_nao_conta_como_recebida(self):
+        # OC 143002: 70 de 70 "faturados" no SGA, mas a nota 239917 está pendente.
+        df = pd.DataFrame([
+            self.linha(5, 76022, 2, ORDEM=143002.0, APROV_ORDEM=1.0, QUANT_ORDEM=70.0, QUANT_RECEBIDA=70.0,
+                       QUANT_CANCELADA=0.0, QUANT_NF_PENDENTE=70.0, NF_PENDENTE=239917.0),
+            # Metade registrada, metade em nota pendente: falta só a pendente.
+            self.linha(6, 76023, 2, ORDEM=143003.0, APROV_ORDEM=1.0, QUANT_ORDEM=10.0, QUANT_RECEBIDA=10.0,
+                       QUANT_CANCELADA=0.0, QUANT_NF_PENDENTE=5.0, NF_PENDENTE=240000.0),
+        ])
+        c = a.montar_compras(df, date(2026, 11, 17))
+        self.assertEqual((c[5][0]['quantidade'], c[5][0]['recebido'], c[5][0]['detalhe']),
+                         (70.0, 0.0, 'nota 239917 pendente de registro'))
+        self.assertEqual((c[6][0]['quantidade'], c[6][0]['detalhe']),
+                         (5.0, 'entrega parcial, nota 240000 pendente de registro'))
+
     def test_lista_e_contas(self):
         df = a.preparar_itens(pd.DataFrame([item(1, 12, 1, 5), item(2, 12, 9, 5)]), GRUPOS)
         a.juntar_compras(df, a.montar_compras(pd.DataFrame([self.linha(1, 100, 0)]), date(2026, 11, 16)))

@@ -179,6 +179,7 @@ _SQL_COMPRAS = """
            O.PCOCOD ORDEM, O.PCODATAORDEM DATA_ORDEM, O.PCOSITAPROV APROV_ORDEM,
            COALESCE(O.FORNOME, '') FORNECEDOR, O.IPCOQUANT QUANT_ORDEM,
            O.IPCOQUANTFAT QUANT_RECEBIDA, O.IPCOQUANTCANC QUANT_CANCELADA,
+           COALESCE(NP.QUANT, 0) QUANT_NF_PENDENTE, NP.NOTA NF_PENDENTE,
            CASE WHEN COALESCE(NULLIF(I.IPCOMPRAZO, 0), NULLIF(O.IPCOPRENT, 0), NULLIF(O.PCOPRENT, 0)) IS NOT NULL
                 THEN DATEADD(day, COALESCE(NULLIF(I.IPCOMPRAZO, 0), NULLIF(O.IPCOPRENT, 0), NULLIF(O.PCOPRENT, 0)),
                              CASE WHEN I.IPCOMDATA > '19000101' THEN I.IPCOMDATA ELSE O.PCODATAPED END) END PREVISAO,
@@ -189,7 +190,7 @@ _SQL_COMPRAS = """
     LEFT JOIN FUNCIONARIO FR ON FR.FUNCOD = COALESCE(NULLIF(I.IPCOMFUNREQ, 0), PC.PCOMFUNREQ)
     LEFT JOIN FUNCIONARIO FC ON FC.FUNCOD = PC.PCOMCOMPRADOR
     OUTER APPLY (
-        SELECT TOP 1 P.PCOCOD, P.PCODATAORDEM, P.PCOSITAPROV, F.FORNOME, P.PCODATAPED, P.PCOPRENT,
+        SELECT TOP 1 IP.IPCOCOD, P.PCOCOD, P.PCODATAORDEM, P.PCOSITAPROV, F.FORNOME, P.PCODATAPED, P.PCOPRENT,
                IP.IPCOQUANT, IP.IPCOQUANTFAT, IP.IPCOQUANTCANC, IP.IPCOPRENT
         FROM ITEMPROCESSOCOMPRA IP
         JOIN PROCESSOCOMPRA P ON P.PCOCOD = IP.IPCOPCO
@@ -197,6 +198,15 @@ _SQL_COMPRAS = """
         WHERE IP.IPCOIPCOM = I.IPCOMCOD AND P.PCOSIT IN (1, 4)
         ORDER BY P.PCODATAORDEM DESC
     ) O
+    -- IPCOQUANTFAT já soma a nota no pré-lançamento: o que está em nota pendente (0)
+    -- ou em alteração (3) ainda não entrou no estoque (NFESIT 1 = registrada).
+    OUTER APPLY (
+        SELECT SUM(FA.FIPCOQUANT) QUANT, MAX(N.NFENUMNF) NOTA
+        FROM FATITEMPROCESSOCOMPRA FA
+        JOIN ITEMNOTAFISCALENTRADA INFE ON INFE.INFECOD = FA.FIPCOINFE
+        JOIN NOTAFISCALENTRADA N ON N.NFECOD = INFE.INFENFE
+        WHERE FA.FIPCOIPCO = O.IPCOCOD AND N.NFESIT IN (0, 3)
+    ) NP
     WHERE PC.PCOMEMP = :emp AND I.IPCOMSIT IN (0, 1, 2) AND PC.PCOMSIT IN (0, 3)
       AND I.IPCOMITEM > 0 {filtro_filial}
       AND (PC.PCOMDATA >= :desde OR O.PCODATAORDEM >= :desde)
@@ -462,7 +472,10 @@ def montar_compras(df: pd.DataFrame, hoje: date,
         recebido = 0.0
         if sit == 2 and ordem:
             pedido = _num(r.QUANT_ORDEM) - _num(r.QUANT_CANCELADA)
-            recebido = _num(r.QUANT_RECEBIDA)
+            # Nota só pré-lançada (pendente/em alteração) já conta no faturado do
+            # SGA, mas o material não entrou: segue em compra (17/11, OC 143002).
+            na_nota = max(_num(getattr(r, 'QUANT_NF_PENDENTE', 0.0)), 0.0)
+            recebido = max(_num(r.QUANT_RECEBIDA) - na_nota, 0.0)
             if pedido > 0 and recebido >= pedido:
                 continue        # já entrou tudo por nota; o SGA só não virou o item ainda
             quant = max(pedido - recebido, 0.0) if pedido > 0 else quant
@@ -473,6 +486,10 @@ def montar_compras(df: pd.DataFrame, hoje: date,
                 detalhe.append('ordem reprovada')
             if recebido > 0:
                 detalhe.append('entrega parcial')
+            if na_nota > 0:
+                nf = getattr(r, 'NF_PENDENTE', None)
+                nf = None if nf is None or pd.isna(nf) else int(nf)
+                detalhe.append(f'nota {nf} pendente de registro' if nf else 'nota pendente de registro')
         cots: list[dict] = []
         if sit == 1:
             ipcom = getattr(r, 'IPCOM', None)
