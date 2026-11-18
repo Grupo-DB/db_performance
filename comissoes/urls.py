@@ -8,6 +8,7 @@ from .relatorio_parcelas import relatorio_vendas_parcelas
 from .clientes_inativos import clientes_inativos, marcar_alerta_cliente
 from .metas_lote import metas_lote
 from .exportacao import faturamento_exportacao
+from .simples_remessa import simples_remessa
 from .teste_valor_total import teste_total_vendedor_valor_total, descobrir_colunas_pedido, teste_pedidos_pendentes_erp
 from django.urls import path
 
@@ -34,6 +35,7 @@ urlpatterns = [
     # Fora do router: 'meta/lote/' cairia no detalhe do MetaViewSet (pk='lote').
     path('metas_lote/', metas_lote, name='metas_lote'),
     path('faturamento_exportacao/', faturamento_exportacao, name='faturamento_exportacao'),
+    path('simples_remessa/', simples_remessa, name='simples_remessa'),
     path('teste_total_vendedor_valor_total/', teste_total_vendedor_valor_total, name='teste_total_vendedor_valor_total'),
     path('descobrir_colunas_pedido/', descobrir_colunas_pedido, name='descobrir_colunas_pedido'),
     path('teste_pedidos_pendentes_erp/', teste_pedidos_pendentes_erp, name='teste_pedidos_pendentes_erp'),
