@@ -467,6 +467,7 @@ def montar_compras(df: pd.DataFrame, hoje: date,
         etapa, rotulo = ETAPAS_COMPRA[sit]
         quant = _num(r.QUANT)
         detalhe = []
+        nota_pendente = None     # nota de entrada pré-lançada (NFESIT 0/3) desta ordem
         ordem = None if pd.isna(r.ORDEM) else int(r.ORDEM)
         previsao = _data_iso(r.PREVISAO) if sit == 2 else None
         recebido = 0.0
@@ -488,8 +489,8 @@ def montar_compras(df: pd.DataFrame, hoje: date,
                 detalhe.append('entrega parcial')
             if na_nota > 0:
                 nf = getattr(r, 'NF_PENDENTE', None)
-                nf = None if nf is None or pd.isna(nf) else int(nf)
-                detalhe.append(f'nota {nf} pendente de registro' if nf else 'nota pendente de registro')
+                nota_pendente = {'numero': None if nf is None or pd.isna(nf) else int(nf),
+                                 'quantidade': round(na_nota, 3)}
         cots: list[dict] = []
         if sit == 1:
             ipcom = getattr(r, 'IPCOM', None)
@@ -520,6 +521,7 @@ def montar_compras(df: pd.DataFrame, hoje: date,
             'previsao': previsao,
             'atrasada': atrasada,
             'recebido': round(recebido, 3),
+            'nota_pendente': nota_pendente,
             'requisitante': str(r.REQUISITANTE or '').strip(),
             'comprador': str(r.COMPRADOR or '').strip(),
             'cotacoes': cots,
@@ -532,8 +534,9 @@ def montar_compras(df: pd.DataFrame, hoje: date,
 def resumo_compra(compras: list[dict] | None) -> dict:
     """Campos do item: etapa mais adiantada, quantidade em compra, texto curto."""
     if not compras:
-        return {'compras': [], 'em_compra': 0.0, 'compra_etapa': None, 'compra_texto': ''}
+        return {'compras': [], 'em_compra': 0.0, 'compra_etapa': None, 'compra_texto': '', 'nota_pendente': None}
     topo = compras[0]
+    nota = next((c['nota_pendente'] for c in compras if c.get('nota_pendente')), None)
     texto = topo['etapa_rotulo']
     if topo['ordem']:
         texto += f" {topo['ordem']}"
@@ -541,6 +544,8 @@ def resumo_compra(compras: list[dict] | None) -> dict:
         texto += f" (req. {topo['requisicao']})"
     if topo['detalhe']:
         texto += f" — {topo['detalhe']}"
+    if nota:
+        texto += f" — nota {nota['numero'] or ''} pendente de registro".replace('  ', ' ')
     if len(compras) > 1:
         texto += f" (+{len(compras) - 1})"
     return {
@@ -548,6 +553,8 @@ def resumo_compra(compras: list[dict] | None) -> dict:
         'em_compra': round(sum(c['quantidade'] for c in compras), 3),
         'compra_etapa': topo['etapa'],
         'compra_texto': texto,
+        # Já tem nota de entrada lançada, mas não registrada: o material não entrou.
+        'nota_pendente': nota,
     }
 
 

@@ -236,10 +236,14 @@ class CompraEmAndamentoTests(SimpleTestCase):
                        QUANT_CANCELADA=0.0, QUANT_NF_PENDENTE=5.0, NF_PENDENTE=240000.0),
         ])
         c = a.montar_compras(df, date(2026, 11, 17))
-        self.assertEqual((c[5][0]['quantidade'], c[5][0]['recebido'], c[5][0]['detalhe']),
-                         (70.0, 0.0, 'nota 239917 pendente de registro'))
-        self.assertEqual((c[6][0]['quantidade'], c[6][0]['detalhe']),
-                         (5.0, 'entrega parcial, nota 240000 pendente de registro'))
+        self.assertEqual((c[5][0]['quantidade'], c[5][0]['recebido'], c[5][0]['detalhe']), (70.0, 0.0, ''))
+        self.assertEqual(c[5][0]['nota_pendente'], {'numero': 239917, 'quantidade': 70.0})
+        self.assertEqual((c[6][0]['quantidade'], c[6][0]['detalhe'], c[6][0]['nota_pendente']['quantidade']),
+                         (5.0, 'entrega parcial', 5.0))
+        r = a.resumo_compra(c[5])
+        self.assertEqual((r['nota_pendente']['numero'], r['compra_texto']),
+                         (239917, 'Ordem de compra 143002 — nota 239917 pendente de registro'))
+        self.assertIsNone(a.resumo_compra(None)['nota_pendente'])
 
     def test_lista_e_contas(self):
         df = a.preparar_itens(pd.DataFrame([item(1, 12, 1, 5), item(2, 12, 9, 5)]), GRUPOS)
