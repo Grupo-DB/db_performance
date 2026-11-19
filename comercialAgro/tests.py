@@ -189,6 +189,12 @@ class CenarioMercadoTests(TestCase):
         self.assertEqual((r.data['t_ha'], r.data['culturas'], r.data['sem_duplo'], r.data['atualizado_por']),
                          (0.3, ['Soja', 'Milho'], False, 'lucas'))
 
+    def test_sem_tabela_usa_padrao(self):
+        from django.db import DatabaseError
+        with mock.patch('comercialAgro.models.CenarioMercado.atual', side_effect=DatabaseError('no such table')):
+            r = self.cli(self.vend).get('/comercialAgro/mercado/cenario/')
+        self.assertEqual((r.status_code, r.data['t_ha'], r.data['pendente']), (200, 0.25, True))
+
     def test_valida(self):
         r = self.cli(self.gestor).put('/comercialAgro/mercado/cenario/', {'t_ha': 'x', 'dose_t_ha': 2, 'ciclo_anos': 0,
                                                                           'culturas': ['Banana'], 'crescimento_pct': 10}, format='json')

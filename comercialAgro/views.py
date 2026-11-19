@@ -2,7 +2,7 @@ import logging
 from datetime import date, datetime, time, timedelta
 
 from django.contrib.auth.models import User
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -945,7 +945,11 @@ class CenarioMercadoView(APIView):
         return [EhGestor()] if self.request.method == 'PUT' else [TemAcesso()]
 
     def get(self, request):
-        return Response(_cenario_json(CenarioMercado.atual()))
+        try:
+            return Response(_cenario_json(CenarioMercado.atual()))
+        except DatabaseError as exc:  # migration 0004 ainda não aplicada: a tela segue com o padrão
+            logger.warning('Comercial Agro: cenário do mercado sem tabela (migration 0004?): %s', exc)
+            return Response({**_cenario_json(CenarioMercado()), 'pendente': True})
 
     def put(self, request):
         d = request.data
