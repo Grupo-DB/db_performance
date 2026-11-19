@@ -134,7 +134,27 @@ def municipios(uf: int) -> dict[int, str]:
 # ── 2/3. CAR/SICAR ──────────────────────────────────────────────────────────
 
 CAR_WFS = 'https://geoserver.car.gov.br/geoserver/sicar/wfs'
-CAR_CAMADA = 'sicar:sicar_imoveis_rs'
+CAR_CAMADA = 'sicar:sicar_imoveis_rs'  # uma camada por UF: sicar_imoveis_ac … sicar_imoveis_to (27, conferido 19/11/2026)
+
+
+def camada_car(uf: int | None) -> str:
+    sigla = UFS.get(int(uf or 0), ('RS', ''))[0]
+    return f'sicar:sicar_imoveis_{sigla.lower()}'
+
+
+def uf_do_codigo_car(codigo: str) -> int:
+    """O código do CAR começa pela sigla da UF ("RS-4303004-…")."""
+    sigla = (codigo or '')[:2].upper()
+    return next((c for c, (s, _) in UFS.items() if s == sigla), UF_IBGE)
+
+
+def uf_do_ponto(lat: float, lng: float) -> int | None:
+    """UF que contém o ponto, pela malha dos estados do IBGE (cache de 30 dias)."""
+    px, py = np.array([float(lng)]), np.array([float(lat)])
+    for f in malha(None).get('features', []):
+        if dentro(px, py, f['geometry'])[0]:
+            return int(f['properties']['ibge'])
+    return None
 CAR_PAGINA = 1000
 
 # O servidor do CAR (19/11/2026) só negocia TLS 1.2 com troca de chave RSA (AES256-GCM-SHA384,
@@ -165,11 +185,11 @@ def _sessao() -> requests.Session:
     return _sessao_car
 
 
-def _wfs(cql: str, count: int, start: int = 0, versao: str = '2.0.0') -> dict:
+def _wfs(cql: str, count: int, start: int = 0, versao: str = '2.0.0', uf: int | None = None) -> dict:
     """GetFeature no WFS do CAR. Filtro com coordenada vai na versão 1.0.0: na 2.0.0 o POINT do
     CQL é lido como (lat lng), mas o GeoJSON de saída vem (lng lat) — testado em 19/11/2026."""
     r = _sessao().get(CAR_WFS, params={
-        'service': 'WFS', 'version': versao, 'request': 'GetFeature', 'typeNames': CAR_CAMADA, 'typeName': CAR_CAMADA,
+        'service': 'WFS', 'version': versao, 'request': 'GetFeature', 'typeNames': camada_car(uf), 'typeName': camada_car(uf),
         'outputFormat': 'application/json', 'count': count, 'maxFeatures': count, 'startIndex': start, 'CQL_FILTER': cql,
     }, timeout=TIMEOUT)
     r.raise_for_status()
@@ -177,8 +197,15 @@ def _wfs(cql: str, count: int, start: int = 0, versao: str = '2.0.0') -> dict:
 
 
 def car_no_ponto(lat: float, lng: float) -> dict | None:
-    """Imóvel do CAR que contém o ponto (o maior, se houver sobreposição de declarações)."""
-    fc = _wfs(f'INTERSECTS(geo_area_imovel,POINT({float(lng):.6f} {float(lat):.6f}))', 10, versao='1.0.0')
+    """Imóvel do CAR que contém o ponto (o maior, se houver sobreposição de declarações), na camada da UF do ponto."""
+    try:
+        uf = uf_do_ponto(lat, lng)
+    except Exception as exc:  # malha do IBGE fora: tenta o RS
+        logger.warning('Comercial Agro: UF do ponto sem a malha: %s', exc)
+        uf = UF_IBGE
+    if uf is None:
+        return None  # fora do Brasil (ou no mar)
+    fc = _wfs(f'INTERSECTS(geo_area_imovel,POINT({float(lng):.6f} {float(lat):.6f}))', 10, versao='1.0.0', uf=uf)
     feats = [imovel(f) for f in fc.get('features', []) if f.get('geometry')]
     feats = [f for f in feats if f['status'] != 'CA']  # cancelado
     return max(feats, key=lambda f: f['area_ha']) if feats else None
@@ -186,7 +213,7 @@ def car_no_ponto(lat: float, lng: float) -> dict | None:
 
 def car_codigo(codigo: str) -> dict | None:
     cod = ''.join(ch for ch in codigo if ch.isalnum() or ch == '-')
-    fc = _wfs(f"cod_imovel='{cod}'", 1)
+    fc = _wfs(f"cod_imovel='{cod}'", 1, uf=uf_do_codigo_car(cod))
     feats = [imovel(f) for f in fc.get('features', []) if f.get('geometry')]
     return feats[0] if feats else None
 
@@ -195,7 +222,7 @@ def car_municipio(ibge: int, area_minima: float) -> list[dict]:
     """Todos os imóveis do município com área ≥ area_minima (paginado de 1000 em 1000)."""
     saida, start = [], 0
     while True:
-        fc = _wfs(f'cod_municipio_ibge={int(ibge)} AND area>={float(area_minima)}', CAR_PAGINA, start)
+        fc = _wfs(f'cod_municipio_ibge={int(ibge)} AND area>={float(area_minima)}', CAR_PAGINA, start, uf=int(ibge) // 100000)
         feats = fc.get('features', [])
         saida += [imovel(f) for f in feats if f.get('geometry')]
         start += len(feats)
@@ -369,7 +396,9 @@ def mapa_lavoura() -> MapaLavoura | None:
 def com_lavoura(im: dict, mapa: MapaLavoura | None) -> dict:
     """Acrescenta lavoura_ha / lavoura_pct / lavoura_ano ao imóvel (área do CAR × fração do mapa)."""
     im = dict(im)
-    r = mapa.lavoura(im['geometria']) if mapa else None
+    # O recorte do MapBiomas é só do RS: imóvel de outra UF na divisa sairia com a lavoura cortada.
+    fora = int(im.get('municipio_ibge') or 0) // 100000 not in (0, UF_IBGE)
+    r = mapa.lavoura(im['geometria']) if mapa and not fora else None
     if r:
         frac, pct = r
         im.update(lavoura_ha=round(float(im['area_ha']) * frac, 1), lavoura_pct=pct, lavoura_ano=mapa.ano)

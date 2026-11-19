@@ -157,3 +157,21 @@ class DadosPublicosTests(TestCase):
             r = self.cli(self.user).get('/comercialAgro/car/ponto/?lat=-30.005&lng=-52.995')
         self.assertEqual((r.data['imovel']['codigo'], r.data['produtor']['id']), ('RS-Z', p.id))
         self.assertTrue(ImovelCar.objects.filter(codigo='RS-Z').exists())
+
+
+class CamadaCarTests(SimpleTestCase):
+    def test_camada_por_uf(self):
+        self.assertEqual(geo.camada_car(51), 'sicar:sicar_imoveis_mt')
+        self.assertEqual(geo.camada_car(None), 'sicar:sicar_imoveis_rs')
+        self.assertEqual(geo.uf_do_codigo_car('MT-5107925-BAFA'), 51)
+        self.assertEqual(geo.uf_do_codigo_car('xx'), 43)
+        with mock.patch('comercialAgro.geo._wfs', return_value={'features': [], 'numberMatched': 0}) as wfs:
+            geo.car_municipio(5107925, 100)
+        self.assertEqual(wfs.call_args.kwargs['uf'], 51)
+
+    def test_lavoura_so_no_rs(self):
+        mapa = mock.Mock(ano=2024)
+        mapa.lavoura.return_value = (0.5, 50.0)
+        g = {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [1, 1], [0, 0]]]}
+        self.assertEqual(geo.com_lavoura({'municipio_ibge': 4303004, 'area_ha': 100, 'geometria': g}, mapa)['lavoura_ha'], 50.0)
+        self.assertNotIn('lavoura_ha', geo.com_lavoura({'municipio_ibge': 4205407, 'area_ha': 100, 'geometria': g}, mapa))
