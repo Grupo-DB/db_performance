@@ -694,6 +694,15 @@ def _sem_contato(hoje: date) -> dict:
 GRUPO_VENDEDOR = 'agroVendedor'
 
 
+def _nome_base(nome: str) -> str:
+    """Nome para casar Comissões × SGA × Colaborador: sem acento, maiúsculo, sem "(REGIÃO)" no fim."""
+    import re
+    import unicodedata
+    n = unicodedata.normalize('NFD', nome or '').encode('ascii', 'ignore').decode().upper()
+    n = re.sub(r'\s*\([^)]*\)\s*$', '', n)
+    return re.sub(r'\s+', ' ', n).strip()
+
+
 def _sincronizar_grupo(v: VendedorAgro, ativo: bool | None = None) -> None:
     """O menu e as rotas do front decidem por grupo: vendedor ativo fica em agroVendedor."""
     from django.contrib.auth.models import Group
@@ -741,6 +750,49 @@ class VendedorViewSet(viewsets.ModelViewSet):
             qs = qs.filter(Q(username__icontains=q) | Q(first_name__icontains=q) | Q(last_name__icontains=q))
         return Response([{'id': u.id, 'nome': u.get_full_name() or u.username, 'username': u.username}
                          for u in qs.order_by('first_name', 'username')[:30]])
+
+    @action(detail=False, methods=['get'])
+    def comissoes(self, request):
+        """Vendedores cadastrados nas Comissões, com o usuário e os REPCOD do SGA sugeridos.
+
+        As Comissões casam vendedor por NOME (Representante.nome ↔ REPNOME do SGA ↔ nome do
+        Colaborador, que tem o usuário). Aqui faz o mesmo: Colaborador de mesmo nome → usuário;
+        senão, usuário com o e-mail do representante. REPCOD = representantes do SGA com o mesmo
+        nome sem o sufixo de região ("RODRIGO CHAVES CRUZ (FRONTEIRA)" → "RODRIGO CHAVES CRUZ").
+        """
+        from comissoes.models import Representante
+        try:
+            from avaliacoes.management.models import Colaborador
+        except Exception:  # app de RH fora do ar não impede o cadastro
+            Colaborador = None
+        from pedidosVenda import erp as base
+        try:
+            sga = [r for r in base.representantes() if r.get('inativo') != 'S']
+        except Exception as exc:
+            logger.warning('Comercial Agro: representantes do SGA indisponíveis: %s', exc)
+            sga = []
+        por_nome: dict[str, list[int]] = {}
+        for r in sga:
+            por_nome.setdefault(_nome_base(r['nome']), []).append(int(r['cod']))
+        colab = {}
+        if Colaborador is not None:
+            for c in Colaborador.objects.filter(user__isnull=False).select_related('user'):
+                colab.setdefault(_nome_base(c.nome), c.user)
+        ja = set(VendedorAgro.objects.values_list('user_id', flat=True))
+        saida = []
+        for r in Representante.objects.all().order_by('nome'):
+            chave = _nome_base(r.nome)
+            u = colab.get(chave)
+            if u is None and r.email:
+                u = User.objects.filter(email__iexact=r.email.strip(), is_active=True).first()
+            saida.append({
+                'id': r.id, 'nome': r.nome, 'segmento': r.segmento or '', 'empresa': r.empresa or '',
+                'agro': 'AGRO' in (r.segmento or '').upper(),
+                'user': u.id if u else None, 'user_nome': (u.get_full_name() or u.username) if u else '',
+                'repcods': sorted(por_nome.get(chave, [])), 'ja_cadastrado': bool(u and u.id in ja),
+            })
+        saida.sort(key=lambda x: (not x['agro'], x['nome']))
+        return Response(saida)
 
     @action(detail=False, methods=['get'])
     def representantes(self, request):

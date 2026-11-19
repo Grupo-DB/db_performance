@@ -143,3 +143,24 @@ class FluxoTests(TestCase):
         self.assertFalse(self.outro.groups.filter(name='agroVendedor').exists())
         r = g.post(f"/comercialAgro/vendedores/{r.data['id']}/meta/", {'ano': 2026, 'toneladas': '30000'})
         self.assertEqual(r.data['metas'][0]['toneladas'], '30000.0')
+
+
+class VendedoresComissoesTests(TestCase):
+    def test_casa_por_nome_e_email(self):
+        from comissoes.models import Representante
+        gestor = User.objects.create_user('lucas')
+        gestor.groups.add(Group.objects.get_or_create(name='agroGestor')[0])
+        u_email = User.objects.create_user('everton', email='everton@x.com')
+        Representante.objects.create(nome='Everton Marques Dorneles', segmento='AGRO', email='EVERTON@x.com')
+        Representante.objects.create(nome='Rodrigo Chaves Cruz', segmento='CC')
+        sga = [{'cod': 82, 'nome': 'EVERTON MARQUES DORNELES', 'inativo': 'N'},
+               {'cod': 38, 'nome': 'RODRIGO CHAVES CRUZ (FRONTEIRA)', 'inativo': 'N'},
+               {'cod': 42, 'nome': 'RODRIGO CHAVES CRUZ (PLANALTO)', 'inativo': 'N'},
+               {'cod': 9, 'nome': 'RODRIGO CHAVES CRUZ', 'inativo': 'S'}]
+        c = APIClient()
+        c.force_authenticate(gestor)
+        with mock.patch('pedidosVenda.erp.representantes', return_value=sga):
+            r = c.get('/comercialAgro/vendedores/comissoes/')
+        ev, ro = r.data
+        self.assertEqual((ev['nome'], ev['agro'], ev['user'], ev['repcods']), ('Everton Marques Dorneles', True, u_email.id, [82]))
+        self.assertEqual((ro['agro'], ro['user'], ro['repcods']), (False, None, [38, 42]))
