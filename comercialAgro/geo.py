@@ -26,6 +26,7 @@ from pathlib import Path
 
 import numpy as np
 import requests
+import requests.adapters
 from django.conf import settings
 from django.core.cache import cache
 
@@ -112,11 +113,38 @@ CAR_WFS = 'https://geoserver.car.gov.br/geoserver/sicar/wfs'
 CAR_CAMADA = 'sicar:sicar_imoveis_rs'
 CAR_PAGINA = 1000
 
+# O servidor do CAR (19/11/2026) só negocia TLS 1.2 com troca de chave RSA (AES256-GCM-SHA384,
+# AES256-SHA256, AES128-SHA); recusa ECDHE/DHE. O urllib3 2.x recente tirou essas cifras da lista
+# padrão, e na VM dava "SSLV3_ALERT_HANDSHAKE_FAILURE" (o curl passava). Acrescenta só essas,
+# só para o CAR, e mantém a verificação do certificado.
+CIFRAS_CAR = 'DEFAULT:AES256-GCM-SHA384:AES128-GCM-SHA256:AES256-SHA256:AES128-SHA256:AES256-SHA:AES128-SHA'
+
+
+class _AdaptadorCar(requests.adapters.HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.set_ciphers(CIFRAS_CAR)
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+_sessao_car = None
+
+
+def _sessao() -> requests.Session:
+    global _sessao_car
+    if _sessao_car is None:
+        s = requests.Session()
+        s.mount('https://geoserver.car.gov.br', _AdaptadorCar())
+        _sessao_car = s
+    return _sessao_car
+
 
 def _wfs(cql: str, count: int, start: int = 0, versao: str = '2.0.0') -> dict:
     """GetFeature no WFS do CAR. Filtro com coordenada vai na versão 1.0.0: na 2.0.0 o POINT do
     CQL é lido como (lat lng), mas o GeoJSON de saída vem (lng lat) — testado em 19/11/2026."""
-    r = requests.get(CAR_WFS, params={
+    r = _sessao().get(CAR_WFS, params={
         'service': 'WFS', 'version': versao, 'request': 'GetFeature', 'typeNames': CAR_CAMADA, 'typeName': CAR_CAMADA,
         'outputFormat': 'application/json', 'count': count, 'maxFeatures': count, 'startIndex': start, 'CQL_FILTER': cql,
     }, timeout=TIMEOUT)
