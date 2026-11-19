@@ -224,15 +224,40 @@ def vendas_por_municipio(desde: date, ate: date, repcods=None) -> dict[int, dict
     return v
 
 
-def clientes_com_compra(desde: date) -> set[int]:
-    """Clientes com pedido agro desde a data (para marcar imóvel de quem já compra)."""
-    chave = f'comercialAgro:compradores:{desde}'
-    v = cache.get(chave)
-    if v is None:
-        v = {int(l['c']) for l in base._rows(f"""
-            SELECT DISTINCT P.PEDCLI c FROM PEDIDO P JOIN ITEMPEDIDO I ON I.IPEDPED = P.PEDNUM
-            JOIN ESTOQUE E ON E.ESTQCOD = I.IPEDESTQ
-            WHERE P.PEDSIT = 0 AND E.ESTQGALM IN ({_AGRO}) AND P.PEDDATA >= :desde
-        """, desde=_d(desde))}
-        cache.set(chave, v, CACHE_SEG)
-    return v
+def clientes_do_municipio(ibge: int, desde: date, ate: date, repcods=None) -> list[dict]:
+    """Quem comprou produto agro no município (cidade do cadastro do cliente) no período."""
+    filtro = f'AND P.PEDREP IN ({_reps(repcods)})' if repcods else ''
+    linhas = base._limpar(base._rows(f"""
+        SELECT C.CLICOD cliente, C.CLINOME nome, R.REPNOME vendedor, COUNT(DISTINCT P.PEDNUM) pedidos,
+               SUM({_TONS}) toneladas, SUM(I.IPEDQUANT * I.IPEDUNIT) valor, MAX(CAST(P.PEDDATA AS DATE)) ultima
+        FROM PEDIDO P
+        JOIN ITEMPEDIDO I ON I.IPEDPED = P.PEDNUM
+        JOIN ESTOQUE E ON E.ESTQCOD = I.IPEDESTQ
+        JOIN CLIENTE C ON C.CLICOD = P.PEDCLI
+        JOIN CIDADE CI ON CI.CIDCOD = C.CLICIDADE
+        LEFT JOIN REPRESENTANTE R ON R.REPCOD = C.CLIREP
+        WHERE P.PEDSIT = 0 AND E.ESTQGALM IN ({_AGRO}) AND P.PEDDATA >= :desde AND P.PEDDATA < :ate
+          AND CI.CIDCODIBGE = :ibge {filtro}
+        GROUP BY C.CLICOD, C.CLINOME, R.REPNOME
+        ORDER BY SUM({_TONS}) DESC
+    """, desde=_d(desde), ate=_d(ate), ibge=int(ibge)))
+    for l in linhas:
+        l['toneladas'] = round(float(l['toneladas'] or 0), 1)
+        l['valor'] = round(float(l['valor'] or 0), 2)
+        l['nome'] = (l['nome'] or '').strip()
+        l['vendedor'] = (l['vendedor'] or '').strip()
+    return linhas
+
+
+def ultimas_compras(clientes) -> dict[int, date]:
+    """Data do último pedido agro (qualquer época) de cada cliente: ativo × ex-cliente × nunca comprou."""
+    cods = base._inteiros(clientes)
+    if not cods:
+        return {}
+    linhas = base._rows(f"""
+        SELECT P.PEDCLI c, MAX(CAST(P.PEDDATA AS DATE)) u
+        FROM PEDIDO P JOIN ITEMPEDIDO I ON I.IPEDPED = P.PEDNUM JOIN ESTOQUE E ON E.ESTQCOD = I.IPEDESTQ
+        WHERE P.PEDSIT = 0 AND E.ESTQGALM IN ({_AGRO}) AND P.PEDCLI IN ({','.join(str(c) for c in cods)})
+        GROUP BY P.PEDCLI
+    """)
+    return {int(l['c']): l['u'] for l in linhas if l['u']}

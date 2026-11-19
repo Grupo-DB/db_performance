@@ -72,7 +72,7 @@ class GeoTests(SimpleTestCase):
             self.assertIsNone(mapa.lavoura(fora))
 
 
-@mock.patch('comercialAgro.erp_agro.clientes_com_compra', return_value={4849})
+@mock.patch('comercialAgro.erp_agro.ultimas_compras', side_effect=lambda cods: {4849: date.today(), 5000: date(2023, 3, 1)})
 class DadosPublicosTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user('paulo')
@@ -101,18 +101,29 @@ class DadosPublicosTests(TestCase):
         self.assertEqual(r.data['totais']['vendido_fora_rs_t'], 900)
         self.assertEqual(r.data['municipios'][0]['ibge'], 4303004)  # maior a ganhar primeiro
 
+    def test_clientes_do_municipio(self, *_):
+        Produtor.objects.create(nome='Tiago', cliente_sga=4849, cadastro='CADASTRADO')
+        linhas = [{'cliente': 4849, 'nome': 'TIAGO', 'vendedor': 'X', 'pedidos': 2, 'toneladas': 50.0, 'valor': 1.0, 'ultima': date(2026, 10, 1)}]
+        with mock.patch('comercialAgro.erp_agro.clientes_do_municipio', return_value=linhas) as cm:
+            r = self.cli(self.user).get('/comercialAgro/mercado/4303004/clientes/')
+        self.assertEqual(cm.call_args.args[0], 4303004)
+        self.assertEqual(cm.call_args.args[3], [82])  # vendedor só vê os dele
+        self.assertEqual(r.data[0]['produtor'], Produtor.objects.get(cliente_sga=4849).id)
+
     def test_prospeccao_cruza_produtores(self, *_):
         p = Produtor.objects.create(nome='Tiago', cliente_sga=4849, car_codigo='RS-B', cadastro='CADASTRADO')
         Produtor.objects.create(nome='Ernesto', car_codigo='RS-C')
-        imoveis = [geo.imovel(feature(c, a)) for c, a in (('RS-A', 300), ('RS-B', 900), ('RS-C', 150))]
+        Produtor.objects.create(nome='Velho', cliente_sga=5000, car_codigo='RS-D', cadastro='CADASTRADO')
+        imoveis = [geo.imovel(feature(c, a)) for c, a in (('RS-A', 300), ('RS-B', 900), ('RS-C', 150), ('RS-D', 120))]
         with mock.patch('comercialAgro.geo.car_municipio', return_value=imoveis) as cm:
             r = self.cli(self.user).get('/comercialAgro/prospeccao/?municipio=4303004&min_ha=100')
             self.cli(self.user).get('/comercialAgro/prospeccao/?municipio=4303004&min_ha=100')
             self.assertEqual(cm.call_count, 1)  # segunda vez sai do banco
         self.assertEqual([(i['codigo'], i['situacao']) for i in r.data['imoveis']],
-                         [('RS-A', 'livre'), ('RS-C', 'conhecido'), ('RS-B', 'cliente')])
-        self.assertEqual(r.data['resumo'], {'livre': 1, 'conhecido': 1, 'contato': 0, 'cliente': 1})
-        self.assertEqual(r.data['imoveis'][2]['produtor']['id'], p.id)
+                         [('RS-A', 'livre'), ('RS-D', 'ex_cliente'), ('RS-C', 'conhecido'), ('RS-B', 'cliente')])
+        self.assertEqual(r.data['resumo'], {'livre': 1, 'ex_cliente': 1, 'conhecido': 1, 'contato': 0, 'cliente': 1})
+        self.assertEqual(r.data['imoveis'][1]['produtor']['ultima_compra'], date(2023, 3, 1))
+        self.assertEqual(r.data['imoveis'][3]['produtor']['id'], p.id)
 
     def test_visita_com_gps_liga_o_car(self, *_):
         p = Produtor.objects.create(nome='Ernesto')

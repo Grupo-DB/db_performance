@@ -18,6 +18,8 @@ CULTURAS = ('Soja', 'Milho', 'Arroz', 'Trigo', 'Pastagem')
 GRUPOS_AGRO = (1974, 1587, 1828)
 
 SEM_CONTATO_DIAS = 60
+# Cliente ativo = comprou produto agro nos últimos 12 meses; antes disso é ex-cliente.
+CLIENTE_ATIVO_DIAS = 365
 
 
 def _f(v) -> float | None:

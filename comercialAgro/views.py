@@ -180,8 +180,14 @@ class ClientesView(APIView):
         except Exception as exc:
             return _erro_sga(exc)
         ligados = dict(Produtor.objects.filter(cliente_sga__in=[c['cod'] for c in sga]).values_list('cliente_sga', 'id'))
+        try:
+            ultimas = erp_agro.ultimas_compras([c['cod'] for c in sga])
+        except Exception as exc:
+            logger.warning('Comercial Agro: busca sem última compra: %s', exc)
+            ultimas = {}
         for c in sga:
             c['produtor'] = ligados.get(c['cod'])
+            c['ultima_compra'] = ultimas.get(c['cod'])
         return Response({
             'sga': sga,
             'app': [{'id': p.id, 'nome': p.nome, 'municipio': p.municipio, 'cadastro': p.cadastro,
@@ -823,6 +829,24 @@ class MercadoView(APIView):
         })
 
 
+class MercadoClientesView(APIView):
+    """Clientes que compraram no município nos últimos 12 meses (o "Clientes que compraram" do mercado)."""
+    permission_classes = [TemAcesso]
+
+    def get(self, request, ibge):
+        hoje = timezone.localdate()
+        vid = request.query_params.get('vendedor')
+        reps = _repcods_de(request) if vid or not ve_tudo(request.user) else None
+        try:
+            linhas = erp_agro.clientes_do_municipio(ibge, hoje - timedelta(days=365), hoje + timedelta(days=1), reps)
+        except Exception as exc:
+            return _erro_sga(exc)
+        ligados = dict(Produtor.objects.filter(cliente_sga__in=[l['cliente'] for l in linhas]).values_list('cliente_sga', 'id'))
+        for l in linhas:
+            l['produtor'] = ligados.get(l['cliente'])
+        return Response(linhas)
+
+
 class MalhaView(APIView):
     permission_classes = [TemAcesso]
 
@@ -930,19 +954,25 @@ class ProspeccaoView(APIView):
                                               data_hora__gte=timezone.now() - timedelta(days=regras.SEM_CONTATO_DIAS))
                        .values_list('produtor_id', flat=True))
         try:
-            compradores = erp_agro.clientes_com_compra(hoje - timedelta(days=365))
+            ultimas = erp_agro.ultimas_compras([p.cliente_sga for p in produtores.values() if p.cliente_sga])
         except Exception as exc:
             logger.warning('Comercial Agro: prospecção sem compras do SGA: %s', exc)
-            compradores = set()
+            ultimas = {}
+        corte = hoje - timedelta(days=regras.CLIENTE_ATIVO_DIAS)
         linhas = []
         for o in qs:
             p = produtores.get(o.codigo)
-            situacao = ('cliente' if p and p.cliente_sga in compradores
-                        else 'contato' if p and p.id in recentes else 'conhecido' if p else 'livre')
+            ultima = ultimas.get(p.cliente_sga) if p and p.cliente_sga else None
+            situacao = ('cliente' if ultima and ultima >= corte
+                        else 'contato' if p and p.id in recentes
+                        else 'ex_cliente' if ultima
+                        else 'conhecido' if p else 'livre')
             linhas.append({**_imovel_json(o, leve=True), 'situacao': situacao,
-                           'produtor': {'id': p.id, 'nome': p.nome, 'cliente_sga': p.cliente_sga} if p else None})
+                           'produtor': {'id': p.id, 'nome': p.nome, 'cliente_sga': p.cliente_sga,
+                                        'ultima_compra': ultima} if p else None})
         chave = (lambda x: -(x['lavoura_ha'] or 0)) if mapa else (lambda x: -x['area_ha'])
-        ordem = {'livre': 0, 'conhecido': 1, 'contato': 2, 'cliente': 3}
+        # Ex-cliente logo depois de "sem contato": é quem já comprou e parou — o mais fácil de recuperar.
+        ordem = {'livre': 0, 'ex_cliente': 1, 'conhecido': 2, 'contato': 3, 'cliente': 4}
         linhas.sort(key=lambda x: (ordem[x['situacao']], chave(x)))
         pot = geo.potencial_t(sum(float(a.hectares) for a in AreaPlantada.objects.filter(
             municipio_ibge=ibge, ano=AreaPlantada.objects.order_by('-ano').values_list('ano', flat=True).first() or 0)))

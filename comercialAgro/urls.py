@@ -18,6 +18,7 @@ urlpatterns = [
     path('fila/', views.FilaView.as_view()),
     path('painel/', views.PainelView.as_view()),
     path('mercado/', views.MercadoView.as_view()),
+    path('mercado/<int:ibge>/clientes/', views.MercadoClientesView.as_view()),
     path('malha/', views.MalhaView.as_view()),
     path('car/ponto/', views.CarPontoView.as_view()),
     path('car/<str:codigo>/', views.CarCodigoView.as_view()),
