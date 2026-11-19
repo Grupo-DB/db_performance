@@ -54,6 +54,7 @@ urlpatterns = [
     path('pesquisas/', include('pesquisas.urls')),
     path('pedidosVenda/', include('pedidosVenda.urls')),
     path('sipat/', include('sipat.urls')),
+    path('comercialAgro/', include('comercialAgro.urls')),
     path('aprendizes/', include('aprendizes.urls')),
     path('uniformes/', include('uniformes.urls')),
     path('combustivel/', include('combustivel.urls')),

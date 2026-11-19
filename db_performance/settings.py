@@ -129,6 +129,7 @@ INSTALLED_APPS = [
     'cockpitFinanceiro',
     'pedidosVenda',
     'sipat',
+    'comercialAgro',
     'aprendizes',
     'uniformes',
     'combustivel',
