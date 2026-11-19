@@ -37,29 +37,44 @@ UF_IBGE = 43
 
 # ── 1. IBGE/PAM ─────────────────────────────────────────────────────────────
 
-# Culturas que recebem calcário no RS (código da classificação 782 do SIDRA → rótulo).
+# Culturas que recebem calcário (código da classificação 782 do SIDRA → rótulo). As 8 primeiras
+# são as do RS; cana, algodão, feijão e café entraram com a visão do Brasil (19/11/2026) e ficam
+# fora do cenário até alguém marcar.
 CULTURAS_PAM = {
     40124: 'Soja', 40122: 'Milho', 40127: 'Trigo', 40102: 'Arroz', 40103: 'Aveia',
     40109: 'Cevada', 83390: 'Canola', 40125: 'Sorgo',
+    40106: 'Cana-de-açúcar', 40099: 'Algodão', 40112: 'Feijão', 40139: 'Café',
+}
+UFS = {
+    11: ('RO', 'Rondônia'), 12: ('AC', 'Acre'), 13: ('AM', 'Amazonas'), 14: ('RR', 'Roraima'), 15: ('PA', 'Pará'),
+    16: ('AP', 'Amapá'), 17: ('TO', 'Tocantins'), 21: ('MA', 'Maranhão'), 22: ('PI', 'Piauí'), 23: ('CE', 'Ceará'),
+    24: ('RN', 'Rio Grande do Norte'), 25: ('PB', 'Paraíba'), 26: ('PE', 'Pernambuco'), 27: ('AL', 'Alagoas'),
+    28: ('SE', 'Sergipe'), 29: ('BA', 'Bahia'), 31: ('MG', 'Minas Gerais'), 32: ('ES', 'Espírito Santo'),
+    33: ('RJ', 'Rio de Janeiro'), 35: ('SP', 'São Paulo'), 41: ('PR', 'Paraná'), 42: ('SC', 'Santa Catarina'),
+    43: ('RS', 'Rio Grande do Sul'), 50: ('MS', 'Mato Grosso do Sul'), 51: ('MT', 'Mato Grosso'), 52: ('GO', 'Goiás'),
+    53: ('DF', 'Distrito Federal'),
 }
 # Calagem média para o potencial do município: 2 t/ha a cada 4 anos = 0,5 t/ha/ano.
 DOSE_T_HA = 2.0
 CICLO_ANOS = 4
 
-SIDRA_URL = ('https://apisidra.ibge.gov.br/values/t/5457/n6/in%20n3%20{uf}/v/8331/p/{periodo}'
-             '/c782/{culturas}?formato=json')
+# Brasil inteiro, uma cultura por chamada (~5.570 valores, ~1 s cada; o SIDRA corta em 50 mil valores).
+SIDRA_URL = 'https://apisidra.ibge.gov.br/values/t/5457/n6/all/v/8331/p/{periodo}/c782/{cultura}?formato=json'
+MALHA_UFS_URL = ('https://servicodados.ibge.gov.br/api/v3/malhas/paises/BR'
+                 '?intrarregiao=UF&formato=application/vnd.geo%2Bjson&qualidade=minima')
 MALHA_URL = ('https://servicodados.ibge.gov.br/api/v3/malhas/estados/{uf}'
              '?intrarregiao=municipio&formato=application/vnd.geo%2Bjson&qualidade=minima')
 MUNICIPIOS_URL = 'https://servicodados.ibge.gov.br/api/v1/localidades/estados/{uf}/municipios'
 
 
 def baixar_pam(periodo: str = 'last 1') -> list[dict]:
-    """Linhas {ano, municipio_ibge, municipio, cultura, hectares} do SIDRA (sem as vazias '-', '...')."""
-    url = SIDRA_URL.format(uf=UF_IBGE, periodo=periodo.replace(' ', '%20'),
-                           culturas=','.join(str(c) for c in CULTURAS_PAM))
-    r = requests.get(url, timeout=TIMEOUT)
-    r.raise_for_status()
-    return ler_pam(r.json())
+    """Linhas {ano, municipio_ibge, municipio, cultura, hectares} do SIDRA, Brasil inteiro (sem as vazias '-', '...')."""
+    linhas = []
+    for cod in CULTURAS_PAM:
+        r = requests.get(SIDRA_URL.format(periodo=periodo.replace(' ', '%20'), cultura=cod), timeout=TIMEOUT)
+        r.raise_for_status()
+        linhas += ler_pam(r.json())
+    return linhas
 
 
 def ler_pam(dados: list[dict]) -> list[dict]:
@@ -82,11 +97,16 @@ def potencial_t(hectares: float, dose: float = DOSE_T_HA, ciclo: int = CICLO_ANO
 
 
 def malha_rs() -> dict:
-    """GeoJSON dos municípios do RS (IBGE, qualidade mínima, ~250 kB), em cache por 30 dias."""
-    chave = 'comercialAgro:malha_rs'
+    return malha(UF_IBGE)
+
+
+def malha(uf: int | None) -> dict:
+    """GeoJSON dos municípios da UF (IBGE, qualidade mínima, ~250 kB no RS) ou, com `uf=None`, dos 27
+    estados (~100 kB); `properties.ibge` = código do município ou da UF. Cache de 30 dias."""
+    chave = f'comercialAgro:malha:{uf or "BR"}'
     m = cache.get(chave)
     if m is None:
-        r = requests.get(MALHA_URL.format(uf=UF_IBGE), timeout=TIMEOUT)
+        r = requests.get(MALHA_URL.format(uf=uf) if uf else MALHA_UFS_URL, timeout=TIMEOUT)
         r.raise_for_status()
         m = r.json()
         for f in m.get('features', []):
@@ -97,10 +117,14 @@ def malha_rs() -> dict:
 
 
 def municipios_rs() -> dict[int, str]:
-    chave = 'comercialAgro:municipios_rs'
+    return municipios(UF_IBGE)
+
+
+def municipios(uf: int) -> dict[int, str]:
+    chave = f'comercialAgro:municipios:{uf}'
     m = cache.get(chave)
     if m is None:
-        r = requests.get(MUNICIPIOS_URL.format(uf=UF_IBGE), timeout=TIMEOUT)
+        r = requests.get(MUNICIPIOS_URL.format(uf=uf), timeout=TIMEOUT)
         r.raise_for_status()
         m = {int(x['id']): x['nome'] for x in r.json()}
         cache.set(chave, m, 30 * 86400)

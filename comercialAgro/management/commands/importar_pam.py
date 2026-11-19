@@ -6,7 +6,7 @@ from comercialAgro.models import AreaPlantada
 
 
 class Command(BaseCommand):
-    help = 'Baixa do IBGE/SIDRA (PAM, tabela 5457) a área plantada por município e cultura no RS.'
+    help = 'Baixa do IBGE/SIDRA (PAM, tabela 5457) a área plantada por município e cultura, Brasil inteiro (~12 s).'
 
     def add_arguments(self, parser):
         parser.add_argument('--periodo', default='last 1', help='"last 1" (padrão), "2024" ou "2023,2024"')

@@ -89,6 +89,7 @@ class DadosPublicosTests(TestCase):
         AreaPlantada.objects.create(ano=2025, municipio_ibge=4303004, municipio='Cachoeira do Sul', cultura='Soja', hectares=100000)
         AreaPlantada.objects.create(ano=2025, municipio_ibge=4303004, municipio='Cachoeira do Sul', cultura='Arroz', hectares=20000)
         AreaPlantada.objects.create(ano=2025, municipio_ibge=4300034, municipio='Aceguá', cultura='Soja', hectares=32000)
+        AreaPlantada.objects.create(ano=2025, municipio_ibge=3100104, municipio='Abadia dos Dourados', cultura='Café', hectares=1000)
         vendas = {4303004: {'clientes': 12, 'toneladas': 15000.0, 'valor': 1.0}, 4205407: {'clientes': 1, 'toneladas': 900.0, 'valor': 1.0}}
         with mock.patch('comercialAgro.erp_agro.vendas_por_municipio', return_value=vendas) as vm:
             r = self.cli(self.gestor).get('/comercialAgro/mercado/')
@@ -100,6 +101,25 @@ class DadosPublicosTests(TestCase):
                          (60000.0, 15000.0, 25.0, 45000.0))
         self.assertEqual(r.data['totais']['vendido_fora_rs_t'], 900)
         self.assertEqual(r.data['municipios'][0]['ibge'], 4303004)  # maior a ganhar primeiro
+        self.assertNotIn(3100104, [m['ibge'] for m in r.data['municipios']])  # MG fora da visão do RS
+
+        # Brasil: uma linha por estado, com os hectares de cada município por cultura em `partes`.
+        with mock.patch('comercialAgro.erp_agro.vendas_por_municipio', return_value=vendas), \
+             mock.patch('comercialAgro.geo.baixar_pam') as baixar:
+            r = self.cli(self.gestor).get('/comercialAgro/mercado/?uf=BR')
+        baixar.assert_not_called()
+        por = {e['sigla']: e for e in r.data['municipios']}
+        self.assertEqual(set(por), {'RS', 'MG', 'SC'})  # SC só tem venda
+        rs = por['RS']
+        self.assertEqual((rs['hectares'], rs['vendido_t'], rs['clientes'], rs['municipios'], len(rs['partes'])), (152000, 15000.0, 12, 2, 2))
+        soja = r.data['culturas'].index('Soja')
+        self.assertEqual(sorted(p[soja] for p in rs['partes']), [32000, 100000])
+        self.assertEqual((r.data['uf'], r.data['totais']['vendido_fora_t']), ('BR', 0))
+
+        # Outra UF pela sigla.
+        with mock.patch('comercialAgro.erp_agro.vendas_por_municipio', return_value=vendas):
+            r = self.cli(self.gestor).get('/comercialAgro/mercado/?uf=mg')
+        self.assertEqual(([m['ibge'] for m in r.data['municipios']], r.data['uf_sigla']), ([3100104], 'MG'))
 
     def test_clientes_do_municipio(self, *_):
         Produtor.objects.create(nome='Tiago', cliente_sga=4849, cadastro='CADASTRADO')

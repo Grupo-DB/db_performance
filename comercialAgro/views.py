@@ -813,17 +813,34 @@ AREA_MINIMA_PADRAO = 50
 
 
 def _pam_garantido() -> int | None:
-    """Ano mais recente do PAM no banco; na primeira vez baixa do SIDRA (1 s)."""
+    """Ano mais recente do PAM no banco. Baixa do SIDRA o Brasil inteiro (12 culturas, ~15 s) na
+    primeira vez e quando o banco só tem o RS antigo (antes de 19/11/2026 era só o RS e 8 culturas)."""
     ano = AreaPlantada.objects.order_by('-ano').values_list('ano', flat=True).first()
-    if ano is None:
+    completo = ano is not None and AreaPlantada.objects.filter(ano=ano, municipio_ibge__lt=4300000, cultura='Café').exists()
+    if not completo:
         linhas = geo.baixar_pam('last 1')
-        AreaPlantada.objects.bulk_create([AreaPlantada(**l) for l in linhas], batch_size=1000, ignore_conflicts=True)
-        ano = max((l['ano'] for l in linhas), default=None)
+        anos = {l['ano'] for l in linhas}
+        with transaction.atomic():
+            AreaPlantada.objects.filter(ano__in=anos).delete()
+            AreaPlantada.objects.bulk_create([AreaPlantada(**l) for l in linhas], batch_size=2000)
+        ano = max(anos, default=ano)
     return ano
 
 
+def _uf_param(request) -> int | None:
+    """?uf=43 ou ?uf=RS → 43; ?uf=BR → None (Brasil por estado). Sem nada = RS."""
+    v = (request.query_params.get('uf') or '43').strip().upper()
+    if v == 'BR':
+        return None
+    if v.isdigit() and int(v) in geo.UFS:
+        return int(v)
+    return next((cod for cod, (sigla, _) in geo.UFS.items() if sigla == v), geo.UF_IBGE)
+
+
 class MercadoView(APIView):
-    """Potencial de calcário por município (IBGE/PAM) × vendido nos últimos 12 meses (SGA)."""
+    """Potencial de calcário (IBGE/PAM) × vendido nos últimos 12 meses (SGA): por município de uma
+    UF (`?uf=43`, padrão) ou, com `?uf=BR`, por estado — cada estado leva os hectares por cultura de
+    cada município (`partes`), porque a regra verão × inverno do cenário é feita município a município."""
     permission_classes = [TemAcesso]
 
     def get(self, request):
@@ -835,46 +852,79 @@ class MercadoView(APIView):
             return Response({'detail': 'Não consegui baixar a área plantada do IBGE agora.'}, status=503)
         if ano is None:
             return Response({'detail': 'Sem dados do IBGE.'}, status=503)
+        uf = _uf_param(request)
         vid = request.query_params.get('vendedor')
         reps = _repcods_de(request) if vid or not ve_tudo(request.user) else None
         try:
             vendas = erp_agro.vendas_por_municipio(hoje - timedelta(days=365), hoje + timedelta(days=1), reps)
         except Exception as exc:
             return _erro_sga(exc)
+        culturas = list(geo.CULTURAS_PAM.values())
+        dentro = (lambda i: i // 100000 == uf) if uf else (lambda i: i // 100000 in geo.UFS)
+
         mun: dict[int, dict] = {}
-        for a in AreaPlantada.objects.filter(ano=ano):
-            m = mun.setdefault(a.municipio_ibge, {'ibge': a.municipio_ibge, 'municipio': a.municipio, 'hectares': 0.0, 'culturas': {}})
-            m['hectares'] += float(a.hectares)
-            m['culturas'][a.cultura] = float(a.hectares)
-        nomes = None
-        for ibge, v in vendas.items():  # vendeu em município sem lavoura no PAM (ex.: cidade de revenda)
-            if ibge not in mun:
-                if nomes is None:
-                    try:
-                        nomes = geo.municipios_rs()
-                    except Exception:
-                        nomes = {}
-                if ibge // 100000 != geo.UF_IBGE:
-                    continue  # fora do RS
-                mun[ibge] = {'ibge': ibge, 'municipio': nomes.get(ibge, str(ibge)), 'hectares': 0.0, 'culturas': {}}
-        linhas = []
-        for ibge, m in mun.items():
+        areas = AreaPlantada.objects.filter(ano=ano)
+        if uf:
+            areas = areas.filter(municipio_ibge__gte=uf * 100000, municipio_ibge__lt=(uf + 1) * 100000)
+        for a in areas.values_list('municipio_ibge', 'municipio', 'cultura', 'hectares'):
+            m = mun.setdefault(a[0], {'ibge': a[0], 'municipio': a[1], 'hectares': 0.0, 'culturas': {}})
+            m['hectares'] += float(a[3])
+            m['culturas'][a[2]] = float(a[3])
+        if uf:
+            nomes = None
+            for ibge in vendas:  # vendeu em município sem lavoura no PAM (ex.: cidade de revenda)
+                if ibge not in mun and dentro(ibge):
+                    if nomes is None:
+                        try:
+                            nomes = geo.municipios(uf)
+                        except Exception:
+                            nomes = {}
+                    mun[ibge] = {'ibge': ibge, 'municipio': nomes.get(ibge, str(ibge)), 'hectares': 0.0, 'culturas': {}}
+            linhas = list(mun.values())
+            for m in linhas:
+                v = vendas.get(m['ibge'], {})
+                m.update(vendido_t=v.get('toneladas', 0.0), clientes=v.get('clientes', 0), valor=v.get('valor', 0.0))
+        else:
+            estados: dict[int, dict] = {}
+            for cod, (sigla, nome) in geo.UFS.items():
+                estados[cod] = {'ibge': cod, 'municipio': nome, 'sigla': sigla, 'hectares': 0.0, 'culturas': {},
+                                'partes': [], 'vendido_t': 0.0, 'clientes': 0, 'valor': 0.0, 'municipios': 0}
+            for m in mun.values():
+                e = estados.get(m['ibge'] // 100000)
+                if not e:
+                    continue
+                e['hectares'] += m['hectares']
+                e['municipios'] += 1
+                for c, h in m['culturas'].items():
+                    e['culturas'][c] = e['culturas'].get(c, 0.0) + h
+                e['partes'].append([round(m['culturas'].get(c, 0.0)) for c in culturas])
+            for ibge, v in vendas.items():
+                e = estados.get(ibge // 100000)
+                if e:
+                    e['vendido_t'] += v['toneladas']
+                    e['clientes'] += v['clientes']
+                    e['valor'] += v['valor']
+            linhas = [e for e in estados.values() if e['hectares'] or e['vendido_t']]
+            for e in linhas:
+                e['vendido_t'], e['valor'] = round(e['vendido_t'], 1), round(e['valor'], 2)
+                e['culturas'] = {c: round(h) for c, h in e['culturas'].items()}
+
+        for m in linhas:
             pot = geo.potencial_t(m['hectares'])
-            v = vendas.get(ibge, {})
-            vend = v.get('toneladas', 0.0)
-            linhas.append({**m, 'hectares': round(m['hectares']), 'potencial_t': pot, 'vendido_t': vend,
-                           'clientes': v.get('clientes', 0), 'valor': v.get('valor', 0.0),
-                           'participacao': round(100 * vend / pot, 1) if pot else None,
-                           'a_ganhar_t': round(max(0.0, pot - vend), 1)})
+            m.update(hectares=round(m['hectares']), potencial_t=pot,
+                     participacao=round(100 * m['vendido_t'] / pot, 1) if pot else None,
+                     a_ganhar_t=round(max(0.0, pot - m['vendido_t']), 1))
         linhas.sort(key=lambda x: -x['a_ganhar_t'])
-        fora_rs = sum(v['toneladas'] for i, v in vendas.items() if i // 100000 != geo.UF_IBGE)
+        fora = sum(v['toneladas'] for i, v in vendas.items() if not dentro(i))
         pot_total = sum(l['potencial_t'] for l in linhas)
         vend_total = sum(l['vendido_t'] for l in linhas)
+        sigla, nome = geo.UFS[uf] if uf else ('BR', 'Brasil')
         return Response({
-            'ano_pam': ano, 'dose_t_ha': geo.DOSE_T_HA, 'ciclo_anos': geo.CICLO_ANOS,
-            'culturas': list(geo.CULTURAS_PAM.values()),
+            'ano_pam': ano, 'dose_t_ha': geo.DOSE_T_HA, 'ciclo_anos': geo.CICLO_ANOS, 'culturas': culturas,
+            'uf': uf or 'BR', 'uf_sigla': sigla, 'uf_nome': nome,
+            'ufs': [{'codigo': c, 'sigla': s_, 'nome': n} for c, (s_, n) in sorted(geo.UFS.items(), key=lambda x: x[1][1])],
             'totais': {'hectares': round(sum(l['hectares'] for l in linhas)), 'potencial_t': round(pot_total),
-                       'vendido_t': round(vend_total), 'vendido_fora_rs_t': round(fora_rs),
+                       'vendido_t': round(vend_total), 'vendido_fora_rs_t': round(fora), 'vendido_fora_t': round(fora),
                        'participacao': round(100 * vend_total / pot_total, 1) if pot_total else None,
                        'municipios_com_venda': sum(1 for l in linhas if l['vendido_t'] > 0)},
             'municipios': linhas,
@@ -949,7 +999,7 @@ class MalhaView(APIView):
 
     def get(self, request):
         try:
-            return Response(geo.malha_rs())
+            return Response(geo.malha(_uf_param(request)))
         except Exception as exc:
             logger.exception('Comercial Agro: malha do IBGE fora: %s', exc)
             return Response({'detail': 'Não consegui baixar o mapa dos municípios do IBGE.'}, status=503)
