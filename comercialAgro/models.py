@@ -275,3 +275,20 @@ class BuscaCarMunicipio(models.Model):
     area_minima = models.DecimalField(max_digits=8, decimal_places=1)
     total = models.PositiveIntegerField(default=0)
     buscado_em = models.DateTimeField(auto_now=True)
+
+
+class CenarioMercado(models.Model):
+    """Premissas do potencial da DB no Mercado por município: uma linha só, a oficial, que o gestor salva."""
+
+    t_ha = models.DecimalField('meta da DB (t/ha/ano)', max_digits=6, decimal_places=3, default=0.25)
+    dose_t_ha = models.DecimalField('calagem do mercado (t/ha)', max_digits=5, decimal_places=2, default=2)
+    ciclo_anos = models.PositiveSmallIntegerField(default=4)
+    culturas = models.JSONField(default=list, blank=True, help_text='culturas do IBGE/PAM que entram na área; vazio = todas')
+    sem_duplo = models.BooleanField('verão e inverno na mesma terra contam uma vez', default=True)
+    crescimento_pct = models.DecimalField('crescimento das vendas (% a.a.)', max_digits=5, decimal_places=1, default=10)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    atualizado_por = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+
+    @classmethod
+    def atual(cls) -> 'CenarioMercado':
+        return cls.objects.order_by('id').first() or cls.objects.create()

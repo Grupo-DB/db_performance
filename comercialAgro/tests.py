@@ -164,3 +164,33 @@ class VendedoresComissoesTests(TestCase):
         ev, ro = r.data
         self.assertEqual((ev['nome'], ev['agro'], ev['user'], ev['repcods']), ('Everton Marques Dorneles', True, u_email.id, [82]))
         self.assertEqual((ro['agro'], ro['user'], ro['repcods']), (False, None, [38, 42]))
+
+
+class CenarioMercadoTests(TestCase):
+    def setUp(self):
+        self.gestor = User.objects.create_user('lucas')
+        self.gestor.groups.add(Group.objects.get_or_create(name='agroGestor')[0])
+        self.vend = User.objects.create_user('paulo')
+        VendedorAgro.objects.create(user=self.vend, repcods=[82])
+
+    def cli(self, user):
+        c = APIClient()
+        c.force_authenticate(user)
+        return c
+
+    def test_gestor_salva_e_vendedor_le(self):
+        r = self.cli(self.vend).get('/comercialAgro/mercado/cenario/')
+        self.assertEqual((r.status_code, r.data['t_ha'], r.data['ciclo_anos']), (200, 0.25, 4))
+        novo = {'t_ha': 0.3, 'dose_t_ha': 2.5, 'ciclo_anos': 5, 'culturas': ['Soja', 'Milho'], 'sem_duplo': False, 'crescimento_pct': 12}
+        self.assertEqual(self.cli(self.vend).put('/comercialAgro/mercado/cenario/', novo, format='json').status_code, 403)
+        r = self.cli(self.gestor).put('/comercialAgro/mercado/cenario/', novo, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        r = self.cli(self.vend).get('/comercialAgro/mercado/cenario/')
+        self.assertEqual((r.data['t_ha'], r.data['culturas'], r.data['sem_duplo'], r.data['atualizado_por']),
+                         (0.3, ['Soja', 'Milho'], False, 'lucas'))
+
+    def test_valida(self):
+        r = self.cli(self.gestor).put('/comercialAgro/mercado/cenario/', {'t_ha': 'x', 'dose_t_ha': 2, 'ciclo_anos': 0,
+                                                                          'culturas': ['Banana'], 'crescimento_pct': 10}, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(set(r.data), {'t_ha', 'ciclo_anos', 'culturas'})

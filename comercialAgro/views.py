@@ -806,7 +806,7 @@ class VendedorViewSet(viewsets.ModelViewSet):
 # ── Dados públicos: mercado (IBGE/PAM), imóvel (CAR) e prospecção ──────────
 
 from . import geo  # noqa: E402
-from .models import AreaPlantada, BuscaCarMunicipio, ImovelCar  # noqa: E402
+from .models import AreaPlantada, BuscaCarMunicipio, CenarioMercado, ImovelCar  # noqa: E402
 
 CAR_VALIDADE_DIAS = 30
 AREA_MINIMA_PADRAO = 50
@@ -879,6 +879,51 @@ class MercadoView(APIView):
                        'municipios_com_venda': sum(1 for l in linhas if l['vendido_t'] > 0)},
             'municipios': linhas,
         })
+
+
+def _cenario_json(c: CenarioMercado) -> dict:
+    por = c.atualizado_por
+    return {'t_ha': float(c.t_ha), 'dose_t_ha': float(c.dose_t_ha), 'ciclo_anos': c.ciclo_anos, 'culturas': c.culturas,
+            'sem_duplo': c.sem_duplo, 'crescimento_pct': float(c.crescimento_pct), 'atualizado_em': c.atualizado_em,
+            'atualizado_por': (por.get_full_name() or por.username) if por else None}
+
+
+class CenarioMercadoView(APIView):
+    """Cenário oficial do potencial da DB: todos leem; só o gestor salva."""
+
+    def get_permissions(self):
+        return [EhGestor()] if self.request.method == 'PUT' else [TemAcesso()]
+
+    def get(self, request):
+        return Response(_cenario_json(CenarioMercado.atual()))
+
+    def put(self, request):
+        d = request.data
+        erros = {}
+
+        def numero(campo, minimo, maximo):
+            try:
+                v = float(d.get(campo))
+            except (TypeError, ValueError):
+                erros[campo] = 'Informe um número.'
+                return None
+            if not minimo <= v <= maximo:
+                erros[campo] = f'Entre {minimo:g} e {maximo:g}.'
+            return v
+
+        t_ha, dose = numero('t_ha', 0, 20), numero('dose_t_ha', 0, 20)
+        ciclo, cresc = numero('ciclo_anos', 1, 10), numero('crescimento_pct', 0, 200)
+        culturas = d.get('culturas') or []
+        validas = set(geo.CULTURAS_PAM.values())
+        if not isinstance(culturas, list) or any(c not in validas for c in culturas):
+            erros['culturas'] = 'Cultura desconhecida.'
+        if erros:
+            return Response(erros, status=400)
+        c = CenarioMercado.atual()
+        c.t_ha, c.dose_t_ha, c.ciclo_anos, c.crescimento_pct = round(t_ha, 3), round(dose, 2), int(ciclo), round(cresc, 1)
+        c.culturas, c.sem_duplo, c.atualizado_por = culturas, bool(d.get('sem_duplo', True)), request.user
+        c.save()
+        return Response(_cenario_json(c))
 
 
 class MercadoClientesView(APIView):
