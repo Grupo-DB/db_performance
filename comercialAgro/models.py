@@ -319,3 +319,24 @@ class PedreiraAnm(models.Model):
     latitude = models.DecimalField(max_digits=9, decimal_places=5)
     longitude = models.DecimalField(max_digits=9, decimal_places=5)
     atualizado_em = models.DateTimeField(auto_now=True)
+
+
+class UnidadeCalcario(models.Model):
+    """Unidade produtora de calcário (empresa × município da mina), com as toneladas vendidas por mês
+    declaradas na CFEM (ANM, dados abertos). Base da visão de concorrentes."""
+
+    cnpj = models.CharField(max_length=14, db_index=True)
+    nome = models.CharField(max_length=120)
+    municipio_ibge = models.IntegerField(db_index=True)
+    municipio = models.CharField(max_length=80)
+    uf = models.CharField(max_length=2)
+    agro = models.BooleanField(default=False, help_text='A empresa tem lavra de calcário com uso "corretivo de solo" na ANM')
+    da_db = models.BooleanField(default=False)
+    mensal = models.JSONField(default=dict, help_text='{"2025-01": toneladas, …}')
+    t_12m = models.FloatField(default=0, help_text='Últimos 12 meses com dado')
+    t_12m_anterior = models.FloatField(default=0, help_text='Os 12 meses antes desses')
+    ate = models.CharField(max_length=7, blank=True, default='', help_text='Último mês da série (AAAA-MM)')
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('cnpj', 'municipio_ibge')]

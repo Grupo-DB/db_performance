@@ -831,7 +831,8 @@ class VendedorViewSet(viewsets.ModelViewSet):
 from . import geo  # noqa: E402
 import numpy as np  # noqa: E402
 
-from .models import AreaPlantada, BuscaCarMunicipio, CenarioMercado, ImovelCar, PedreiraAnm  # noqa: E402
+from . import concorrentes  # noqa: E402
+from .models import AreaPlantada, BuscaCarMunicipio, CenarioMercado, ImovelCar, PedreiraAnm, UnidadeCalcario  # noqa: E402
 
 
 def primeiro_mes(d: date, meses: int) -> date:
@@ -984,6 +985,98 @@ def _redistribuir_canal(vendas: dict, desde, ate, reps, ano: int) -> tuple[dict,
     return vendas, dict(canal)
 
 
+def importar_cfem(caminho: str, ano_min: int | None = None) -> dict:
+    """CFEM (arquivo baixado pelo navegador) → UnidadeCalcario. Liga o CNPJ ao nome pelos processos do SIGMINE."""
+    ano_min = ano_min or timezone.localdate().year - 3
+    linhas = concorrentes.limpar(concorrentes.ler_cfem(caminho, ano_min))
+    processos = geo.baixar_processos_calcario()
+    try:
+        titulares = CenarioMercado.atual().titulares_db or TITULARES_DB_PADRAO
+    except DatabaseError:
+        titulares = TITULARES_DB_PADRAO
+    if not PedreiraAnm.objects.exists():
+        importar_pedreiras()
+    try:
+        cent = geo.centroides_municipios()
+    except Exception as exc:
+        logger.warning('Comercial Agro: CFEM sem centros dos municípios: %s', exc)
+        cent = None
+    unid = concorrentes.montar_unidades(linhas, processos, titulares,
+                                        list(PedreiraAnm.objects.values('titular', 'latitude', 'longitude')), cent)
+    with transaction.atomic():
+        UnidadeCalcario.objects.all().delete()
+        UnidadeCalcario.objects.bulk_create([UnidadeCalcario(**u) for u in unid], batch_size=1000)
+    cache.delete('comercialAgro:abastecimento')
+    return {'linhas': len(linhas), 'corrigidas': sum(1 for l in linhas if l.get('corrigida')), 'unidades': len(unid),
+            'empresas_agro': len({u['cnpj'] for u in unid if u['agro']}), 'ate': unid[0]['ate'] if unid else ''}
+
+
+def _abastecimento(ano: int) -> tuple[dict, dict]:
+    """({ibge: {cnpj: t}}, {cnpj: empresa}) das empresas de calcário agrícola; cache de 1 dia por processo."""
+    v = cache.get('comercialAgro:abastecimento')
+    if v is not None:
+        return v
+    unid = list(UnidadeCalcario.objects.filter(agro=True, t_12m__gt=0).values(
+        'cnpj', 'nome', 'municipio_ibge', 'municipio', 'uf', 'da_db', 't_12m', 't_12m_anterior', 'ate'))
+    if not unid:
+        return {}, {}
+    try:
+        cent = geo.centroides_municipios()
+    except Exception as exc:
+        logger.warning('Comercial Agro: abastecimento sem centros: %s', exc)
+        return {}, {}
+    ha = {r['municipio_ibge']: float(r['h']) for r in AreaPlantada.objects.filter(ano=ano)
+          .exclude(cultura__in=list(geo.PASTAGENS.values())).values('municipio_ibge').annotate(h=Sum('hectares'))}
+    abast = concorrentes.abastecimento(unid, cent, ha)
+    empresas: dict[str, dict] = {}
+    for u in unid:
+        e = empresas.setdefault(u['cnpj'], {'cnpj': u['cnpj'], 'nome': u['nome'], 'db': u['da_db'], 't_12m': 0.0,
+                                            't_12m_anterior': 0.0, 'unidades': [], 'ate': u['ate']})
+        e['t_12m'] += u['t_12m']
+        e['t_12m_anterior'] += u['t_12m_anterior']
+        e['unidades'].append(f"{u['municipio']}/{u['uf']}")
+    v = (abast, empresas)
+    cache.set('comercialAgro:abastecimento', v, 86400)
+    return v
+
+
+def _sem_acento(t: str) -> str:
+    import unicodedata
+    return ''.join(c for c in unicodedata.normalize('NFD', t or '') if unicodedata.category(c) != 'Mn').upper().strip()
+
+
+def _campo(uf: int) -> dict[int, dict]:
+    """O que os vendedores registraram dos produtores da UF: fornecedor atual, concorrente e preço, por município."""
+    try:
+        nomes = {_sem_acento(n): i for i, n in geo.municipios(uf).items()}
+    except Exception:
+        return {}
+    saida: dict[int, dict] = {}
+    qs = (Produtor.objects.exclude(municipio='').filter(Q(fornecedor_atual__gt='') | Q(concorrente_nome__gt=''))
+          .values('municipio', 'fornecedor_atual', 'concorrente_nome', 'preco_concorrente'))
+    for p in qs:
+        i = nomes.get(_sem_acento(p['municipio']))
+        if not i:
+            continue
+        c = saida.setdefault(i, {'produtores': 0, 'fornecedores': defaultdict(int), 'concorrentes': {}})
+        c['produtores'] += 1
+        if p['fornecedor_atual']:
+            c['fornecedores'][p['fornecedor_atual']] += 1
+        nome = (p['concorrente_nome'] or '').strip()
+        if nome:
+            k = _sem_acento(nome)
+            x = c['concorrentes'].setdefault(k, {'nome': nome, 'n': 0, 'precos': []})
+            x['n'] += 1
+            if p['preco_concorrente']:
+                x['precos'].append(float(p['preco_concorrente']))
+    for c in saida.values():
+        c['fornecedores'] = dict(c['fornecedores'])
+        c['concorrentes'] = sorted(({'nome': x['nome'], 'n': x['n'],
+                                     'preco_medio': round(sum(x['precos']) / len(x['precos']), 2) if x['precos'] else None}
+                                    for x in c['concorrentes'].values()), key=lambda x: -x['n'])
+    return saida
+
+
 def _uf_param(request) -> int | None:
     """?uf=43 ou ?uf=RS → 43; ?uf=BR → None (Brasil por estado). Sem nada = RS."""
     v = (request.query_params.get('uf') or '43').strip().upper()
@@ -1029,6 +1122,7 @@ class MercadoView(APIView):
         except DatabaseError:
             titulares = TITULARES_DB_PADRAO
         pedreiras = _pedreiras()
+        abast, empresas = _abastecimento(ano)
         culturas = _culturas_todas()
         dentro = (lambda i: i // 100000 == uf) if uf else (lambda i: i // 100000 in geo.UFS)
 
@@ -1052,10 +1146,13 @@ class MercadoView(APIView):
                     mun[ibge] = {'ibge': ibge, 'municipio': nomes.get(ibge, str(ibge)), 'hectares': 0.0, 'culturas': {}}
             linhas = list(mun.values())
             conc = _concorrencia([m['ibge'] for m in linhas], pedreiras, titulares)
+            campo = _campo(uf)
             for m in linhas:
                 v = vendas.get(m['ibge'], {})
                 m.update(vendido_t=round(v.get('toneladas', 0.0), 1), clientes=v.get('clientes', 0), valor=v.get('valor', 0.0),
-                         vendido_canal_t=round(canal.get(m['ibge'], 0.0), 1), conc=conc.get(m['ibge'], [0] * len(geo.BRASIL_RAIOS_KM)))
+                         vendido_canal_t=round(canal.get(m['ibge'], 0.0), 1), conc=conc.get(m['ibge'], [0] * len(geo.BRASIL_RAIOS_KM)),
+                         abastecimento={c: round(t, 1) for c, t in abast.get(m['ibge'], {}).items() if t >= 1},
+                         campo=campo.get(m['ibge']))
         else:
             estados: dict[int, dict] = {}
             for cod, (sigla, nome) in geo.UFS.items():
@@ -1074,6 +1171,9 @@ class MercadoView(APIView):
                     e['culturas'][c] = e['culturas'].get(c, 0.0) + h
                 e['partes'].append([round(m['culturas'].get(c, 0.0)) for c in culturas])
                 e['partes_conc'].append(conc.get(m['ibge'], zero))
+                ab = e.setdefault('abastecimento', {})
+                for cnpj, t in abast.get(m['ibge'], {}).items():
+                    ab[cnpj] = ab.get(cnpj, 0.0) + t
             for ibge, v in vendas.items():
                 e = estados.get(ibge // 100000)
                 if e:
@@ -1085,6 +1185,7 @@ class MercadoView(APIView):
             for e in linhas:
                 e['vendido_t'], e['valor'] = round(e['vendido_t'], 1), round(e['valor'], 2)
                 e['vendido_canal_t'] = round(e['vendido_canal_t'], 1)
+                e['abastecimento'] = {c: round(t, 1) for c, t in e.get('abastecimento', {}).items() if t >= 1}
                 e['culturas'] = {c: round(h) for c, h in e['culturas'].items()}
 
         for m in linhas:
@@ -1110,6 +1211,7 @@ class MercadoView(APIView):
             'pedreiras': [{'titular': p['titular'], 'uf': p['uf'], 'lat': float(p['latitude']), 'lng': float(p['longitude']),
                            'db': p['titular'].strip().upper() in {t.strip().upper() for t in titulares}} for p in pedreiras],
             'mensal': mensal,
+            'empresas': {c: empresas[c] for c in {c for l in linhas for c in (l.get('abastecimento') or {})} if c in empresas},
             'territorio': {str(i): v.id for v in VendedorAgro.objects.filter(ativo=True) for i in (v.municipios or [])},
             'abracal': {'ano': geo.ABRACAL_ANO, 'consumo_t': {str(k): v for k, v in geo.CONSUMO_ABRACAL.items()},
                         'outros_t': geo.ABRACAL_OUTROS_T},

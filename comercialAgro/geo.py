@@ -241,6 +241,32 @@ def _ca_anm() -> str:
     return str(destino)
 
 
+def baixar_processos_calcario() -> dict[tuple[int, int], dict]:
+    """Todos os processos de calcário na ANM (qualquer fase e uso, ~8.900): (número, ano) → titular e uso.
+    Liga a CFEM (que só tem CNPJ e processo) ao nome da empresa."""
+    onde = "(SUBS LIKE '%CALC%' OR SUBS LIKE '%DOLOM%' OR SUBS LIKE '%CONCHA%' OR SUBS LIKE '%MARGA%')"
+    saida, inicio = {}, 0
+    while True:
+        r = requests.get(ANM_URL, params={'where': onde, 'outFields': 'PROCESSO,NOME,USO', 'returnGeometry': 'false',
+                                          'orderByFields': 'OBJECTID', 'resultOffset': inicio, 'resultRecordCount': 2000,
+                                          'f': 'json'}, timeout=TIMEOUT, verify=_ca_anm())
+        r.raise_for_status()
+        d = r.json()
+        if 'error' in d:
+            raise RuntimeError(d['error'])
+        feats = d.get('features', [])
+        for f in feats:
+            a = f['attributes']
+            try:
+                n, ano = (int(x) for x in str(a['PROCESSO']).split('/'))
+            except (ValueError, AttributeError):
+                continue
+            saida[(n, ano)] = {'nome': (a.get('NOME') or '').strip(), 'uso': a.get('USO') or ''}
+        inicio += len(feats)
+        if not d.get('exceededTransferLimit') or not feats:
+            return saida
+
+
 def baixar_pedreiras() -> list[dict]:
     """Lavras ativas de calcário agrícola no Brasil (~540, 1 s). Ponto = média do 1º anel do polígono."""
     r = requests.get(ANM_URL, params={
