@@ -224,6 +224,46 @@ def vendas_por_municipio(desde: date, ate: date, repcods=None) -> dict[int, dict
     return v
 
 
+def vendas_por_cliente(clientes: list[int], desde: date, ate: date, repcods=None) -> dict[int, dict]:
+    """Toneladas agro de cada cliente no período, com o IBGE da cidade do cadastro (revenda/cooperativa)."""
+    cods = sorted({int(c) for c in clientes if c})
+    if not cods:
+        return {}
+    filtro = f'AND P.PEDREP IN ({_reps(repcods)})' if repcods else ''
+    linhas = base._rows(f"""
+        SELECT P.PEDCLI cliente, MAX(CI.CIDCODIBGE) ibge, SUM({_TONS}) toneladas
+        FROM PEDIDO P
+        JOIN ITEMPEDIDO I ON I.IPEDPED = P.PEDNUM
+        JOIN ESTOQUE E ON E.ESTQCOD = I.IPEDESTQ
+        JOIN CLIENTE C ON C.CLICOD = P.PEDCLI
+        JOIN CIDADE CI ON CI.CIDCOD = C.CLICIDADE
+        WHERE P.PEDSIT = 0 AND E.ESTQGALM IN ({_AGRO}) AND P.PEDDATA >= :desde AND P.PEDDATA < :ate
+          AND P.PEDCLI IN ({','.join(str(c) for c in cods)}) {filtro}
+        GROUP BY P.PEDCLI
+    """, desde=_d(desde), ate=_d(ate))
+    return {int(l['cliente']): {'ibge': int(l['ibge'] or 0), 'toneladas': round(float(l['toneladas'] or 0), 1)} for l in linhas}
+
+
+def vendas_mensais(desde: date, ate: date, repcods=None) -> list[dict]:
+    """Toneladas agro por mês (para a sazonalidade da projeção)."""
+    filtro = f'AND P.PEDREP IN ({_reps(repcods)})' if repcods else ''
+    chave = f'comercialAgro:vendas_mes:{_reps(repcods) if repcods else "todos"}:{desde}:{ate}'
+    v = cache.get(chave)
+    if v is None:
+        linhas = base._rows(f"""
+            SELECT YEAR(P.PEDDATA) ano, MONTH(P.PEDDATA) mes, SUM({_TONS}) toneladas
+            FROM PEDIDO P
+            JOIN ITEMPEDIDO I ON I.IPEDPED = P.PEDNUM
+            JOIN ESTOQUE E ON E.ESTQCOD = I.IPEDESTQ
+            WHERE P.PEDSIT = 0 AND E.ESTQGALM IN ({_AGRO}) AND P.PEDDATA >= :desde AND P.PEDDATA < :ate {filtro}
+            GROUP BY YEAR(P.PEDDATA), MONTH(P.PEDDATA)
+            ORDER BY 1, 2
+        """, desde=_d(desde), ate=_d(ate))
+        v = [{'ano': int(l['ano']), 'mes': int(l['mes']), 'toneladas': round(float(l['toneladas'] or 0), 1)} for l in linhas]
+        cache.set(chave, v, CACHE_SEG)
+    return v
+
+
 def clientes_do_municipio(ibge: int, desde: date, ate: date, repcods=None) -> list[dict]:
     """Quem comprou produto agro no município (cidade do cadastro do cliente) no período."""
     filtro = f'AND P.PEDREP IN ({_reps(repcods)})' if repcods else ''

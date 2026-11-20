@@ -1,20 +1,18 @@
 from django.core.management.base import BaseCommand
-from django.db import transaction
 
-from comercialAgro import geo
-from comercialAgro.models import AreaPlantada
+from comercialAgro.views import importar_pam, importar_pedreiras
 
 
 class Command(BaseCommand):
-    help = 'Baixa do IBGE/SIDRA (PAM, tabela 5457) a área plantada por município e cultura, Brasil inteiro (~12 s).'
+    help = ('Baixa do IBGE a área plantada do Brasil (PAM, 12 culturas + milho 2ª safra) e, com --pastagem, a pastagem '
+            'plantada do Censo Agro 2017 (~2 min); com --anm, as lavras de calcário agrícola da ANM.')
 
     def add_arguments(self, parser):
-        parser.add_argument('--periodo', default='last 1', help='"last 1" (padrão), "2024" ou "2023,2024"')
+        parser.add_argument('--pastagem', action='store_true', help='também a pastagem (boa e degradada) do Censo 2017')
+        parser.add_argument('--anm', action='store_true', help='também as lavras de calcário da ANM (concorrência)')
 
     def handle(self, *args, **opts):
-        linhas = geo.baixar_pam(opts['periodo'])
-        anos = sorted({l['ano'] for l in linhas})
-        with transaction.atomic():
-            AreaPlantada.objects.filter(ano__in=anos).delete()
-            AreaPlantada.objects.bulk_create([AreaPlantada(**l) for l in linhas], batch_size=1000)
-        self.stdout.write(self.style.SUCCESS(f'{len(linhas)} linhas de {anos} ({len({l["municipio_ibge"] for l in linhas})} municípios).'))
+        r = importar_pam(com_pastagem=opts['pastagem'])
+        self.stdout.write(self.style.SUCCESS(f"PAM {r['ano']}: {r['linhas']} linhas; pastagem: {r['pastagem']} linhas."))
+        if opts['anm']:
+            self.stdout.write(self.style.SUCCESS(f'ANM: {importar_pedreiras()} lavras de calcário agrícola.'))

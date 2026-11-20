@@ -23,7 +23,8 @@ class VendedorAgroSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = VendedorAgro
-        fields = ['id', 'user', 'username', 'nome', 'papel', 'carteira', 'repcods', 'ativo', 'metas']
+        fields = ['id', 'user', 'username', 'nome', 'papel', 'carteira', 'repcods', 'municipios', 'ativo', 'metas']
+        read_only_fields = ['municipios']  # muda pela ação territorio, que tira o município de outro vendedor
 
     def validate_repcods(self, v):
         try:
@@ -40,7 +41,7 @@ class ProdutorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Produtor
         fields = [
-            'id', 'nome', 'documento', 'whatsapp', 'municipio', 'tipo', 'cliente_sga', 'cadastro', 'origem',
+            'id', 'nome', 'documento', 'whatsapp', 'municipio', 'tipo', 'raio_atuacao_km', 'cliente_sga', 'cadastro', 'origem',
             'vendedor', 'vendedor_nome',
             'fornecedor_atual', 'concorrente_nome', 'preco_concorrente', 'frete_concorrente',
             'area_ha', 'culturas', 'ciclo_anos', 'ultima_aplicacao', 'dose_t_ha', 'cooperativa',

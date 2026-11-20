@@ -31,6 +31,7 @@ class VendedorAgro(models.Model):
     papel = models.CharField(max_length=15, choices=PAPEL_CHOICES, default='VENDEDOR')
     carteira = models.CharField(max_length=60, blank=True, default='', help_text='Ex.: "C2 · Centro"')
     repcods = models.JSONField(default=list, blank=True, help_text='Códigos REPCOD do SGA')
+    municipios = models.JSONField(default=list, blank=True, help_text='Território: códigos IBGE dos municípios do vendedor')
     ativo = models.BooleanField(default=True)
     criado_em = models.DateTimeField(auto_now_add=True)
 
@@ -81,6 +82,8 @@ class Produtor(models.Model):
     municipio = models.CharField(max_length=80, blank=True, default='')
     tipo = models.CharField(max_length=12, choices=TIPO_CHOICES, default='PRODUTOR')
     cliente_sga = models.IntegerField(null=True, blank=True, unique=True)
+    raio_atuacao_km = models.PositiveSmallIntegerField(
+        null=True, blank=True, help_text='Revenda/cooperativa: o volume comprado é espalhado pelos municípios neste raio')
     cadastro = models.CharField(max_length=12, choices=CADASTRO_CHOICES, default='PROSPECT', db_index=True)
     # Como entrou no app: já era cliente do SGA ou chegou como prospect (conta "prospects novos").
     origem = models.CharField(max_length=8, choices=[('SGA', 'Cliente do SGA'), ('PROSPECT', 'Prospect')], default='PROSPECT')
@@ -286,9 +289,33 @@ class CenarioMercado(models.Model):
     culturas = models.JSONField(default=list, blank=True, help_text='culturas do IBGE/PAM que entram na área; vazio = todas')
     sem_duplo = models.BooleanField('verão e inverno na mesma terra contam uma vez', default=True)
     crescimento_pct = models.DecimalField('crescimento das vendas (% a.a.)', max_digits=5, decimal_places=1, default=10)
+    # Por estado: {"51": {"dose": 3, "ciclo": 3, "consumo_t": 13710700}} — vazio = usa o geral.
+    por_uf = models.JSONField(default=dict, blank=True)
+    calibrar = models.BooleanField('ajustar o mercado ao consumo real (ABRACAL)', default=False)
+    conc_raio_km = models.PositiveSmallIntegerField('raio da concorrência (km)', default=100)
+    conc_reducao_pct = models.DecimalField('cada concorrente no raio tira (%)', max_digits=4, decimal_places=1, default=10)
+    conc_piso_pct = models.DecimalField('piso do potencial com concorrência (%)', max_digits=4, decimal_places=1, default=40)
+    titulares_db = models.JSONField(default=list, blank=True, help_text='Titulares de lavra na ANM que são da DB (não contam como concorrente)')
+    capacidade_mes_t = models.DecimalField('capacidade de carregamento (t/mês)', max_digits=10, decimal_places=0, null=True, blank=True)
     atualizado_em = models.DateTimeField(auto_now=True)
     atualizado_por = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
 
     @classmethod
     def atual(cls) -> 'CenarioMercado':
         return cls.objects.order_by('id').first() or cls.objects.create()
+
+
+
+class PedreiraAnm(models.Model):
+    """Lavra de calcário agrícola ativa na ANM (SIGMINE: uso "Corretivo de solo"/"Fertilizantes",
+    fase concessão de lavra ou licenciamento). Ponto = centro do polígono do processo."""
+
+    processo = models.CharField(max_length=20, unique=True)
+    fase = models.CharField(max_length=40)
+    titular = models.CharField(max_length=120)
+    substancia = models.CharField(max_length=60)
+    uf = models.CharField(max_length=2, db_index=True)
+    area_ha = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    latitude = models.DecimalField(max_digits=9, decimal_places=5)
+    longitude = models.DecimalField(max_digits=9, decimal_places=5)
+    atualizado_em = models.DateTimeField(auto_now=True)

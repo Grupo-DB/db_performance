@@ -131,6 +131,139 @@ def municipios(uf: int) -> dict[int, str]:
     return m
 
 
+# ── Área real: milho 2ª safra (IBGE 839) e pastagem (Censo Agro 2017, IBGE 6881) ─────────────
+
+SIDRA_MILHO_2A = ('https://apisidra.ibge.gov.br/values/t/839/n6/all/v/109/p/{periodo}/c81/114254?formato=json')
+# Censo 2017: área dos estabelecimentos por utilização das terras (só pastagem plantada; a natural quase não recebe calcário).
+SIDRA_PASTAGEM = ('https://apisidra.ibge.gov.br/values/t/6881/n6/all/v/184/p/all/c829/46302/c222/{categoria}'
+                  '/c218/46502/c12517/113601/c12567/41151?formato=json')
+PASTAGENS = {40678: 'Pastagem degradada', 113469: 'Pastagem boa'}
+MILHO_2A = 'Milho 2ª safra'
+
+
+def _linhas_sidra(dados: list[dict], cultura: str, cod_coluna: str = 'D3C') -> list[dict]:
+    linhas = []
+    for d in dados[1:]:
+        try:
+            ha = float(d['V'])
+        except (TypeError, ValueError):
+            continue
+        if ha > 0:
+            linhas.append({'ano': int(d[cod_coluna]), 'municipio_ibge': int(d['D1C']),
+                           'municipio': d['D1N'].rsplit(' - ', 1)[0], 'cultura': cultura, 'hectares': ha})
+    return linhas
+
+
+def baixar_milho_2a(periodo: str = 'last 1') -> list[dict]:
+    """Milho 2ª safra (safrinha) por município — ~1 s. Vai para o grupo de inverno do cenário."""
+    r = requests.get(SIDRA_MILHO_2A.format(periodo=periodo.replace(' ', '%20')), timeout=TIMEOUT)
+    r.raise_for_status()
+    return _linhas_sidra(r.json(), MILHO_2A)
+
+
+def baixar_pastagem() -> list[dict]:
+    """Pastagem plantada (boa e degradada) do Censo 2017 — ~1 min por categoria; roda no importar_pam."""
+    linhas = []
+    for cod, nome in PASTAGENS.items():
+        r = requests.get(SIDRA_PASTAGEM.format(categoria=cod), timeout=300)
+        r.raise_for_status()
+        linhas += _linhas_sidra(r.json(), nome)
+    return linhas
+
+
+def separar_milho(linhas: list[dict]) -> list[dict]:
+    """O PAM traz o milho total; com a 2ª safra baixada, "Milho" passa a ser só a 1ª (verão)."""
+    safrinha = {(l['ano'], l['municipio_ibge']): l['hectares'] for l in linhas if l['cultura'] == MILHO_2A}
+    for l in linhas:
+        if l['cultura'] == 'Milho':
+            l['hectares'] = max(0.0, l['hectares'] - safrinha.get((l['ano'], l['municipio_ibge']), 0.0))
+    return [l for l in linhas if l['hectares'] > 0]
+
+
+# ── Centro de cada município (para raio de concorrência e de revenda) ────────────────────────────
+
+MALHA_MUN_BR_URL = ('https://servicodados.ibge.gov.br/api/v3/malhas/paises/BR'
+                    '?intrarregiao=municipio&formato=application/vnd.geo%2Bjson&qualidade=minima')
+
+
+def centroides_municipios() -> dict[int, tuple[float, float]]:
+    """{ibge: (lat, lng)} dos 5.570 municípios; calculado uma vez da malha do IBGE e guardado em arquivo."""
+    m = cache.get('comercialAgro:centroides')
+    if m is not None:
+        return m
+    arq = pasta_mapas().parent / 'centroides_municipios.json'
+    if arq.exists():
+        m = {int(k): tuple(v) for k, v in json.loads(arq.read_text()).items()}
+    else:
+        r = requests.get(MALHA_MUN_BR_URL, timeout=TIMEOUT)
+        r.raise_for_status()
+        m = {int(f['properties']['codarea']): tuple(round(x, 4) for x in centroide(f['geometry']))
+             for f in r.json().get('features', []) if f.get('geometry')}
+        arq.parent.mkdir(parents=True, exist_ok=True)
+        arq.write_text(json.dumps({str(k): v for k, v in m.items()}))
+    cache.set('comercialAgro:centroides', m, 30 * 86400)
+    return m
+
+
+def distancias_km(lat: float, lng: float, lats: np.ndarray, lngs: np.ndarray) -> np.ndarray:
+    """Distância em linha reta (haversine) de um ponto a vários."""
+    p1, p2 = np.radians(lat), np.radians(lats)
+    dl = np.radians(lngs - lng)
+    a = np.sin((p2 - p1) / 2) ** 2 + np.cos(p1) * np.cos(p2) * np.sin(dl / 2) ** 2
+    return 6371.0 * 2 * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
+
+
+# ── Concorrência: lavras de calcário agrícola na ANM (SIGMINE) ───────────────────────────────────
+
+ANM_URL = 'https://geo.anm.gov.br/arcgis/rest/services/SIGMINE/dados_anm/MapServer/0/query'
+ANM_FILTRO = ("USO IN ('Corretivo de solo','Fertilizantes') AND FASE IN ('CONCESSÃO DE LAVRA','LICENCIAMENTO') "
+              "AND (SUBS LIKE '%CALC%' OR SUBS LIKE '%DOLOM%' OR SUBS LIKE '%CONCHA%')")
+# O geo.anm.gov.br não manda o certificado intermediário da Sectigo (20/11/2026): sem ele a
+# verificação falha. Vai junto do projeto (válido até 2036) e é somado ao bundle do certifi —
+# a verificação continua ligada.
+ANM_INTERMEDIARIO = Path(__file__).resolve().parent / 'certs' / 'sectigo_public_server_auth_ca_ov_r36.pem'
+BRASIL_RAIOS_KM = (50, 100, 150, 200, 300)
+
+# Consumo aparente de calcário agrícola por UF (t), ABRACAL "Calcário agrícola Brasil – 2025"
+# (abracal.com.br/site/estatisticas, publicado em 27/04/2026). As outras 17 UFs vêm só somadas.
+ABRACAL_ANO = 2025
+CONSUMO_ABRACAL = {51: 13_710_700, 52: 9_125_400, 31: 7_058_900, 41: 5_066_400, 50: 4_952_000,
+                   35: 4_786_400, 17: 4_303_300, 43: 3_760_400, 42: 1_351_900, 29: 1_122_800}
+ABRACAL_OUTROS_T = 6_065_900
+
+
+def _ca_anm() -> str:
+    import certifi
+    import tempfile
+    destino = Path(tempfile.gettempdir()) / 'comercialAgro_anm_ca.pem'
+    if not destino.exists():
+        destino.write_text(Path(certifi.where()).read_text() + '\n' + ANM_INTERMEDIARIO.read_text())
+    return str(destino)
+
+
+def baixar_pedreiras() -> list[dict]:
+    """Lavras ativas de calcário agrícola no Brasil (~540, 1 s). Ponto = média do 1º anel do polígono."""
+    r = requests.get(ANM_URL, params={
+        'where': ANM_FILTRO, 'outFields': 'PROCESSO,FASE,NOME,SUBS,UF,AREA_HA', 'returnGeometry': 'true',
+        'outSR': 4326, 'geometryPrecision': 5, 'f': 'json'}, timeout=TIMEOUT, verify=_ca_anm())
+    r.raise_for_status()
+    d = r.json()
+    if 'error' in d:
+        raise RuntimeError(d['error'])
+    saida = []
+    for f in d.get('features', []):
+        a, g = f.get('attributes', {}), f.get('geometry') or {}
+        anel = (g.get('rings') or [[]])[0]
+        if not anel:
+            continue
+        pts = np.asarray(anel, dtype=float)
+        saida.append({'processo': a['PROCESSO'], 'fase': (a.get('FASE') or '')[:40], 'titular': (a.get('NOME') or '')[:120],
+                      'substancia': (a.get('SUBS') or '')[:60], 'uf': (a.get('UF') or '')[:2],
+                      'area_ha': round(float(a.get('AREA_HA') or 0), 2),
+                      'latitude': round(float(pts[:, 1].mean()), 5), 'longitude': round(float(pts[:, 0].mean()), 5)})
+    return saida
+
+
 # ── 2/3. CAR/SICAR ──────────────────────────────────────────────────────────
 
 CAR_WFS = 'https://geoserver.car.gov.br/geoserver/sicar/wfs'

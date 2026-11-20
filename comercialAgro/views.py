@@ -1,9 +1,12 @@
+import copy
 import logging
+from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 
 from django.contrib.auth.models import User
 from django.db import DatabaseError, transaction
-from django.db.models import Q
+from django.core.cache import cache
+from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status, viewsets
@@ -742,6 +745,26 @@ class VendedorViewSet(viewsets.ModelViewSet):
                                           defaults={'toneladas': ser.validated_data['toneladas']})
         return Response(self.get_serializer(self.get_queryset().get(pk=v.pk)).data)  # metas relidas
 
+    @action(detail=True, methods=['post'], permission_classes=[EhGestor])
+    def territorio(self, request, pk=None):
+        """Põe/tira municípios do território do vendedor. Um município é de um vendedor só."""
+        v = self.get_object()
+        try:
+            add = {int(i) for i in request.data.get('adicionar') or []}
+            rem = {int(i) for i in request.data.get('remover') or []}
+        except (TypeError, ValueError):
+            return Response({'detail': 'Códigos IBGE inválidos.'}, status=400)
+        with transaction.atomic():
+            if add:
+                for outro in VendedorAgro.objects.exclude(pk=v.pk).select_for_update():
+                    resto = [i for i in (outro.municipios or []) if i not in add]
+                    if len(resto) != len(outro.municipios or []):
+                        outro.municipios = resto
+                        outro.save(update_fields=['municipios'])
+            v.municipios = sorted((set(v.municipios or []) | add) - rem)
+            v.save(update_fields=['municipios'])
+        return Response({'id': v.id, 'municipios': v.municipios})
+
     @action(detail=False, methods=['get'])
     def usuarios(self, request):
         q = (request.query_params.get('q') or '').strip()
@@ -806,25 +829,159 @@ class VendedorViewSet(viewsets.ModelViewSet):
 # ── Dados públicos: mercado (IBGE/PAM), imóvel (CAR) e prospecção ──────────
 
 from . import geo  # noqa: E402
-from .models import AreaPlantada, BuscaCarMunicipio, CenarioMercado, ImovelCar  # noqa: E402
+import numpy as np  # noqa: E402
+
+from .models import AreaPlantada, BuscaCarMunicipio, CenarioMercado, ImovelCar, PedreiraAnm  # noqa: E402
+
+
+def primeiro_mes(d: date, meses: int) -> date:
+    """1º dia do mês `meses` antes (negativo) ou depois de d."""
+    n = d.year * 12 + d.month - 1 + meses
+    return date(n // 12, n % 12 + 1, 1)
 
 CAR_VALIDADE_DIAS = 30
 AREA_MINIMA_PADRAO = 50
 
 
+# 20/11/2026: lavra em nome da DB na ANM (Caçapava do Sul). Não conta como concorrente; editável no cenário.
+TITULARES_DB_PADRAO = ['DAGOBERTO BARCELLOS S/A']
+
+
+def _culturas_todas() -> list[str]:
+    """Ordem das culturas na resposta (e nas `partes` da visão Brasil)."""
+    return list(geo.CULTURAS_PAM.values()) + [geo.MILHO_2A] + list(geo.PASTAGENS.values())
+
+
+def _ano_pam() -> int | None:
+    return (AreaPlantada.objects.exclude(cultura__in=list(geo.PASTAGENS.values()))
+            .order_by('-ano').values_list('ano', flat=True).first())
+
+
+def _gravar_pam(linhas: list[dict], ano: int, culturas_trocadas) -> None:
+    with transaction.atomic():
+        AreaPlantada.objects.filter(ano=ano, cultura__in=list(culturas_trocadas)).delete()
+        AreaPlantada.objects.bulk_create([AreaPlantada(**l) for l in linhas], batch_size=2000, ignore_conflicts=True)
+
+
+def importar_pam(com_pastagem: bool = False) -> dict:
+    """PAM do Brasil (12 culturas) + milho 2ª safra; com_pastagem soma o Censo 2017 (~2 min).
+    Tudo gravado no ano do PAM, que é o que a tela lê."""
+    linhas = geo.baixar_pam('last 1')
+    ano = max(l['ano'] for l in linhas)
+    linhas = [l for l in linhas if l['ano'] == ano]
+    try:
+        milho2 = geo.baixar_milho_2a('last 1')
+    except Exception as exc:
+        logger.warning('Comercial Agro: sem milho 2ª safra: %s', exc)
+        milho2 = []
+    for l in milho2:
+        l['ano'] = ano  # a 839 pode sair um ano depois do PAM: vale a última
+    linhas = geo.separar_milho(linhas + milho2)
+    _gravar_pam(linhas, ano, list(geo.CULTURAS_PAM.values()) + [geo.MILHO_2A])
+    res = {'ano': ano, 'linhas': len(linhas), 'pastagem': 0}
+    if com_pastagem:
+        past = geo.baixar_pastagem()
+        for l in past:
+            l['ano'] = ano
+        _gravar_pam(past, ano, geo.PASTAGENS.values())
+        res['pastagem'] = len(past)
+    return res
+
+
 def _pam_garantido() -> int | None:
-    """Ano mais recente do PAM no banco. Baixa do SIDRA o Brasil inteiro (12 culturas, ~15 s) na
-    primeira vez e quando o banco só tem o RS antigo (antes de 19/11/2026 era só o RS e 8 culturas)."""
-    ano = AreaPlantada.objects.order_by('-ano').values_list('ano', flat=True).first()
-    completo = ano is not None and AreaPlantada.objects.filter(ano=ano, municipio_ibge__lt=4300000, cultura='Café').exists()
+    """Ano do PAM no banco. Baixa o Brasil inteiro (~15 s) na primeira vez e quando o banco ainda não
+    tem a separação do milho safrinha (antes de 20/11/2026). A pastagem só vem pelo `importar_pam`."""
+    ano = _ano_pam()
+    completo = ano is not None and AreaPlantada.objects.filter(ano=ano, municipio_ibge__lt=4300000, cultura=geo.MILHO_2A).exists()
     if not completo:
-        linhas = geo.baixar_pam('last 1')
-        anos = {l['ano'] for l in linhas}
-        with transaction.atomic():
-            AreaPlantada.objects.filter(ano__in=anos).delete()
-            AreaPlantada.objects.bulk_create([AreaPlantada(**l) for l in linhas], batch_size=2000)
-        ano = max(anos, default=ano)
+        ano = importar_pam()['ano']
     return ano
+
+
+def importar_pedreiras() -> int:
+    linhas = geo.baixar_pedreiras()
+    if linhas:
+        with transaction.atomic():
+            PedreiraAnm.objects.all().delete()
+            PedreiraAnm.objects.bulk_create([PedreiraAnm(**l) for l in linhas], ignore_conflicts=True)
+    return len(linhas)
+
+
+def _pedreiras() -> list[dict]:
+    """Lavras de calcário agrícola da ANM; baixa na primeira vez (1 s). Falha não derruba a tela."""
+    if not PedreiraAnm.objects.exists() and cache.add('comercialAgro:anm_tentou', 1, 3600):
+        try:
+            importar_pedreiras()
+        except Exception as exc:
+            logger.warning('Comercial Agro: ANM fora: %s', exc)
+    return list(PedreiraAnm.objects.values('titular', 'uf', 'latitude', 'longitude', 'substancia'))
+
+
+def _concorrencia(ibges, pedreiras: list[dict], titulares_db) -> dict[int, list[int]]:
+    """Por município: quantas EMPRESAS (titulares distintos) concorrentes têm lavra a até 50/100/150/200/300 km."""
+    try:
+        cent = geo.centroides_municipios()
+    except Exception as exc:
+        logger.warning('Comercial Agro: sem centros dos municípios: %s', exc)
+        return {}
+    da_db = {t.strip().upper() for t in titulares_db}
+    conc = [p for p in pedreiras if p['titular'].strip().upper() not in da_db]
+    if not conc:
+        return {}
+    lats = np.array([float(p['latitude']) for p in conc])
+    lngs = np.array([float(p['longitude']) for p in conc])
+    nomes = {}
+    tit = np.array([nomes.setdefault(p['titular'].strip().upper(), len(nomes)) for p in conc])
+    saida = {}
+    for i in ibges:
+        c = cent.get(int(i))
+        if not c:
+            continue
+        d = geo.distancias_km(c[0], c[1], lats, lngs)
+        saida[int(i)] = [int(np.unique(tit[d <= r]).size) for r in geo.BRASIL_RAIOS_KM]
+    return saida
+
+
+def _redistribuir_canal(vendas: dict, desde, ate, reps, ano: int) -> tuple[dict, dict]:
+    """Revenda/cooperativa com raio de atuação: tira o volume da cidade dela e espalha pelos municípios
+    do raio, na proporção da lavoura. Devolve (vendas ajustadas, toneladas via canal por município)."""
+    canais = list(Produtor.objects.filter(tipo__in=['REVENDA', 'COOPERATIVA'], raio_atuacao_km__gt=0, cliente_sga__isnull=False)
+                  .values_list('cliente_sga', 'raio_atuacao_km'))
+    if not canais:
+        return vendas, {}
+    try:
+        porcli = erp_agro.vendas_por_cliente([c for c, _ in canais], desde, ate, reps)
+        cent = geo.centroides_municipios()
+    except Exception as exc:
+        logger.warning('Comercial Agro: canal sem redistribuir: %s', exc)
+        return vendas, {}
+    ha = {r['municipio_ibge']: float(r['h']) for r in AreaPlantada.objects.filter(ano=ano)
+          .exclude(cultura__in=list(geo.PASTAGENS.values())).values('municipio_ibge').annotate(h=Sum('hectares'))}
+    ids = np.array(list(cent.keys()))
+    lats = np.array([cent[i][0] for i in ids])
+    lngs = np.array([cent[i][1] for i in ids])
+    vendas = copy.deepcopy(vendas)
+    canal: dict[int, float] = defaultdict(float)
+    for cli, raio in canais:
+        v = porcli.get(cli)
+        c = cent.get(v['ibge']) if v else None
+        if not v or v['toneladas'] <= 0 or not c:
+            continue
+        perto = ids[geo.distancias_km(c[0], c[1], lats, lngs) <= raio]
+        pesos = {int(i): ha.get(int(i), 0.0) for i in perto}
+        total = sum(pesos.values())
+        if total <= 0:
+            continue
+        t = v['toneladas']
+        if v['ibge'] in vendas:
+            vendas[v['ibge']]['toneladas'] = max(0.0, vendas[v['ibge']]['toneladas'] - t)
+        for i, w in pesos.items():
+            if w > 0:
+                x = t * w / total
+                e = vendas.setdefault(i, {'clientes': 0, 'toneladas': 0.0, 'valor': 0.0})
+                e['toneladas'] += x
+                canal[i] += x
+    return vendas, dict(canal)
 
 
 def _uf_param(request) -> int | None:
@@ -855,11 +1012,24 @@ class MercadoView(APIView):
         uf = _uf_param(request)
         vid = request.query_params.get('vendedor')
         reps = _repcods_de(request) if vid or not ve_tudo(request.user) else None
+        desde, ate = hoje - timedelta(days=365), hoje + timedelta(days=1)
         try:
-            vendas = erp_agro.vendas_por_municipio(hoje - timedelta(days=365), hoje + timedelta(days=1), reps)
+            vendas = erp_agro.vendas_por_municipio(desde, ate, reps)
         except Exception as exc:
             return _erro_sga(exc)
-        culturas = list(geo.CULTURAS_PAM.values())
+        vendas, canal = _redistribuir_canal(vendas, desde, ate, reps, ano)
+        try:
+            mensal = erp_agro.vendas_mensais(primeiro_mes(hoje, -24), ate, reps)
+        except Exception as exc:
+            logger.warning('Comercial Agro: sem vendas por mês: %s', exc)
+            mensal = []
+        try:
+            cen = CenarioMercado.atual()
+            titulares = cen.titulares_db or TITULARES_DB_PADRAO
+        except DatabaseError:
+            titulares = TITULARES_DB_PADRAO
+        pedreiras = _pedreiras()
+        culturas = _culturas_todas()
         dentro = (lambda i: i // 100000 == uf) if uf else (lambda i: i // 100000 in geo.UFS)
 
         mun: dict[int, dict] = {}
@@ -881,14 +1051,19 @@ class MercadoView(APIView):
                             nomes = {}
                     mun[ibge] = {'ibge': ibge, 'municipio': nomes.get(ibge, str(ibge)), 'hectares': 0.0, 'culturas': {}}
             linhas = list(mun.values())
+            conc = _concorrencia([m['ibge'] for m in linhas], pedreiras, titulares)
             for m in linhas:
                 v = vendas.get(m['ibge'], {})
-                m.update(vendido_t=v.get('toneladas', 0.0), clientes=v.get('clientes', 0), valor=v.get('valor', 0.0))
+                m.update(vendido_t=round(v.get('toneladas', 0.0), 1), clientes=v.get('clientes', 0), valor=v.get('valor', 0.0),
+                         vendido_canal_t=round(canal.get(m['ibge'], 0.0), 1), conc=conc.get(m['ibge'], [0] * len(geo.BRASIL_RAIOS_KM)))
         else:
             estados: dict[int, dict] = {}
             for cod, (sigla, nome) in geo.UFS.items():
                 estados[cod] = {'ibge': cod, 'municipio': nome, 'sigla': sigla, 'hectares': 0.0, 'culturas': {},
-                                'partes': [], 'vendido_t': 0.0, 'clientes': 0, 'valor': 0.0, 'municipios': 0}
+                                'partes': [], 'partes_conc': [], 'vendido_t': 0.0, 'clientes': 0, 'valor': 0.0,
+                                'vendido_canal_t': 0.0, 'municipios': 0}
+            conc = _concorrencia(list(mun), pedreiras, titulares)
+            zero = [0] * len(geo.BRASIL_RAIOS_KM)
             for m in mun.values():
                 e = estados.get(m['ibge'] // 100000)
                 if not e:
@@ -898,15 +1073,18 @@ class MercadoView(APIView):
                 for c, h in m['culturas'].items():
                     e['culturas'][c] = e['culturas'].get(c, 0.0) + h
                 e['partes'].append([round(m['culturas'].get(c, 0.0)) for c in culturas])
+                e['partes_conc'].append(conc.get(m['ibge'], zero))
             for ibge, v in vendas.items():
                 e = estados.get(ibge // 100000)
                 if e:
                     e['vendido_t'] += v['toneladas']
                     e['clientes'] += v['clientes']
                     e['valor'] += v['valor']
+                    e['vendido_canal_t'] += canal.get(ibge, 0.0)
             linhas = [e for e in estados.values() if e['hectares'] or e['vendido_t']]
             for e in linhas:
                 e['vendido_t'], e['valor'] = round(e['vendido_t'], 1), round(e['valor'], 2)
+                e['vendido_canal_t'] = round(e['vendido_canal_t'], 1)
                 e['culturas'] = {c: round(h) for c, h in e['culturas'].items()}
 
         for m in linhas:
@@ -928,14 +1106,25 @@ class MercadoView(APIView):
                        'participacao': round(100 * vend_total / pot_total, 1) if pot_total else None,
                        'municipios_com_venda': sum(1 for l in linhas if l['vendido_t'] > 0)},
             'municipios': linhas,
+            'raios_km': list(geo.BRASIL_RAIOS_KM),
+            'pedreiras': [{'titular': p['titular'], 'uf': p['uf'], 'lat': float(p['latitude']), 'lng': float(p['longitude']),
+                           'db': p['titular'].strip().upper() in {t.strip().upper() for t in titulares}} for p in pedreiras],
+            'mensal': mensal,
+            'territorio': {str(i): v.id for v in VendedorAgro.objects.filter(ativo=True) for i in (v.municipios or [])},
+            'abracal': {'ano': geo.ABRACAL_ANO, 'consumo_t': {str(k): v for k, v in geo.CONSUMO_ABRACAL.items()},
+                        'outros_t': geo.ABRACAL_OUTROS_T},
         })
 
 
 def _cenario_json(c: CenarioMercado) -> dict:
     por = c.atualizado_por
     return {'t_ha': float(c.t_ha), 'dose_t_ha': float(c.dose_t_ha), 'ciclo_anos': c.ciclo_anos, 'culturas': c.culturas,
-            'sem_duplo': c.sem_duplo, 'crescimento_pct': float(c.crescimento_pct), 'atualizado_em': c.atualizado_em,
-            'atualizado_por': (por.get_full_name() or por.username) if por else None}
+            'sem_duplo': c.sem_duplo, 'crescimento_pct': float(c.crescimento_pct),
+            'por_uf': c.por_uf or {}, 'calibrar': c.calibrar, 'conc_raio_km': c.conc_raio_km,
+            'conc_reducao_pct': float(c.conc_reducao_pct), 'conc_piso_pct': float(c.conc_piso_pct),
+            'titulares_db': c.titulares_db or TITULARES_DB_PADRAO,
+            'capacidade_mes_t': float(c.capacidade_mes_t) if c.capacidade_mes_t is not None else None,
+            'atualizado_em': c.atualizado_em, 'atualizado_por': (por.get_full_name() or por.username) if por else None}
 
 
 class CenarioMercadoView(APIView):
@@ -968,14 +1157,49 @@ class CenarioMercadoView(APIView):
         t_ha, dose = numero('t_ha', 0, 20), numero('dose_t_ha', 0, 20)
         ciclo, cresc = numero('ciclo_anos', 1, 10), numero('crescimento_pct', 0, 200)
         culturas = d.get('culturas') or []
-        validas = set(geo.CULTURAS_PAM.values())
+        validas = set(_culturas_todas())
         if not isinstance(culturas, list) or any(c not in validas for c in culturas):
             erros['culturas'] = 'Cultura desconhecida.'
+        reducao = numero('conc_reducao_pct', 0, 100) if 'conc_reducao_pct' in d else 10.0
+        piso = numero('conc_piso_pct', 0, 100) if 'conc_piso_pct' in d else 40.0
+        raio = d.get('conc_raio_km', 100)
+        if raio not in geo.BRASIL_RAIOS_KM:
+            erros['conc_raio_km'] = f'Use {", ".join(str(r) for r in geo.BRASIL_RAIOS_KM)} km.'
+        capacidade = d.get('capacidade_mes_t')
+        if capacidade not in (None, ''):
+            capacidade = numero('capacidade_mes_t', 0, 10_000_000)
+        else:
+            capacidade = None
+        por_uf = {}
+        for k, v in (d.get('por_uf') or {}).items():
+            if not str(k).isdigit() or int(k) not in geo.UFS or not isinstance(v, dict):
+                erros['por_uf'] = f'Estado inválido: {k}.'
+                break
+            item = {}
+            for campo, lim in (('dose', (0, 20)), ('ciclo', (1, 10)), ('consumo_t', (0, 100_000_000))):
+                x = v.get(campo)
+                if x in (None, ''):
+                    continue
+                try:
+                    x = float(x)
+                except (TypeError, ValueError):
+                    erros['por_uf'] = f'{geo.UFS[int(k)][0]}: {campo} inválido.'
+                    break
+                if not lim[0] <= x <= lim[1]:
+                    erros['por_uf'] = f'{geo.UFS[int(k)][0]}: {campo} entre {lim[0]:g} e {lim[1]:g}.'
+                    break
+                item[campo] = int(x) if campo == 'ciclo' else round(x, 2)
+            if item:
+                por_uf[str(int(k))] = item
+        titulares = [str(t).strip()[:120] for t in (d.get('titulares_db') or []) if str(t).strip()]
         if erros:
             return Response(erros, status=400)
         c = CenarioMercado.atual()
         c.t_ha, c.dose_t_ha, c.ciclo_anos, c.crescimento_pct = round(t_ha, 3), round(dose, 2), int(ciclo), round(cresc, 1)
         c.culturas, c.sem_duplo, c.atualizado_por = culturas, bool(d.get('sem_duplo', True)), request.user
+        c.por_uf, c.calibrar, c.conc_raio_km = por_uf, bool(d.get('calibrar')), int(raio)
+        c.conc_reducao_pct, c.conc_piso_pct, c.titulares_db = round(reducao, 1), round(piso, 1), titulares
+        c.capacidade_mes_t = round(capacidade) if capacidade is not None else None
         c.save()
         return Response(_cenario_json(c))
 
@@ -992,9 +1216,13 @@ class MercadoClientesView(APIView):
             linhas = erp_agro.clientes_do_municipio(ibge, hoje - timedelta(days=365), hoje + timedelta(days=1), reps)
         except Exception as exc:
             return _erro_sga(exc)
-        ligados = dict(Produtor.objects.filter(cliente_sga__in=[l['cliente'] for l in linhas]).values_list('cliente_sga', 'id'))
+        ligados = {p['cliente_sga']: p for p in Produtor.objects.filter(cliente_sga__in=[l['cliente'] for l in linhas])
+                   .values('cliente_sga', 'id', 'tipo', 'raio_atuacao_km')}
         for l in linhas:
-            l['produtor'] = ligados.get(l['cliente'])
+            p = ligados.get(l['cliente'])
+            l['produtor'] = p['id'] if p else None
+            l['tipo'] = p['tipo'] if p else None
+            l['raio_atuacao_km'] = p['raio_atuacao_km'] if p else None
         return Response(linhas)
 
 

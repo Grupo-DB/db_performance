@@ -90,6 +90,13 @@ class DadosPublicosTests(TestCase):
         AreaPlantada.objects.create(ano=2025, municipio_ibge=4303004, municipio='Cachoeira do Sul', cultura='Arroz', hectares=20000)
         AreaPlantada.objects.create(ano=2025, municipio_ibge=4300034, municipio='Aceguá', cultura='Soja', hectares=32000)
         AreaPlantada.objects.create(ano=2025, municipio_ibge=3100104, municipio='Abadia dos Dourados', cultura='Café', hectares=1000)
+        AreaPlantada.objects.create(ano=2025, municipio_ibge=3100104, municipio='Abadia dos Dourados', cultura='Milho 2ª safra', hectares=10)
+        self.semrede = [mock.patch('comercialAgro.erp_agro.vendas_mensais', return_value=[]),
+                        mock.patch('comercialAgro.views._pedreiras', return_value=[]),
+                        mock.patch('comercialAgro.geo.baixar_pam', side_effect=AssertionError('não devia baixar'))]
+        for m in self.semrede:
+            m.start()
+            self.addCleanup(m.stop)
         vendas = {4303004: {'clientes': 12, 'toneladas': 15000.0, 'valor': 1.0}, 4205407: {'clientes': 1, 'toneladas': 900.0, 'valor': 1.0}}
         with mock.patch('comercialAgro.erp_agro.vendas_por_municipio', return_value=vendas) as vm:
             r = self.cli(self.gestor).get('/comercialAgro/mercado/')
@@ -104,10 +111,8 @@ class DadosPublicosTests(TestCase):
         self.assertNotIn(3100104, [m['ibge'] for m in r.data['municipios']])  # MG fora da visão do RS
 
         # Brasil: uma linha por estado, com os hectares de cada município por cultura em `partes`.
-        with mock.patch('comercialAgro.erp_agro.vendas_por_municipio', return_value=vendas), \
-             mock.patch('comercialAgro.geo.baixar_pam') as baixar:
+        with mock.patch('comercialAgro.erp_agro.vendas_por_municipio', return_value=vendas):
             r = self.cli(self.gestor).get('/comercialAgro/mercado/?uf=BR')
-        baixar.assert_not_called()
         por = {e['sigla']: e for e in r.data['municipios']}
         self.assertEqual(set(por), {'RS', 'MG', 'SC'})  # SC só tem venda
         rs = por['RS']
@@ -175,3 +180,57 @@ class CamadaCarTests(SimpleTestCase):
         g = {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [1, 1], [0, 0]]]}
         self.assertEqual(geo.com_lavoura({'municipio_ibge': 4303004, 'area_ha': 100, 'geometria': g}, mapa)['lavoura_ha'], 50.0)
         self.assertNotIn('lavoura_ha', geo.com_lavoura({'municipio_ibge': 4205407, 'area_ha': 100, 'geometria': g}, mapa))
+
+
+class SimuladorTests(TestCase):
+    def setUp(self):
+        self.gestor = User.objects.create_user('lucas')
+        self.gestor.groups.add(Group.objects.get_or_create(name='agroGestor')[0])
+        self.c = APIClient()
+        self.c.force_authenticate(self.gestor)
+
+    def test_concorrencia_conta_empresas_e_ignora_a_db(self):
+        from .views import _concorrencia
+        cent = {4303004: (-30.04, -52.89)}  # Cachoeira do Sul
+        ped = [{'titular': 'A LTDA', 'latitude': -30.54, 'longitude': -53.41},   # ~75 km
+               {'titular': 'A LTDA', 'latitude': -30.55, 'longitude': -53.42},   # mesma empresa
+               {'titular': 'B LTDA', 'latitude': -30.32, 'longitude': -52.32},   # ~63 km
+               {'titular': 'Dagoberto Barcellos S/A', 'latitude': -30.54, 'longitude': -53.41}]
+        with mock.patch('comercialAgro.geo.centroides_municipios', return_value=cent):
+            r = _concorrencia([4303004], ped, ['DAGOBERTO BARCELLOS S/A'])
+        self.assertEqual(r[4303004], [0, 2, 2, 2, 2])
+
+    def test_revenda_espalha_pelo_raio(self):
+        from datetime import date as d
+        from .views import _redistribuir_canal
+        Produtor.objects.create(nome='Coop', tipo='COOPERATIVA', cliente_sga=77, raio_atuacao_km=100)
+        AreaPlantada.objects.create(ano=2025, municipio_ibge=1, municipio='A', cultura='Soja', hectares=300)
+        AreaPlantada.objects.create(ano=2025, municipio_ibge=2, municipio='B', cultura='Soja', hectares=100)
+        AreaPlantada.objects.create(ano=2025, municipio_ibge=3, municipio='Longe', cultura='Soja', hectares=900)
+        cent = {1: (-30.0, -53.0), 2: (-30.3, -53.0), 3: (-25.0, -50.0)}
+        vendas = {1: {'clientes': 3, 'toneladas': 1000.0, 'valor': 0}}
+        with mock.patch('comercialAgro.geo.centroides_municipios', return_value=cent), \
+             mock.patch('comercialAgro.erp_agro.vendas_por_cliente', return_value={77: {'ibge': 1, 'toneladas': 400.0}}):
+            v, canal = _redistribuir_canal(vendas, d(2025, 1, 1), d(2026, 1, 1), None, 2025)
+        self.assertEqual((round(v[1]['toneladas']), round(v[2]['toneladas']), 3 in v), (900, 100, False))
+        self.assertEqual({k: round(x) for k, x in canal.items()}, {1: 300, 2: 100})
+        self.assertEqual(vendas[1]['toneladas'], 1000.0)  # não mexe no dict do cache
+
+    def test_territorio_um_municipio_um_vendedor(self):
+        a = VendedorAgro.objects.create(user=User.objects.create_user('a'), repcods=[1], municipios=[4303004, 4300034])
+        b = VendedorAgro.objects.create(user=User.objects.create_user('b'), repcods=[2])
+        r = self.c.post(f'/comercialAgro/vendedores/{b.id}/territorio/', {'adicionar': [4303004]}, format='json')
+        self.assertEqual(r.data['municipios'], [4303004])
+        a.refresh_from_db()
+        self.assertEqual(a.municipios, [4300034])
+
+    def test_cenario_estendido(self):
+        novo = {'t_ha': 0.25, 'dose_t_ha': 2, 'ciclo_anos': 4, 'culturas': ['Soja', 'Milho 2ª safra', 'Pastagem degradada'],
+                'sem_duplo': True, 'crescimento_pct': 10, 'por_uf': {'51': {'dose': 3, 'ciclo': 3, 'consumo_t': 13710700}},
+                'calibrar': True, 'conc_raio_km': 150, 'conc_reducao_pct': 12, 'conc_piso_pct': 30,
+                'titulares_db': ['DAGOBERTO BARCELLOS S/A'], 'capacidade_mes_t': 90000}
+        r = self.c.put('/comercialAgro/mercado/cenario/', novo, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual((r.data['por_uf']['51']['ciclo'], r.data['conc_raio_km'], r.data['capacidade_mes_t']), (3, 150, 90000.0))
+        r = self.c.put('/comercialAgro/mercado/cenario/', {**novo, 'conc_raio_km': 77, 'por_uf': {'99': {}}}, format='json')
+        self.assertEqual(set(r.data), {'conc_raio_km', 'por_uf'})
