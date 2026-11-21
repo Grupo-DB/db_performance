@@ -1040,6 +1040,31 @@ def _abastecimento(ano: int) -> tuple[dict, dict]:
     return v
 
 
+def _cfem_pedreiras(pedreiras: list[dict]) -> list[dict | None]:
+    """Para cada pedreira: volume CFEM da unidade da mesma empresa a até 40 km (a mina) e o total da empresa."""
+    unid = list(UnidadeCalcario.objects.filter(agro=True).values('nome', 'municipio_ibge', 't_12m', 't_12m_anterior'))
+    if not unid:
+        return [None] * len(pedreiras)
+    try:
+        cent = geo.centroides_municipios()
+    except Exception:
+        cent = {}
+    por_nome: dict[str, list] = defaultdict(list)
+    for u in unid:
+        por_nome[u['nome'].strip().upper()].append(u)
+    saida = []
+    for p in pedreiras:
+        us = por_nome.get(p['titular'].strip().upper())
+        if not us:
+            saida.append(None)
+            continue
+        perto = [u for u in us if (c := cent.get(u['municipio_ibge'])) and
+                 geo.distancias_km(float(p['latitude']), float(p['longitude']), np.array([c[0]]), np.array([c[1]]))[0] <= 40]
+        saida.append({'mina_t': round(sum(u['t_12m'] for u in perto)), 'mina_ant': round(sum(u['t_12m_anterior'] for u in perto)),
+                      'empresa_t': round(sum(u['t_12m'] for u in us)), 'empresa_ant': round(sum(u['t_12m_anterior'] for u in us))})
+    return saida
+
+
 def _sem_acento(t: str) -> str:
     import unicodedata
     return ''.join(c for c in unicodedata.normalize('NFD', t or '') if unicodedata.category(c) != 'Mn').upper().strip()
@@ -1209,7 +1234,8 @@ class MercadoView(APIView):
             'municipios': linhas,
             'raios_km': list(geo.BRASIL_RAIOS_KM),
             'pedreiras': [{'titular': p['titular'], 'uf': p['uf'], 'lat': float(p['latitude']), 'lng': float(p['longitude']),
-                           'db': p['titular'].strip().upper() in {t.strip().upper() for t in titulares}} for p in pedreiras],
+                           'db': p['titular'].strip().upper() in {t.strip().upper() for t in titulares}, 'cfem': cf}
+                          for p, cf in zip(pedreiras, _cfem_pedreiras(pedreiras))],
             'mensal': mensal,
             'empresas': {c: empresas[c] for c in {c for l in linhas for c in (l.get('abastecimento') or {})} if c in empresas},
             'territorio': {str(i): v.id for v in VendedorAgro.objects.filter(ativo=True) for i in (v.municipios or [])},
