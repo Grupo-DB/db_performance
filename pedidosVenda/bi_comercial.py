@@ -18,6 +18,7 @@ referencia a nota de saída), como no BI.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -38,6 +39,30 @@ FILTROS = {
     'filial': 'FILIAL', 'regiao': 'REGIAO', 'segmento': 'SEGMENTO', 'grupo': 'GRUPO_GESTAO',
     'representante': 'REPRESENTANTE', 'cliente': 'CLIENTE', 'natureza': 'NATUREZA', 'produto': 'PRODUTO',
 }
+# Naturezas que o segmentador "Nat. Operação" do Power BI deixa marcadas (prints de
+# 23/11/2026). Com elas, 2026 até 22/11 bateu com o BI: R$ 126,9 mi; novembro R$ 6,34 mi
+# e 22.950,8 t (BI: R$ 6M e 22,95K). Algumas só aparecem em outros anos.
+NATUREZAS_PADRAO = (
+    'Devol. Venda Merc.Adq. Terceiros (1.411)',
+    'Venda De Merc. Ad. Terc. (5.102)', 'Venda De Merc. Ad. Terc. (6.102)',
+    'Venda De Merc. Ad. Terc.(Exp.) (7.102)', 'Venda De Merc. Ad. Terc.(St) (5.403)',
+    'Venda De Prod. Estab. (5.101)', 'Venda De Prod. Estab. (6.101)',
+    'Venda De Prod. Estab. (Exp.) (7.101)', 'Venda De Prod. Estab. (St)(401) (5.401)',
+    'Devol. Vendas Simp. Remessa (1.201)', 'Devolucao Venda Prod. Estabelecimento (1.201)',
+    'Simples Remessa (5.116)', 'Venda De Merc. Ad. Terc.(St) (5.405)',
+    'Venda De Prod. Estab. (Exp.) (5.101)', 'Devolucao De Compras (Geral) (6.202)',
+)
+
+
+def _chave(s: str) -> str:
+    return ' '.join(str(s).upper().split())
+
+
+def naturezas_padrao(disponiveis: list[str]) -> list[str]:
+    alvo = {_chave(n) for n in NATUREZAS_PADRAO}
+    return [n for n in disponiveis if _chave(n) in alvo]
+
+
 FILTROS_SALDO = {'filial': 'FILIAL', 'grupo': 'GRUPO', 'produto': 'PRODUTO', 'cliente': 'CLIENTE'}
 
 
@@ -51,9 +76,10 @@ def _ler(sql: str, **params) -> pd.DataFrame:
 
 
 def _titulo(s) -> str:
-    """Text.Proper do Power Query: cada palavra com a 1ª maiúscula."""
+    """Text.Proper do Power Query: 1ª letra de cada sequência de letras maiúscula, o resto
+    minúsculo — "(ST)" vira "(St)" e "MERC.ADQ." vira "Merc.Adq.", como o BI mostra."""
     s = '' if s is None or (isinstance(s, float) and pd.isna(s)) else str(s).strip()
-    return ' '.join(p[:1].upper() + p[1:].lower() for p in s.split(' ')) if s else ''
+    return re.sub(r'[^\W\d_]+', lambda m: m.group(0)[:1].upper() + m.group(0)[1:].lower(), s)
 
 
 def _txt(s) -> str:
@@ -88,7 +114,7 @@ def preparar(raw: pd.DataFrame) -> pd.DataFrame:
         'NOTA': pd.to_numeric(r.NOTA_FISCAL, errors='coerce').fillna(0).astype('int64'),
         'NFCOD': pd.to_numeric(r.NFCOD, errors='coerce').fillna(0).astype('int64'),
         'TIPO_NF': r.TIPO_NF.map(_txt),
-        'NATUREZA': r.NATUREZA_OPERACAO.map(_txt),
+        'NATUREZA': r.NATUREZA_OPERACAO.map(_titulo),       # "Nat. Operação" do BI (Text.Proper)
         'CLIENTE': r.CLIENTE_NOME.map(_txt),
         'CLIENTE_COD': pd.to_numeric(r.CLIENTE_CODIGO, errors='coerce').fillna(0).astype('int64'),
         'CNPJ': r.CLIENTE_CNPJCPF.map(_txt),
@@ -186,7 +212,9 @@ def montar(df: pd.DataFrame, todos: pd.DataFrame, desde: date, ate: date) -> dic
         'produtos': produtos,
         'segmentos': segmentos,
         'grupos': grupos,
-        'opcoes': opcoes(todos),
+        'opcoes': (op := opcoes(todos)),
+        # Seleção inicial dos filtros, como o BI abre (o front aplica na 1ª carga).
+        'padroes': {'natureza': naturezas_padrao(op['natureza'])},
         'ultima_nota': df.DATA.max().date().isoformat() if len(df) else None,
     }
 
