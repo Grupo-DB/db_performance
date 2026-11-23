@@ -226,6 +226,18 @@ class CompraEmAndamentoTests(SimpleTestCase):
         self.assertEqual(r['compra_texto'], 'Ordem de compra 500 — aguardando aprovação, entrega parcial, entrega atrasada (+1)')
         self.assertEqual(a.resumo_compra(None)['compra_etapa'], None)
 
+    def test_ordem_inativa_nao_e_compra(self):
+        # A consulta já descarta ordem reprovada (OUTER APPLY vem vazio): item "em ordem" sem
+        # ordem não está em compra. Item todo cancelado na ordem também não.
+        df = pd.DataFrame([
+            self.linha(7, 75815, 2),
+            self.linha(8, 75816, 2, ORDEM=142704.0, APROV_ORDEM=1.0, QUANT_ORDEM=4.0, QUANT_RECEBIDA=0.0, QUANT_CANCELADA=4.0),
+            self.linha(9, 75817, 2, ORDEM=142705.0, APROV_ORDEM=1.0, QUANT_ORDEM=4.0, QUANT_RECEBIDA=0.0, QUANT_CANCELADA=1.0),
+        ])
+        c = a.montar_compras(df, date(2026, 11, 23))
+        self.assertEqual(sorted(c), [9])
+        self.assertEqual(c[9][0]['quantidade'], 3.0)
+
     def test_nota_so_pre_lancada_nao_conta_como_recebida(self):
         # OC 143002: 70 de 70 "faturados" no SGA, mas a nota 239917 está pendente.
         df = pd.DataFrame([

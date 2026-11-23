@@ -249,6 +249,7 @@ _SQL_COMPRAS = """
         JOIN PROCESSOCOMPRA P ON P.PCOCOD = IP.IPCOPCO
         LEFT JOIN FORNECEDOR F ON F.FORCOD = P.PCOFOR
         WHERE IP.IPCOIPCOM = I.IPCOMCOD AND P.PCOSIT IN (1, 4)
+          AND P.PCOSITAPROV <> 2          -- reprovada não é compra ativa (23/11/2026, OC 142703)
         ORDER BY P.PCODATAORDEM DESC
     ) O
     -- IPCOQUANTFAT já soma a nota no pré-lançamento: o que está em nota pendente (0)
@@ -524,6 +525,8 @@ def montar_compras(df: pd.DataFrame, hoje: date,
         ordem = None if pd.isna(r.ORDEM) else int(r.ORDEM)
         previsao = _data_iso(r.PREVISAO) if sit == 2 else None
         recebido = 0.0
+        if sit == 2 and not ordem:
+            continue            # item "em ordem" sem ordem ativa (reprovada, cancelada): não está em compra
         if sit == 2 and ordem:
             pedido = _num(r.QUANT_ORDEM) - _num(r.QUANT_CANCELADA)
             # Nota só pré-lançada (pendente/em alteração) já conta no faturado do
@@ -532,12 +535,12 @@ def montar_compras(df: pd.DataFrame, hoje: date,
             recebido = max(_num(r.QUANT_RECEBIDA) - na_nota, 0.0)
             if pedido > 0 and recebido >= pedido:
                 continue        # já entrou tudo por nota; o SGA só não virou o item ainda
+            if _num(r.QUANT_ORDEM) > 0 and pedido <= 0:
+                continue        # item todo cancelado na ordem (IPCOQUANTCANC): não está mais em compra
             quant = max(pedido - recebido, 0.0) if pedido > 0 else quant
             aprov = None if pd.isna(r.APROV_ORDEM) else int(r.APROV_ORDEM)
             if aprov == 0:
                 detalhe.append('aguardando aprovação')
-            elif aprov == 2:
-                detalhe.append('ordem reprovada')
             if recebido > 0:
                 detalhe.append('entrega parcial')
             if na_nota > 0:
