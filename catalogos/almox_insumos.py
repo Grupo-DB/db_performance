@@ -68,9 +68,28 @@ def _da_filial(qs, filial: int | None):
     return qs.filter(filial__isnull=True) if filial is None else qs.filter(filial=filial)
 
 
-def monitorados_app(filial: int | None = None) -> list[dict]:
+def _selecao(filial: int | None, usuario=None):
+    """Linhas de UMA seleção: a do usuário (painel próprio) ou, com usuario=None, o padrão da filial."""
     from .models import InsumoMonitorado
-    return list(_da_filial(InsumoMonitorado.objects.all(), filial).values('id', 'tipo', 'codigo', 'ordem', 'foto_item'))
+    qs = _da_filial(InsumoMonitorado.objects.all(), filial)
+    return qs.filter(usuario__isnull=True) if usuario is None else qs.filter(usuario=usuario)
+
+
+_CAMPOS = ('id', 'tipo', 'codigo', 'ordem', 'foto_item')
+
+
+def monitorados_app(filial: int | None = None, usuario=None) -> list[dict]:
+    """Seleção exata (padrão com usuario=None; a do usuário, sem cair no padrão)."""
+    return list(_selecao(filial, usuario).values(*_CAMPOS))
+
+
+def selecao_efetiva(filial: int | None, usuario=None, painel: str = 'meu') -> tuple[list[dict], bool]:
+    """(o que a pessoa vê, se é o painel próprio). 'meu' cai no padrão enquanto ela não personalizou."""
+    if painel == 'meu' and usuario is not None:
+        proprio = monitorados_app(filial, usuario)
+        if proprio:
+            return proprio, True
+    return monitorados_app(filial, None), False
 
 
 def caminho_grupo(cod: int, nome: dict, pai: dict) -> str:
@@ -335,10 +354,11 @@ def montar_painel(df: pd.DataFrame, grupos: pd.DataFrame, mov: pd.DataFrame, mon
     }
 
 
-def painel(filial: int | None, dias: int = DIAS_PADRAO, fonte: str = 'sga', hoje: date | None = None) -> dict:
+def painel(filial: int | None, dias: int = DIAS_PADRAO, fonte: str = 'sga', hoje: date | None = None,
+           usuario=None, qual: str = 'meu') -> dict:
     hoje = hoje or date.today()
     df, erp, _prazos = ax._preparado(filial, fonte)
-    monitorados = monitorados_app(filial)
+    monitorados, personalizado = selecao_efetiva(filial, usuario, qual)
     chaves, _ = distribuir(df, erp['grupos'], monitorados)
     codigos = [int(c) for c in df.ESTQCOD[chaves.notna()]]
     # Período atual + anterior (comparação) e pelo menos 12 meses para a série mensal.
@@ -346,12 +366,55 @@ def painel(filial: int | None, dias: int = DIAS_PADRAO, fonte: str = 'sga', hoje
     mov = ler_movimento(filial, codigos, hoje - timedelta(days=janela))
     dados = montar_painel(df, erp['grupos'], mov, monitorados, hoje, dias)
     dados['lido_em'] = erp.get('lido_em')
+    dados['painel'] = qual
+    dados['personalizado'] = personalizado
     return dados
 
 
-# ── Edição (gestor) ─────────────────────────────────────────────────────────
+# ── Edição ──────────────────────────────────────────────────────────────────
+# Duas seleções por filial: o PADRÃO (usuario vazio, só o gestor edita) e o painel de cada pessoa.
+# Quem ainda não personalizou vê o padrão; a 1ª mudança dele em "meu" copia o padrão para ele
+# (garantir_proprio) e aplica a mudança na cópia — os ids do padrão viram os da cópia (_no_proprio).
 
-def incluir(tipo: str, codigo: int, usuario, filial: int | None = None) -> dict:
+def garantir_proprio(filial: int | None, usuario) -> bool:
+    """Cria o painel do usuário como cópia do padrão da filial, se ele ainda não tem. True = criou."""
+    from .models import InsumoMonitorado
+    if _selecao(filial, usuario).exists():
+        return False
+    InsumoMonitorado.objects.bulk_create([
+        InsumoMonitorado(usuario=usuario, filial=filial, tipo=m.tipo, codigo=m.codigo, ordem=m.ordem,
+                         foto_item=m.foto_item, incluido_por=usuario)
+        for m in _selecao(filial, None).order_by('ordem', 'id')])
+    return True
+
+
+def _no_proprio(pk: int, usuario):
+    """A linha do painel do usuário que corresponde a `pk` (do padrão ou já dele). None = não existe."""
+    from .models import InsumoMonitorado
+    m = InsumoMonitorado.objects.filter(pk=pk).first()
+    if m is None:
+        return None
+    if m.usuario_id == usuario.id:
+        return m
+    if m.usuario_id is not None:
+        return None                                       # painel de outra pessoa
+    garantir_proprio(m.filial, usuario)
+    return _selecao(m.filial, usuario).filter(tipo=m.tipo, codigo=m.codigo).first()
+
+
+def alvo(pk: int, usuario, qual: str):
+    """Linha a editar. 'padrao' só aceita linha do padrão; 'meu' converte para a do usuário."""
+    from .models import InsumoMonitorado
+    if qual == 'padrao':
+        return InsumoMonitorado.objects.filter(pk=pk, usuario__isnull=True).first()
+    return _no_proprio(pk, usuario)
+
+
+def voltar_ao_padrao(filial: int | None, usuario) -> int:
+    """Apaga o painel próprio da filial: a pessoa volta a ver o padrão."""
+    return _selecao(filial, usuario).delete()[0]
+
+def incluir(tipo: str, codigo: int, usuario, filial: int | None = None, qual: str = 'padrao') -> dict:
     from django.db.models import Max
     from .models import InsumoMonitorado
     if tipo not in ('grupo', 'item'):
@@ -360,29 +423,40 @@ def incluir(tipo: str, codigo: int, usuario, filial: int | None = None) -> dict:
         codigo = int(codigo)
     except (TypeError, ValueError):
         raise ValueError('codigo deve ser um número.')
-    da_filial = _da_filial(InsumoMonitorado.objects.all(), filial)
-    existente = da_filial.filter(tipo=tipo, codigo=codigo).first()
-    if existente:                       # NULL não entra no unique do MySQL: "Todas" confere aqui
+    dono = usuario if qual == 'meu' else None
+    if dono is not None:
+        garantir_proprio(filial, dono)
+    sel = _selecao(filial, dono)
+    existente = sel.filter(tipo=tipo, codigo=codigo).first()
+    if existente:                       # NULL não entra no unique do MySQL: o padrão confere aqui
         return {'id': existente.id, 'criado': False}
-    ordem = (da_filial.aggregate(m=Max('ordem'))['m'] or 0) + 1
-    obj = InsumoMonitorado.objects.create(tipo=tipo, codigo=codigo, filial=filial, ordem=ordem, incluido_por=usuario)
+    ordem = (sel.aggregate(m=Max('ordem'))['m'] or 0) + 1
+    obj = InsumoMonitorado.objects.create(tipo=tipo, codigo=codigo, filial=filial, usuario=dono, ordem=ordem,
+                                          incluido_por=usuario)
     return {'id': obj.id, 'criado': True}
 
 
-def definir_foto(pk: int, item: int | None) -> bool:
+def definir_foto(pk: int, item: int | None, usuario=None, qual: str = 'padrao') -> bool:
     """Foto do cartão: ESTQCOD escolhido, ou None para voltar à automática."""
-    from .models import InsumoMonitorado
-    if item is not None:
-        item = int(item)
-    return InsumoMonitorado.objects.filter(pk=pk).update(foto_item=item) > 0
+    m = alvo(pk, usuario, qual)
+    if m is None:
+        return False
+    m.foto_item = None if item is None else int(item)
+    m.save(update_fields=['foto_item'])
+    return True
 
 
-def remover(pk: int) -> bool:
-    from .models import InsumoMonitorado
-    return InsumoMonitorado.objects.filter(pk=pk).delete()[0] > 0
+def remover(pk: int, usuario=None, qual: str = 'padrao') -> bool:
+    m = alvo(pk, usuario, qual)
+    if m is None:
+        return False
+    m.delete()
+    return True
 
 
-def reordenar(ids: list[int]) -> None:
-    from .models import InsumoMonitorado
+def reordenar(ids: list[int], usuario=None, qual: str = 'padrao') -> None:
     for i, pk in enumerate(ids):
-        InsumoMonitorado.objects.filter(pk=int(pk)).update(ordem=i)
+        m = alvo(int(pk), usuario, qual)
+        if m is not None:
+            m.ordem = i
+            m.save(update_fields=['ordem'])

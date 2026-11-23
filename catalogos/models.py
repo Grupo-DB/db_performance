@@ -390,6 +390,10 @@ class InsumoMonitorado(models.Model):
     # 23/11/2026: cada filial tem a própria seleção (pedido do planejamento — trocar de filial não
     # pode obrigar a ligar e desligar itens). Vazio = a seleção de "Todas as filiais".
     filial = models.IntegerField(null=True, blank=True, help_text='FILCOD do SGA (0 = matriz); vazio = "Todas as filiais"')
+    # 23/11/2026: painel próprio por usuário. Vazio = o PADRÃO da filial (o que o gestor configura e
+    # quem não personalizou vê). Com usuário = o painel dele, criado como cópia do padrão na 1ª mudança.
+    usuario = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='+',
+                                help_text='Dono do painel personalizado; vazio = padrão da filial')
     # Foto do cartão: item do SGA cuja foto representa o monitorado. Vazio = automática
     # (o item de maior consumo do cartão que tiver foto).
     foto_item = models.IntegerField(null=True, blank=True, help_text='ESTQCOD da foto do cartão; vazio = automática')
@@ -400,7 +404,7 @@ class InsumoMonitorado(models.Model):
     class Meta:
         verbose_name = 'Insumo monitorado'
         verbose_name_plural = 'Insumos monitorados'
-        unique_together = ('filial', 'tipo', 'codigo')
+        unique_together = ('usuario', 'filial', 'tipo', 'codigo')
         ordering = ('ordem', 'id')
 
     def __str__(self):

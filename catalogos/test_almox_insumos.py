@@ -162,6 +162,47 @@ class InsumosEdicaoTests(TestCase):
                              [('grupo', 1702, None), ('item', 9, 9)])
         self.assertEqual(len(ins.monitorados_app(None)), 2)
 
+    def test_painel_proprio_por_usuario(self):
+        from django.contrib.auth.models import User
+        from catalogos.models import InsumoMonitorado
+        url = '/catalogos/erp/almoxarifado/insumos/monitorados/'
+        InsumoMonitorado.objects.all().delete()
+        p1 = InsumoMonitorado.objects.create(tipo='grupo', codigo=1702, filial=0, ordem=0)
+        p2 = InsumoMonitorado.objects.create(tipo='grupo', codigo=1703, filial=0, ordem=1)
+        outro = User.objects.create(username='o')
+        codigos = lambda lst: [m['codigo'] for m in lst]
+
+        # Sem personalizar, vê o padrão.
+        self.assertEqual((codigos(ins.selecao_efetiva(0, self.leitor)[0]), ins.selecao_efetiva(0, self.leitor)[1]), ([1702, 1703], False))
+        # O leitor (sem permissão no padrão) inclui no PRÓPRIO: nasce como cópia do padrão + o novo.
+        c = self.cli(self.leitor)
+        self.assertEqual(c.post(url, {'tipo': 'item', 'codigo': 9, 'filial': 0, 'painel': 'meu'}, format='json').status_code, 201)
+        self.assertEqual(ins.selecao_efetiva(0, self.leitor), (ins.monitorados_app(0, self.leitor), True))
+        self.assertEqual(codigos(ins.monitorados_app(0, self.leitor)), [1702, 1703, 9])
+        self.assertEqual(codigos(ins.monitorados_app(0)), [1702, 1703])                    # padrão intacto
+        self.assertEqual(codigos(ins.selecao_efetiva(0, outro)[0]), [1702, 1703])            # os outros não mudam
+        self.assertEqual(ins.selecao_efetiva(3, self.leitor)[1], False)                       # outra filial: ainda o padrão
+
+        # Ids do padrão em "meu" agem na cópia: tirar o 1703 e inverter a ordem.
+        self.assertEqual(c.delete(f'{url}{p2.id}/?painel=meu').status_code, 204)
+        meu = {m['codigo']: m['id'] for m in ins.monitorados_app(0, self.leitor)}
+        c.put(url, {'ids': [meu[9], p1.id], 'painel': 'meu'}, format='json')
+        self.assertEqual(codigos(ins.monitorados_app(0, self.leitor)), [9, 1702])
+        self.assertEqual(c.patch(f'{url}{p1.id}/', {'foto_item': 77, 'painel': 'meu'}, format='json').status_code, 200)
+        self.assertEqual({m['codigo']: m['foto_item'] for m in ins.monitorados_app(0, self.leitor)}[1702], 77)
+        self.assertIsNone(InsumoMonitorado.objects.get(pk=p1.id).foto_item)
+        self.assertEqual(codigos(ins.monitorados_app(0)), [1702, 1703])
+
+        # Não mexe no painel de outra pessoa, nem no padrão sem ser gestor.
+        self.assertEqual(self.cli(outro).delete(f'{url}{meu[9]}/?painel=meu').status_code, 403)   # sem grupo do almoxarifado
+        self.assertEqual(c.delete(f'{url}{p1.id}/').status_code, 403)                              # padrão é do gestor
+
+        # Voltar ao padrão apaga só o painel próprio daquela filial.
+        r = c.delete(f'{url}?filial=0')
+        self.assertEqual((r.status_code, r.data['removidos']), (200, 2))
+        self.assertEqual(ins.selecao_efetiva(0, self.leitor)[1], False)
+        self.assertEqual(codigos(ins.monitorados_app(0)), [1702, 1703])
+
     def test_leitor_nao_edita_mas_ve(self):
         self.assertEqual(self.cli(self.leitor).post('/catalogos/erp/almoxarifado/insumos/monitorados/',
                                                     {'tipo': 'grupo', 'codigo': 1}, format='json').status_code, 403)

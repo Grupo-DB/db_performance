@@ -779,6 +779,13 @@ def _almox_fonte(request):
     return fonte if fonte in ('sga', 'manager') else 'sga'
 
 
+def _insumos_painel(request, padrao='meu'):
+    """Qual seleção do painel de Insumos: 'meu' (o da pessoa, ou o padrão enquanto não personalizou) | 'padrao'."""
+    bruto = request.data.get('painel') if request.method in ('POST', 'PUT', 'PATCH') else None
+    qual = str(bruto or request.GET.get('painel') or padrao).strip().lower()
+    return qual if qual in ('meu', 'padrao') else padrao
+
+
 def _almox_filial(bruto):
     """(filial, erro): None = todas."""
     bruto = (bruto if bruto is not None else '0')
@@ -1048,7 +1055,7 @@ def almoxarifado_indicadores(request):
 
 @api_view(['GET'])
 def almoxarifado_insumos(request):
-    """Painel: ?filial=0|…|todas &dias=30|90|180|365 &fonte=sga|manager."""
+    """Painel: ?filial=0|…|todas &dias=30|90|180|365 &fonte=sga|manager &painel=meu|padrao."""
     from . import almox_insumos
 
     if (erro := _almox_acesso(request)):
@@ -1064,7 +1071,8 @@ def almoxarifado_insumos(request):
         return Response({'erro': f'dias deve ser um de: {", ".join(map(str, almox_insumos.DIAS_OPCOES))}.'},
                         status=status.HTTP_400_BAD_REQUEST)
     try:
-        dados = almox_insumos.painel(filial, dias, _almox_fonte(request))
+        dados = almox_insumos.painel(filial, dias, _almox_fonte(request), usuario=request.user,
+                                     qual=_insumos_painel(request))
         dados['filiais'] = almox_insumos.ax.filiais()
     except Exception as exc:
         logger.exception('painel de insumos')
@@ -1073,20 +1081,27 @@ def almoxarifado_insumos(request):
     return Response(dados)
 
 
-@api_view(['POST', 'PUT'])
+@api_view(['POST', 'PUT', 'DELETE'])
 def almoxarifado_insumos_monitorados(request):
-    """POST {"tipo": "grupo"|"item", "codigo": 1702, "filial": 0|…|"todas"} inclui na seleção da filial;
-    PUT {"ids": [3, 1, 2]} reordena (os ids já são de uma filial só)."""
+    """POST {"tipo": "grupo"|"item", "codigo": 1702, "filial": 0|…|"todas", "painel": "meu"|"padrao"} inclui;
+    PUT {"ids": [3, 1, 2], "painel": …} reordena; DELETE ?filial=… apaga o painel PRÓPRIO (volta ao padrão).
+    "padrao" (o default, como antes do painel por usuário) é só do gestor; "meu" é de qualquer um com acesso."""
     from . import almox_insumos
 
-    if (erro := _almox_acesso(request, editar=True)):
+    qual = 'meu' if request.method == 'DELETE' else _insumos_painel(request, padrao='padrao')
+    if (erro := _almox_acesso(request, editar=(qual == 'padrao'))):
         return erro
+    if request.method == 'DELETE':
+        filial, erro = _almox_filial(request.GET.get('filial'))
+        if erro:
+            return erro
+        return Response({'removidos': almox_insumos.voltar_ao_padrao(filial, request.user)})
     if request.method == 'PUT':
         ids = request.data.get('ids')
         if not isinstance(ids, list):
             return Response({'erro': 'Mande a lista de ids.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            almox_insumos.reordenar([int(i) for i in ids])
+            almox_insumos.reordenar([int(i) for i in ids], request.user, qual)
         except (TypeError, ValueError):
             return Response({'erro': 'ids devem ser números.'}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'ok': True})
@@ -1094,7 +1109,7 @@ def almoxarifado_insumos_monitorados(request):
     if erro:
         return erro
     try:
-        r = almox_insumos.incluir(str(request.data.get('tipo') or ''), request.data.get('codigo'), request.user, filial)
+        r = almox_insumos.incluir(str(request.data.get('tipo') or ''), request.data.get('codigo'), request.user, filial, qual)
     except ValueError as exc:
         return Response({'erro': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(r, status=status.HTTP_201_CREATED if r['criado'] else status.HTTP_200_OK)
@@ -1102,10 +1117,12 @@ def almoxarifado_insumos_monitorados(request):
 
 @api_view(['DELETE', 'PATCH'])
 def almoxarifado_insumos_monitorado(request, pk):
-    """DELETE tira do painel; PATCH {"foto_item": ESTQCOD|null} escolhe a foto do cartão (null = automática)."""
+    """DELETE tira do painel; PATCH {"foto_item": ESTQCOD|null} escolhe a foto do cartão (null = automática).
+    ?painel=meu|padrao (padrão: padrao). Em "meu", um id do padrão vira o do painel próprio (criado na hora)."""
     from . import almox_insumos
 
-    if (erro := _almox_acesso(request, editar=True)):
+    qual = _insumos_painel(request, padrao='padrao')
+    if (erro := _almox_acesso(request, editar=(qual == 'padrao'))):
         return erro
     if request.method == 'PATCH':
         bruto = request.data.get('foto_item')
@@ -1113,9 +1130,9 @@ def almoxarifado_insumos_monitorado(request, pk):
             item = None if bruto in (None, '') else int(bruto)
         except (TypeError, ValueError):
             return Response({'erro': 'foto_item deve ser o código do item ou vazio.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not almox_insumos.definir_foto(int(pk), item):
+        if not almox_insumos.definir_foto(int(pk), item, request.user, qual):
             return Response({'erro': 'Não está no painel.'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'ok': True, 'foto_item': item})
-    if not almox_insumos.remover(int(pk)):
+    if not almox_insumos.remover(int(pk), request.user, qual):
         return Response({'erro': 'Não está no painel.'}, status=status.HTTP_404_NOT_FOUND)
     return Response(status=status.HTTP_204_NO_CONTENT)
