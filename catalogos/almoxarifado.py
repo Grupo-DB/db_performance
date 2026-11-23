@@ -157,6 +157,17 @@ _SQL_ITENS = """
          AND QESTQREF = 0 AND QESTQTIPO = 0 {filtro_filial}
 """
 
+# Saldo na FÁBRICA (posição 0/100, 23/11/2026): o que já saiu do GERAL por
+# transferência e ainda não foi consumido. Informativo — o saldo, o mínimo e a
+# cobertura das telas continuam sendo do GERAL.
+_SQL_SALDO_FABRICA = """
+    SELECT QESTQESTQ ESTQ, SUM(QESTQESTOQUE) SALDO
+    FROM QUANTESTOQUE
+    WHERE QESTQEMP = :emp AND QESTQTIPO = 0 AND QESTQREF = 100 AND QESTQESTOQUE <> 0 {filtro_filial}
+    GROUP BY QESTQESTQ
+"""
+
+
 # Saídas do almoxarifado GERAL (posição 0/0), uma linha por movimento, QUANT/VALOR
 # com sinal (negativo = saiu). Até 23/11/2026 só contava a requisição (tipo 2) e
 # tudo que saía por lançamento de produção sumia do consumo (relatório 12.02 do
@@ -650,6 +661,8 @@ def _item(r) -> dict:
         'subgrupo': r.SUB_NOME,
         'grupo_item': getattr(r, 'GALM_NOME', r.SUB_NOME),
         'saldo': round(float(r.SALDO), 3),
+        # Já transferido para a FÁBRICA e ainda não consumido (fora do saldo acima).
+        'saldo_fabrica': round(float(getattr(r, 'SALDO_FABRICA', 0.0) or 0.0), 3),
         'minimo': round(float(r.MINIMO), 3),
         'minimo_sga': round(float(getattr(r, 'MINIMO_SGA', r.MINIMO)), 3),
         'minimo_manager': bool(getattr(r, 'MIN_MANAGER', False)),
@@ -815,6 +828,7 @@ def _erp(filial: int | None) -> dict:
             'mov': _ler(_SQL_MOVIMENTOS.format(filtro_filial=f_m),
                         desde=hoje - timedelta(days=DIAS_MOVIMENTO - 1), **params),
             'compras': _ler_compras(filial, hoje),
+            'fabrica': _ler_fabrica(filial),
             'fotos': _ler_fotos(),
             'lido_em': pd.Timestamp.now().isoformat(timespec='seconds'),
         }
@@ -849,6 +863,24 @@ def _consumo(filial: int | None, desde: date, ate: date) -> dict:
                 'valor': {int(e): _num(v) for e, v in zip(df.ESTQ, df.CONSUMO_VALOR)}}
     chave = f'almox:consumo:{"todas" if filial is None else filial}:{desde.isoformat()}:{ate.isoformat()}'
     return _cacheado(chave, CACHE_SEG, ler)
+
+
+def _ler_fabrica(filial: int | None) -> dict[int, float] | None:
+    """Saldo na FÁBRICA por item. Informação extra: se falhar, a tela segue sem ela."""
+    params = {'emp': EMPRESA}
+    if filial is not None:
+        params['fil'] = filial
+    try:
+        df = _ler(_SQL_SALDO_FABRICA.format(filtro_filial='' if filial is None else 'AND QESTQFIL = :fil'), **params)
+    except Exception:
+        logger.exception('almoxarifado: falha ao ler o saldo na fábrica')
+        return None
+    return {int(e): _num(q) for e, q in zip(df.ESTQ, df.SALDO)}
+
+
+def juntar_fabrica(df: pd.DataFrame, fabrica: dict[int, float] | None) -> pd.DataFrame:
+    df['SALDO_FABRICA'] = [(fabrica or {}).get(int(c), 0.0) for c in df.ESTQCOD]
+    return df
 
 
 def _ler_compras(filial: int | None, hoje: date) -> dict[int, list[dict]]:
@@ -919,6 +951,7 @@ def _preparado(filial: int | None, fonte: str = 'sga',
                         dias_consumo=(ate - desde).days + 1, consumo_valor=cons['valor'])
     juntar_compras(df, erp.get('compras') or {})
     juntar_fotos(df, erp.get('fotos'))
+    juntar_fabrica(df, erp.get('fabrica'))
     return df, erp, prazos
 
 

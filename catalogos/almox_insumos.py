@@ -271,6 +271,7 @@ def montar_painel(df: pd.DataFrame, grupos: pd.DataFrame, mov: pd.DataFrame, mon
             'grupo_item': base['grupo_item'],
             'monitorado': r.MONIT,
             'saldo': base['saldo'],
+            'saldo_fabrica': base['saldo_fabrica'],
             'minimo': base['minimo'],
             'valor': base['valor'],
             'custo_unitario': _r(r.VALOR / r.SALDO, 4) if r.SALDO > 0 else None,

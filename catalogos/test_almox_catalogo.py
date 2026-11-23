@@ -43,6 +43,12 @@ class CatalogoListaTests(SimpleTestCase):
         self.assertEqual(self.cods(q='ferramentas allen'), [])        # nome do grupo-raiz não está no alvo
         self.assertEqual(self.cods(q='chaves allen'), [2])            # grupo do item está
 
+    def test_busca_igual(self):
+        self.assertEqual(self.cods(q='1', modo='igual'), [1])                  # igual: só o código 1
+        self.assertEqual(self.cods(q='cf-10', modo='igual'), [1])              # referência inteira
+        self.assertEqual(self.cods(q='CHAVE  allen', modo='igual'), [2])       # nome inteiro, sem caixa/espaço extra
+        self.assertEqual(self.cods(q='chave', modo='igual'), [])               # parte do nome não basta
+
     def test_filtros(self):
         self.assertEqual(self.cods(grupo=12), [1, 2])
         self.assertEqual(self.cods(saldo='sem'), [2])

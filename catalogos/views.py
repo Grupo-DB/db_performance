@@ -917,7 +917,7 @@ def _cat_filtros(request):
 @api_view(['GET'])
 def almoxarifado_catalogo(request):
     """
-    Catálogo de itens: ?filial=0|…|todas &q=<nome/código/referência> &grupo=<GALMCOD>
+    Catálogo de itens: ?filial=0|…|todas &q=<nome/código/referência> &modo=contem|igual &grupo=<GALMCOD>
     &saldo=com|sem &situacao=abaixo|atencao|ok|sem_minimo &foto=com|sem &compra=com|sem
     &baixa=com|sem &parados=1 &desde=&ate=(AAAA-MM-DD, padrão 90 dias) &cc=&eqp=&req=
     &ordem=nome|codigo|saldo|valor|baixado|custo_baixado|ultima_baixa|vezes &pagina=&por_pagina=
@@ -943,6 +943,7 @@ def almoxarifado_catalogo(request):
     try:
         return Response(almox_catalogo.listar(
             filial, q=(g.get('q') or '').strip()[:120], grupo=grupo,
+            modo='igual' if g.get('modo') == 'igual' else 'contem',
             saldo=(g.get('saldo') or '').strip(), situacao=(g.get('situacao') or '').strip(),
             foto=(g.get('foto') or '').strip(), compra=(g.get('compra') or '').strip(),
             baixa=(g.get('baixa') or '').strip(), parados=g.get('parados') in ('1', 'true', 'sim'),

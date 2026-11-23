@@ -199,14 +199,23 @@ def juntar_baixas(df: pd.DataFrame, baixas: pd.DataFrame) -> pd.DataFrame:
 
 def filtrar(df: pd.DataFrame, grupos: pd.DataFrame, *, q: str = '', grupo: int | None = None,
             saldo: str = '', situacao: str = '', foto: str = '', compra: str = '', baixa: str = '',
-            parados: bool = False, destino: bool = False) -> pd.DataFrame:
+            parados: bool = False, destino: bool = False, modo: str = 'contem') -> pd.DataFrame:
     """Aplica os filtros da tela. `destino` = filtrou centro/equipamento/requisitante:
     só ficam os itens que foram para lá."""
     if grupo is not None:
         _, _, pai = ax.arvore(grupos)
         df = df[df.GALM.isin(ax.descendentes(grupo, ax.filhos_por_grupo(pai)))]
     termos = _sem_acento(q).split()
-    if termos:
+    if termos and modo == 'igual':
+        # Igual (23/11/2026): o texto inteiro bate com o código, a referência ou o nome
+        # (sem acento/maiúsculas) — "2446" traz só o item 2446, não 12446 nem "…2446…".
+        inteiro = ' '.join(termos)
+        campos = (df.ESTQCOD.astype('Int64').astype(str), df.ESTQREF.fillna('').astype(str), df.ESTQNOME.fillna('').astype(str))
+        casa = pd.Series(False, index=df.index)
+        for c in campos:
+            casa |= c.map(lambda v: ' '.join(_sem_acento(v).split())) == inteiro
+        df = df[casa]
+    elif termos:
         alvo = (df.ESTQCOD.astype('Int64').astype(str) + ' ' + df.ESTQNOME.fillna('').astype(str) + ' '
                 + df.ESTQREF.fillna('').astype(str) + ' ' + df.GALM_NOME.fillna('').astype(str)).map(_sem_acento)
         for t in termos:
@@ -275,14 +284,14 @@ def _nome_cc(v) -> str:
 
 def listar(filial: int | None, *, desde: date | None = None, ate: date | None = None,
            q: str = '', grupo: int | None = None, saldo: str = '', situacao: str = '', foto: str = '',
-           compra: str = '', baixa: str = '', parados: bool = False,
+           compra: str = '', baixa: str = '', parados: bool = False, modo: str = 'contem',
            cc: int | None = None, eqp: int | None = None, req: int | None = None,
            ordem: str = 'nome', pagina: int = 1, por_pagina: int = 48, fonte: str = 'sga') -> dict:
     desde, ate = periodo(desde, ate)
     df, erp, _ = ax._preparado(filial, fonte)
     df = juntar_baixas(df, baixas_por_item(filial, desde, ate, cc, eqp, req))
     sel = filtrar(df, erp['grupos'], q=q, grupo=grupo, saldo=saldo, situacao=situacao, foto=foto,
-                  compra=compra, baixa=baixa, parados=parados,
+                  compra=compra, baixa=baixa, parados=parados, modo=modo,
                   destino=any(x is not None for x in (cc, eqp, req)))
     sel = ordenar(sel, ordem)
     por_pagina = max(1, min(int(por_pagina), POR_PAGINA_MAX))
