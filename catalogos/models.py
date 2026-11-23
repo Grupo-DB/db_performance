@@ -387,6 +387,12 @@ class InsumoMonitorado(models.Model):
 
     tipo = models.CharField(max_length=5, choices=TIPOS)
     codigo = models.IntegerField(help_text='GALMCOD (grupo) ou ESTQCOD (item) do SGA')
+    # 23/11/2026: cada filial tem a própria seleção (pedido do planejamento — trocar de filial não
+    # pode obrigar a ligar e desligar itens). Vazio = a seleção de "Todas as filiais".
+    filial = models.IntegerField(null=True, blank=True, help_text='FILCOD do SGA (0 = matriz); vazio = "Todas as filiais"')
+    # Foto do cartão: item do SGA cuja foto representa o monitorado. Vazio = automática
+    # (o item de maior consumo do cartão que tiver foto).
+    foto_item = models.IntegerField(null=True, blank=True, help_text='ESTQCOD da foto do cartão; vazio = automática')
     ordem = models.PositiveIntegerField(default=0)
     incluido_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     incluido_em = models.DateTimeField(auto_now_add=True)
@@ -394,7 +400,7 @@ class InsumoMonitorado(models.Model):
     class Meta:
         verbose_name = 'Insumo monitorado'
         verbose_name_plural = 'Insumos monitorados'
-        unique_together = ('tipo', 'codigo')
+        unique_together = ('filial', 'tipo', 'codigo')
         ordering = ('ordem', 'id')
 
     def __str__(self):

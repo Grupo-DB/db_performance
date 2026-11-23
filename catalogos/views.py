@@ -1075,7 +1075,8 @@ def almoxarifado_insumos(request):
 
 @api_view(['POST', 'PUT'])
 def almoxarifado_insumos_monitorados(request):
-    """POST {"tipo": "grupo"|"item", "codigo": 1702} inclui; PUT {"ids": [3, 1, 2]} reordena."""
+    """POST {"tipo": "grupo"|"item", "codigo": 1702, "filial": 0|…|"todas"} inclui na seleção da filial;
+    PUT {"ids": [3, 1, 2]} reordena (os ids já são de uma filial só)."""
     from . import almox_insumos
 
     if (erro := _almox_acesso(request, editar=True)):
@@ -1089,19 +1090,32 @@ def almoxarifado_insumos_monitorados(request):
         except (TypeError, ValueError):
             return Response({'erro': 'ids devem ser números.'}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'ok': True})
+    filial, erro = _almox_filial(request.data.get('filial', request.GET.get('filial')))
+    if erro:
+        return erro
     try:
-        r = almox_insumos.incluir(str(request.data.get('tipo') or ''), request.data.get('codigo'), request.user)
+        r = almox_insumos.incluir(str(request.data.get('tipo') or ''), request.data.get('codigo'), request.user, filial)
     except ValueError as exc:
         return Response({'erro': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(r, status=status.HTTP_201_CREATED if r['criado'] else status.HTTP_200_OK)
 
 
-@api_view(['DELETE'])
+@api_view(['DELETE', 'PATCH'])
 def almoxarifado_insumos_monitorado(request, pk):
+    """DELETE tira do painel; PATCH {"foto_item": ESTQCOD|null} escolhe a foto do cartão (null = automática)."""
     from . import almox_insumos
 
     if (erro := _almox_acesso(request, editar=True)):
         return erro
+    if request.method == 'PATCH':
+        bruto = request.data.get('foto_item')
+        try:
+            item = None if bruto in (None, '') else int(bruto)
+        except (TypeError, ValueError):
+            return Response({'erro': 'foto_item deve ser o código do item ou vazio.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not almox_insumos.definir_foto(int(pk), item):
+            return Response({'erro': 'Não está no painel.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'ok': True, 'foto_item': item})
     if not almox_insumos.remover(int(pk)):
         return Response({'erro': 'Não está no painel.'}, status=status.HTTP_404_NOT_FOUND)
     return Response(status=status.HTTP_204_NO_CONTENT)

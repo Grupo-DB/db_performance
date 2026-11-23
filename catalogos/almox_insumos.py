@@ -63,9 +63,14 @@ def passo_serie(dias: int) -> int:
 
 # ── Monitorados ─────────────────────────────────────────────────────────────
 
-def monitorados_app() -> list[dict]:
+def _da_filial(qs, filial: int | None):
+    """Seleção de uma filial (23/11/2026): cada filial tem a sua; None = a de "Todas as filiais"."""
+    return qs.filter(filial__isnull=True) if filial is None else qs.filter(filial=filial)
+
+
+def monitorados_app(filial: int | None = None) -> list[dict]:
     from .models import InsumoMonitorado
-    return list(InsumoMonitorado.objects.values('id', 'tipo', 'codigo', 'ordem'))
+    return list(_da_filial(InsumoMonitorado.objects.all(), filial).values('id', 'tipo', 'codigo', 'ordem', 'foto_item'))
 
 
 def caminho_grupo(cod: int, nome: dict, pai: dict) -> str:
@@ -94,7 +99,8 @@ def distribuir(df: pd.DataFrame, grupos: pd.DataFrame, monitorados: list[dict]) 
     info, por_item, por_grupo = [], {}, {}
     for m in monitorados:
         chave = f"{m['tipo'][0]}{m['codigo']}"
-        d = {'id': m.get('id'), 'chave': chave, 'tipo': m['tipo'], 'codigo': int(m['codigo'])}
+        d = {'id': m.get('id'), 'chave': chave, 'tipo': m['tipo'], 'codigo': int(m['codigo']),
+             'foto_item': m.get('foto_item')}
         if m['tipo'] == 'item':
             d['nome'] = nomes_item.get(int(m['codigo']), f"Item {m['codigo']}")
             d['caminho'] = ''
@@ -268,6 +274,11 @@ def montar_painel(df: pd.DataFrame, grupos: pd.DataFrame, mov: pd.DataFrame, mon
         unidade = unidades.pop() if len(unidades) == 1 else None
         mov_g = mov[mov.ESTQ.isin(cods) & (mov.DIA >= ini_serie)]
         cv_dia = cv / dias
+        # Foto do cartão: a escolhida pelo gestor (se o item ainda tem foto) ou a do item de maior
+        # consumo que tiver foto — `its` já vem do maior para o menor consumo.
+        com_foto = [i for i in its if i['tem_foto']]
+        escolhida = next((i for i in com_foto if i['codigo'] == d.get('foto_item')), None)
+        foto = escolhida or (com_foto[0] if com_foto else None)
         cards.append({
             **d,
             'itens': len(its),
@@ -285,6 +296,9 @@ def montar_painel(df: pd.DataFrame, grupos: pd.DataFrame, mov: pd.DataFrame, mon
             'em_compra': sum(bool(i['compra_etapa']) for i in its),
             'serie': _serie(mov_g, 'CONS_V', ini_serie, passo, n_serie),
             'mensal': [round(float(cons_mes.get((d['chave'], m), 0.0)), 2) for m in meses],
+            'foto_codigo': foto['codigo'] if foto else None,
+            'foto_escolhida': escolhida is not None,
+            'fotos_opcoes': [{'codigo': i['codigo'], 'nome': i['nome']} for i in com_foto[:30]],
             'destaques': [{'codigo': i['codigo'], 'nome': i['nome'], 'consumo': i['consumo'], 'unidade': i['unidade'],
                            'cobertura_dias': i['cobertura_dias'], 'situacao': i['situacao']}
                           for i in its[:3] if i['consumo_valor'] > 0],
@@ -324,7 +338,7 @@ def montar_painel(df: pd.DataFrame, grupos: pd.DataFrame, mov: pd.DataFrame, mon
 def painel(filial: int | None, dias: int = DIAS_PADRAO, fonte: str = 'sga', hoje: date | None = None) -> dict:
     hoje = hoje or date.today()
     df, erp, _prazos = ax._preparado(filial, fonte)
-    monitorados = monitorados_app()
+    monitorados = monitorados_app(filial)
     chaves, _ = distribuir(df, erp['grupos'], monitorados)
     codigos = [int(c) for c in df.ESTQCOD[chaves.notna()]]
     # Período atual + anterior (comparação) e pelo menos 12 meses para a série mensal.
@@ -337,7 +351,7 @@ def painel(filial: int | None, dias: int = DIAS_PADRAO, fonte: str = 'sga', hoje
 
 # ── Edição (gestor) ─────────────────────────────────────────────────────────
 
-def incluir(tipo: str, codigo: int, usuario) -> dict:
+def incluir(tipo: str, codigo: int, usuario, filial: int | None = None) -> dict:
     from django.db.models import Max
     from .models import InsumoMonitorado
     if tipo not in ('grupo', 'item'):
@@ -346,10 +360,21 @@ def incluir(tipo: str, codigo: int, usuario) -> dict:
         codigo = int(codigo)
     except (TypeError, ValueError):
         raise ValueError('codigo deve ser um número.')
-    ordem = (InsumoMonitorado.objects.aggregate(m=Max('ordem'))['m'] or 0) + 1
-    obj, criado = InsumoMonitorado.objects.get_or_create(
-        tipo=tipo, codigo=codigo, defaults={'ordem': ordem, 'incluido_por': usuario})
-    return {'id': obj.id, 'criado': criado}
+    da_filial = _da_filial(InsumoMonitorado.objects.all(), filial)
+    existente = da_filial.filter(tipo=tipo, codigo=codigo).first()
+    if existente:                       # NULL não entra no unique do MySQL: "Todas" confere aqui
+        return {'id': existente.id, 'criado': False}
+    ordem = (da_filial.aggregate(m=Max('ordem'))['m'] or 0) + 1
+    obj = InsumoMonitorado.objects.create(tipo=tipo, codigo=codigo, filial=filial, ordem=ordem, incluido_por=usuario)
+    return {'id': obj.id, 'criado': True}
+
+
+def definir_foto(pk: int, item: int | None) -> bool:
+    """Foto do cartão: ESTQCOD escolhido, ou None para voltar à automática."""
+    from .models import InsumoMonitorado
+    if item is not None:
+        item = int(item)
+    return InsumoMonitorado.objects.filter(pk=pk).update(foto_item=item) > 0
 
 
 def remover(pk: int) -> bool:
