@@ -97,7 +97,8 @@ def _normas_citadas(texto: str) -> list[tuple[str, int]]:
 def vincular_automatico(itens=None) -> dict:
     """Sugere (e grava) as ligações. Não mexe nas manuais nem traz de volta as excluídas."""
     itens = list(itens if itens is not None else MatrizItem.objects.all())
-    requisitos = list(Requisito.objects.select_related('norma').filter(ativo=True).exclude(aplicabilidade='NAO_APLICAVEL'))
+    requisitos = list(Requisito.objects.select_related('norma').filter(ativo=True).exclude(aplicabilidade='NAO_APLICAVEL')
+                      .exclude(norma__situacao='REVOGADA'))
     textos_req = {r.id: _texto_do_requisito(r) for r in requisitos}
     normas = list(Norma.objects.all())
     novos = novos_normas = 0

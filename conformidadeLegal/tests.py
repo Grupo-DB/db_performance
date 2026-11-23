@@ -1788,3 +1788,166 @@ class MatrizTests(APITestCase):
         wb.save(buf)
         r = self.client.post('/conformidadeLegal/matriz/importar/', {'arquivo': SimpleUploadedFile('x.xlsx', buf.getvalue())}, format='multipart')
         self.assertEqual(r.status_code, 400)
+
+
+# ── Renovação de licença (23/11/2026, LO 05809/2026 revogando a LO 00893/2024) ──
+
+class CruzarCondicionantesTests(SimpleTestCase):
+    def test_pareia_pelo_texto_mesmo_com_capitulo_renumerado(self):
+        from . import renovacao as rv
+        antigos = [
+            {'id': 1, 'referencia': '1.1', 'texto': 'período de validade deste documento: 14/03/2024 à 14/03/2029;'},
+            {'id': 2, 'referencia': '1.7', 'texto': 'Esta licença não exime o empreendedor do atendimento às demais obrigações legais (federais, estaduais e municipais);'},
+            {'id': 3, 'referencia': '1.16', 'texto': 'No prazo de até 60 (sessenta) dias deverá ser apresentado o Certificado de Regularidade do Cadastro Técnico Federal CTF/APP;'},
+            {'id': 4, 'referencia': '3.1.2', 'texto': 'Poligonal Útil: 38,83 hectares;'},
+            {'id': 5, 'referencia': '10.2', 'texto': 'Deverá ser monitorada semestralmente a qualidade das Águas Subsuperficiais.'},
+        ]
+        novos = [
+            {'referencia': '1.1', 'texto': 'este documento REVOGA o documento de Licença de Operação nº 00893/2024.'},
+            {'referencia': '2.1', 'texto': 'período de validade deste documento: 19/11/2026 à 14/03/2029;'},
+            {'referencia': '2.7', 'texto': 'Esta licença não exime o empreendedor do atendimento às demais obrigações legais (federais, estaduais e municipais);'},
+            {'referencia': '2.16', 'texto': 'os empreendedores deverão manter o Certificado de Regularidade do Cadastro Técnico Federal CTF/APP válido;'},
+            {'referencia': '4.1.2', 'texto': 'Poligonal Útil: 46,63 hectares;'},
+        ]
+        r = rv.cruzar(novos, antigos)
+        par = {p['novo']: (p['antigo'], p['situacao']) for p in r['pares']}
+        self.assertEqual(par[0], (None, 'nova'))                 # a revogação é nova
+        self.assertEqual(par[1], (1, 'alterada'))                # validade: 1.1 → 2.1, data mudou
+        self.assertEqual(par[2], (2, 'igual'))                   # 1.7 → 2.7
+        self.assertEqual(par[3], (3, 'alterada'))                # reescrita, mas é a 1.16 → 2.16
+        self.assertEqual(par[4], (4, 'alterada'))
+        self.assertEqual(r['removidos'], [5])
+        self.assertEqual(r['capitulos'].get('1'), '2')
+
+    def test_numero_de_subitem(self):
+        from . import renovacao as rv
+        self.assertEqual([rv.numero(x) for x in ('Condicionante 4.1.3', 'Item 4.1.3-', '14.2-3', '')], ['4.1.3', '4.1.3', '14.2.3', ''])
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TESTE)
+class RenovacaoLicencaTests(APITestCase):
+    def setUp(self):
+        from .models import MatrizItem, MatrizVinculo, MatrizVinculoNorma, Terceiro
+        self.user = User.objects.create_user('sgi', password='x')
+        self.user.groups.add(Group.objects.create(name='ConformidadeLegal'))
+        self.client.force_authenticate(self.user)
+        self.resp = User.objects.create_user('pedro', password='x')
+        self.antiga = Norma.objects.create(tipo='LICENCA', orgao='FEPAM', numero='00893', ano=2024, ementa='LO Mato Grande',
+                                           validade=date(2029, 3, 14), arquivo=SimpleUploadedFile('lo.pdf', b'%PDF-1.4 a'),
+                                           relatorio_anual={'empresa': 'DB', 'fora': [1], 'sem_resposta': [2]})
+        self.terceiro = Terceiro.objects.create(razao_social='Lab Águas')
+        self.r1 = Requisito.objects.create(norma=self.antiga, referencia='1.7', secao='Quanto ao Empreendimento',
+                                           descricao='Atender as demais obrigações', aplicabilidade='APLICAVEL',
+                                           justificativa='Vale', responsavel=self.resp, periodicidade_meses=6,
+                                           trecho_fonte='Esta licença não exime o empreendedor do atendimento às demais obrigações legais;')
+        self.r1.terceiros.add(self.terceiro)
+        self.v1 = Verificacao.objects.create(requisito=self.r1, data=date(2026, 9, 1), resultado='ATENDIDO', evidencia='Ok',
+                                             verificado_por=self.resp)
+        self.anexo = EvidenciaAnexo.objects.create(verificacao=self.v1, arquivo=SimpleUploadedFile('foto.jpg', b'jpg'), legenda='Bacia')
+        self.r1.recalcular_situacao()
+        self.r2 = Requisito.objects.create(norma=self.antiga, referencia='10.2', descricao='Monitorar águas subsuperficiais',
+                                           aplicabilidade='APLICAVEL',
+                                           trecho_fonte='Deverá ser monitorada semestralmente a qualidade das Águas Subsuperficiais.')
+        item = MatrizItem.objects.create(atividade='Licenciamento')
+        MatrizVinculo.objects.create(item=item, requisito=self.r1)
+        MatrizVinculoNorma.objects.create(item=item, norma=self.antiga)
+        self.item_matriz = item
+
+    def _nova(self):
+        r = self.client.post(f'/conformidadeLegal/normas/{self.antiga.id}/nova-versao/', {
+            'arquivo': SimpleUploadedFile('lo5809.pdf', b'%PDF-1.4 nova', content_type='application/pdf'),
+            'numero': '05809', 'ano': 2026, 'validade': '2029-03-14', 'data_publicacao': '2026-11-19'}, format='multipart')
+        self.assertEqual(r.status_code, 201, r.data)
+        return Norma.objects.get(pk=r.data['id'])
+
+    def test_fluxo_completo_herda_e_revoga(self):
+        from .models import ExtracaoIA, MatrizVinculo, MatrizVinculoNorma
+        nova = self._nova()
+        self.assertEqual((nova.substitui_id, nova.orgao, nova.tipo, nova.numero), (self.antiga.id, 'FEPAM', 'LICENCA', '05809'))
+        self.assertEqual(nova.relatorio_anual, {'empresa': 'DB'})          # ids da anterior não vão para a nova
+
+        # Leitura da IA ainda não terminou: 202
+        self.assertEqual(self.client.get(f'/conformidadeLegal/normas/{nova.id}/renovacao/').status_code, 202)
+        ExtracaoIA.objects.create(norma=nova, status='CONCLUIDA', itens=[
+            {'referencia': '2.7', 'secao': 'Quanto ao Empreendimento', 'descricao': 'Atender as demais obrigações legais',
+             'tema': 'AMBIENTAL', 'periodicidade_meses': 12, 'prazo_legal': '', 'pagina': 1, 'observacao': '',
+             'trecho': 'Esta licença não exime o empreendedor do atendimento às demais obrigações legais;'},
+            {'referencia': '1.1', 'secao': 'Quanto à Revogação', 'descricao': 'Revoga a LO 00893/2024', 'tema': 'AMBIENTAL',
+             'periodicidade_meses': 0, 'prazo_legal': '', 'pagina': 1, 'observacao': '',
+             'trecho': 'este documento REVOGA o documento de Licença de Operação nº 00893/2024'},
+        ])
+        r = self.client.get(f'/conformidadeLegal/normas/{nova.id}/renovacao/')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['contagem'], {'igual': 1, 'alterada': 0, 'nova': 1, 'removida': 1})
+        par = r.data['itens'][0]
+        self.assertEqual((par['situacao'], par['anterior']['id'], par['anterior']['ultima']['anexos']), ('igual', self.r1.id, 1))
+        self.assertEqual(par['anterior']['terceiros_nomes'], ['Lab Águas'])
+        self.assertEqual(r.data['removidos'][0]['id'], self.r2.id)
+
+        itens = [{'indice': i['indice'], 'herdar_de': (i['anterior'] or {}).get('id'), 'herdar_resposta': True, 'dados': i['item']}
+                 for i in r.data['itens']]
+        r = self.client.post(f'/conformidadeLegal/normas/{nova.id}/renovacao/aplicar/', {'itens': itens, 'revogar_anterior': True}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual((r.data['criados'], r.data['herdados'], r.data['com_resposta'], r.data['anterior_revogada']), (2, 1, 1, True))
+
+        herdado = Requisito.objects.get(norma=nova, referencia='2.7')
+        self.assertEqual((herdado.herdado_de_id, herdado.aplicabilidade, herdado.justificativa, herdado.responsavel_id,
+                          herdado.periodicidade_meses, herdado.situacao, herdado.ultima_verificacao),
+                         (self.r1.id, 'APLICAVEL', 'Vale', self.resp.id, 6, 'ATENDIDO', date(2026, 9, 1)))
+        self.assertEqual(list(herdado.terceiros.all()), [self.terceiro])
+        v = herdado.verificacoes.get()
+        self.assertEqual((v.herdada_de_id, v.data, v.evidencia, v.verificado_por_id), (self.v1.id, date(2026, 9, 1), 'Ok', self.resp.id))
+        self.assertIn('herdada da licença anterior', v.observacao)
+        a = v.anexos.get()
+        self.assertEqual((a.arquivo.name, a.legenda), (self.anexo.arquivo.name, 'Bacia'))    # mesmo arquivo, sem cópia
+        nova_cond = Requisito.objects.get(norma=nova, referencia='1.1')
+        self.assertEqual((nova_cond.herdado_de_id, nova_cond.aplicabilidade, nova_cond.situacao), (None, 'EM_ANALISE', 'NAO_AVALIADO'))
+        self.assertTrue(MatrizVinculo.objects.filter(requisito=herdado, item=self.item_matriz).exists())
+        self.assertTrue(MatrizVinculoNorma.objects.filter(norma=nova, item=self.item_matriz).exists())
+
+        self.antiga.refresh_from_db()
+        self.assertEqual(self.antiga.situacao, 'REVOGADA')
+        self.assertIn('Substituída por', self.antiga.observacao)
+        # A anterior continua inteira (histórico) mas sai das pendências; a VCL herdada aparece marcada.
+        self.assertEqual(self.antiga.requisitos.filter(ativo=True).count(), 2)
+        from . import avisos
+        self.assertNotIn(self.r1.id, set(avisos.vigentes(Requisito.objects.all()).values_list('id', flat=True)))
+        vcl = self.client.get(f'/conformidadeLegal/verificacoes/?requisito={herdado.id}').data
+        lista = vcl['results'] if isinstance(vcl, dict) else vcl
+        self.assertTrue(lista[0]['herdada'])
+        self.assertEqual(self.client.get(f'/conformidadeLegal/normas/{self.antiga.id}/').data['substituida_por'][0]['id'], nova.id)
+
+        # Já aplicada: a comparação marca o que já existe na nova.
+        self.assertTrue(all(i['ja_criado'] for i in self.client.get(f'/conformidadeLegal/normas/{nova.id}/renovacao/').data['itens']))
+
+    def test_par_invalido_e_repetido(self):
+        from .models import ExtracaoIA
+        nova = self._nova()
+        ExtracaoIA.objects.create(norma=nova, status='CONCLUIDA', itens=[])
+        url = f'/conformidadeLegal/normas/{nova.id}/renovacao/aplicar/'
+        outra = Requisito.objects.create(norma=nova, descricao='x')
+        d = {'descricao': 'Algo', 'referencia': '1'}
+        self.assertEqual(self.client.post(url, {'itens': [{'herdar_de': outra.id, 'dados': d}]}, format='json').status_code, 400)
+        r = self.client.post(url, {'itens': [{'herdar_de': self.r1.id, 'dados': d}, {'herdar_de': self.r1.id, 'dados': d}]}, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(nova.requisitos.count(), 1)                         # nada criado (transação)
+        self.antiga.refresh_from_db()
+        self.assertEqual(self.antiga.situacao, 'VIGENTE')
+
+    def test_liga_licenca_ja_cadastrada_e_logo_compartilhado(self):
+        from .models import ExtracaoIA
+        avulsa = Norma.objects.create(tipo='LICENCA', orgao='FEPAM', numero='05809', ementa='LO nova')
+        r = self.client.patch(f'/conformidadeLegal/normas/{avulsa.id}/', {'substitui': self.antiga.id}, format='json')
+        self.assertEqual((r.status_code, r.data['substitui_identificacao']), (200, self.antiga.identificacao))
+        self.assertEqual(self.client.patch(f'/conformidadeLegal/normas/{avulsa.id}/', {'substitui': avulsa.id}, format='json').status_code, 400)
+        ExtracaoIA.objects.create(norma=avulsa, status='CONCLUIDA', itens=[])
+        self.assertEqual(self.client.get(f'/conformidadeLegal/normas/{avulsa.id}/renovacao/').data['contagem']['removida'], 2)
+
+        # logo herdado: tirar o da nova não apaga o arquivo da anterior
+        self.antiga.relatorio_logo = SimpleUploadedFile('logo.png', b'png')
+        self.antiga.save()
+        nova = self._nova()
+        self.assertEqual(nova.relatorio_logo.name, self.antiga.relatorio_logo.name)
+        self.client.delete(f'/conformidadeLegal/normas/{nova.id}/relatorio-anual/logo/')
+        self.antiga.refresh_from_db()
+        self.assertTrue(self.antiga.relatorio_logo.storage.exists(self.antiga.relatorio_logo.name))

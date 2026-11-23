@@ -79,6 +79,60 @@ def juntar_extras(df: pd.DataFrame, consumo12: dict[int, float], ultima: dict[in
     return df
 
 
+# Situação de compra (23/11/2026, pedido: gráfico de itens por situação de compra, "bem destacado").
+# Cada item conta uma vez, pela situação mais crítica: nota já lançada e não registrada (o material
+# chegou e não entrou) > ordem com entrega atrasada > ordem no prazo > coleta > requisição.
+SITUACOES_COMPRA = (
+    ('requisicao', 'Requisição aberta'),
+    ('coleta', 'Coleta de preço'),
+    ('ordem', 'Ordem no prazo'),
+    ('atrasada', 'Ordem atrasada'),
+    ('nota', 'NF pendente de registro'),
+)
+TOP_GRUPOS_COMPRA = 10
+
+
+def situacao_compra(compras) -> str | None:
+    """Chave de SITUACOES_COMPRA para a lista de compras abertas do item (None = sem compra)."""
+    if not compras:
+        return None
+    if any(c.get('nota_pendente') for c in compras):
+        return 'nota'
+    etapa = compras[0].get('etapa')                      # a mais adiantada vem primeiro (montar_compras)
+    if etapa == 'ordem':
+        return 'atrasada' if any(c.get('atrasada') for c in compras if c.get('etapa') == 'ordem') else 'ordem'
+    return etapa if etapa in ('requisicao', 'coleta') else 'requisicao'
+
+
+def compras(df: pd.DataFrame) -> dict:
+    """Itens por situação de compra, com quantos estão abaixo do mínimo, e por grupo-raiz."""
+    sit = df.COMPRAS.map(situacao_compra)
+    abaixo = df.ABAIXO.astype(bool)
+    situacoes = []
+    for chave, rotulo in SITUACOES_COMPRA:
+        m = sit == chave
+        situacoes.append({'chave': chave, 'rotulo': rotulo, 'itens': int(m.sum()), 'abaixo': int((m & abaixo).sum())})
+    sem = abaixo & sit.isna()
+    grupos = []
+    for (cod, nome), idx in df.groupby(['RAIZ', 'RAIZ_NOME']).groups.items():
+        s_g, a_g = sit.loc[idx], abaixo.loc[idx]
+        linha = {'codigo': int(cod), 'nome': nome, 'sem_compra': int((a_g & s_g.isna()).sum())}
+        linha.update({ch: int((s_g == ch).sum()) for ch, _ in SITUACOES_COMPRA})
+        linha['total'] = sum(linha[ch] for ch, _ in SITUACOES_COMPRA)
+        if linha['total'] or linha['sem_compra']:
+            grupos.append(linha)
+    grupos.sort(key=lambda g: (-(g['total'] + g['sem_compra']), g['nome']))
+    return {
+        'dias': ax.DIAS_COMPRA,
+        'em_compra': int(sit.notna().sum()),
+        'abaixo': int(abaixo.sum()),
+        'abaixo_em_compra': int((abaixo & sit.notna()).sum()),
+        'abaixo_sem_compra': int(sem.sum()),
+        'situacoes': situacoes,
+        'grupos': grupos[:TOP_GRUPOS_COMPRA],
+    }
+
+
 def por_grupo(df: pd.DataFrame) -> list[dict]:
     linhas = []
     for (cod, nome), g in df.groupby(['RAIZ', 'RAIZ_NOME']):
@@ -176,6 +230,7 @@ def montar(df: pd.DataFrame, mov: pd.DataFrame, hoje: date) -> dict:
             'pct_valor_parado': _pct(float(parados.VALOR.sum()), valor),
         },
         'grupos': por_grupo(df),
+        'compras': compras(df),
         'movimentos': movimentos(mov, df, hoje),
         'top_valor': [_linha_item(r) for r in com_saldo.nlargest(TOP, 'VALOR').itertuples()],
         'top_consumo': [_linha_item(r) for r in df[df.CONSUMO12 > 0].nlargest(TOP, 'CONSUMO12').itertuples()],

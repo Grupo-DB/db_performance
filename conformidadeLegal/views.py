@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 
 from kanban.models import KanbanColumn, KanbanTask
 
-from . import avisos, ia, importar_relatorio, matriz, normas_tecnicas, relatorio_anual
+from . import avisos, ia, importar_relatorio, matriz, normas_tecnicas, relatorio_anual, renovacao
 from .models import (
     TEMAS, ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, MatrizItem, MatrizVinculo, MatrizVinculoNorma, Norma, OrgaoMonitor, PalavraChaveMonitor,
     PlanoAcao, PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao, ConfiguracaoAvisos,
@@ -213,6 +213,57 @@ class NormaViewSet(viewsets.ModelViewSet):
         transaction.on_commit(lambda: extrair_requisitos.delay(extracao.id))
         return Response(ExtracaoIASerializer(extracao).data, status=status.HTTP_202_ACCEPTED)
 
+    # ── Nova versão de licença (renovação, 23/11/2026) ─────────────────────────
+    @action(detail=True, methods=['post'], url_path='nova-versao')
+    def nova_versao(self, request, pk=None):
+        """
+        Lança a nova versão desta licença (multipart: arquivo PDF, numero, ano, data_publicacao,
+        validade, ementa opcional). A nova nasce ligada a esta e a IA já começa a ler o PDF; o
+        cruzamento das condicionantes é em `normas/{nova}/renovacao/`.
+        """
+        anterior = self.get_object()
+        arquivo = request.FILES.get('arquivo')
+        if not arquivo or not arquivo.name.lower().endswith('.pdf'):
+            raise ValidationError({'arquivo': 'Anexe o PDF da nova versão.'})
+        dados = NormaSerializer(data={'tipo': anterior.tipo, 'ementa': request.data.get('ementa') or anterior.ementa,
+                                      **{c: request.data.get(c) for c in ('numero', 'ano', 'data_publicacao', 'validade')
+                                         if request.data.get(c) not in (None, '')}}, partial=True)
+        dados.is_valid(raise_exception=True)
+        with transaction.atomic():
+            nova = renovacao.nova_versao(anterior, dados.validated_data, arquivo, request.user)
+            if ia.configurada():
+                extracao = ExtracaoIA.objects.create(norma=nova, criado_por=request.user, modelo=ia.modelo())
+                transaction.on_commit(lambda: extrair_requisitos.delay(extracao.id))
+        return Response(NormaSerializer(nova, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'])
+    def renovacao(self, request, pk=None):
+        """Cruzamento das condicionantes da leitura da IA com as da versão anterior (igual/alterada/nova/removida)."""
+        norma = self.get_object()
+        try:
+            return Response(renovacao.comparar(norma))
+        except renovacao.SemExtracao as e:
+            ultima = norma.extracoes.first()
+            return Response({'pronta': False, 'status': str(e),
+                             'extracao': ExtracaoIASerializer(ultima).data if ultima else None,
+                             'anterior': {'id': norma.substitui_id, 'identificacao': norma.substitui.identificacao}},
+                            status=status.HTTP_202_ACCEPTED)
+        except ValueError as e:
+            raise ValidationError({'detail': str(e)})
+
+    @action(detail=True, methods=['post'], url_path='renovacao/aplicar')
+    def renovacao_aplicar(self, request, pk=None):
+        """{"itens": [{indice, herdar_de, herdar_resposta, dados}], "revogar_anterior": true}."""
+        norma = self.get_object()
+        itens = request.data.get('itens')
+        if not isinstance(itens, list) or not itens:
+            raise ValidationError({'itens': 'Nenhuma condicionante recebida.'})
+        try:
+            r = renovacao.aplicar(norma, itens, request.user, bool(request.data.get('revogar_anterior', True)))
+        except ValueError as e:
+            raise ValidationError({'detail': str(e)})
+        return Response(r, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['post'], url_path='monitorar-nbr')
     def monitorar_nbr(self, request, pk=None):
         """
@@ -361,9 +412,15 @@ class NormaViewSet(viewsets.ModelViewSet):
     def relatorio_anual_logo(self, request, pk=None):
         """POST (multipart `arquivo`): logo próprio na capa. DELETE: volta ao logo do grupo."""
         norma = self.get_object()
-        if request.method == 'DELETE':
-            if norma.relatorio_logo:
+        # O arquivo do logo pode ser o mesmo de outra norma (a nova versão de uma licença herda o da anterior):
+        # só sai do disco se ninguém mais usar.
+        def soltar_logo():
+            nome = norma.relatorio_logo.name if norma.relatorio_logo else None
+            if nome and not Norma.objects.filter(relatorio_logo=nome).exclude(pk=norma.pk).exists():
                 norma.relatorio_logo.delete(save=False)
+
+        if request.method == 'DELETE':
+            soltar_logo()
             norma.relatorio_logo = None
         else:
             arquivo = request.FILES.get('arquivo')
@@ -371,8 +428,7 @@ class NormaViewSet(viewsets.ModelViewSet):
                 raise ValidationError({'arquivo': 'Envie a imagem do logo.'})
             if not arquivo.name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')):
                 raise ValidationError({'arquivo': 'Use uma imagem PNG ou JPG.'})
-            if norma.relatorio_logo:
-                norma.relatorio_logo.delete(save=False)
+            soltar_logo()
             norma.relatorio_logo = arquivo
         norma.save(update_fields=['relatorio_logo', 'atualizado_em'])
         return Response(relatorio_anual.para_json(self._montar_relatorio(norma, request)))
@@ -549,7 +605,7 @@ class RequisitoViewSet(viewsets.ModelViewSet):
         hoje = date.today()
         filtros = avisos.ler_filtros(request.query_params)
         cfg = ConfiguracaoAvisos.atual()
-        ativos = avisos.filtrar_requisitos(Requisito.objects.filter(ativo=True), filtros)
+        ativos = avisos.filtrar_requisitos(avisos.vigentes(Requisito.objects.filter(ativo=True)), filtros)
         aplicaveis = ativos.filter(aplicabilidade='APLICAVEL')
 
         por_situacao = dict(aplicaveis.values_list('situacao').annotate(n=Count('id')))

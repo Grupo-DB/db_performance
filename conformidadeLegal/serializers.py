@@ -27,6 +27,9 @@ class NormaSerializer(serializers.ModelSerializer):
     unidade_nome = serializers.CharField(source='unidade.nome', read_only=True, default=None)
     total_requisitos = serializers.IntegerField(read_only=True, default=0)
     arquivo_url = serializers.SerializerMethodField()
+    # Renovação: a versão anterior que esta substitui (editável) e a(s) que a substituíram.
+    substitui_identificacao = serializers.CharField(source='substitui.identificacao', read_only=True, default=None)
+    substituida_por = serializers.SerializerMethodField()
 
     class Meta:
         model = Norma
@@ -34,6 +37,7 @@ class NormaSerializer(serializers.ModelSerializer):
             'id', 'tipo', 'numero', 'ano', 'orgao', 'esfera', 'tema', 'ementa', 'link',
             'data_publicacao', 'validade', 'dias_aviso', 'situacao', 'arquivo', 'arquivo_url', 'observacao',
             'unidade', 'unidade_nome', 'identificacao', 'total_requisitos', 'criado_em', 'atualizado_em',
+            'substitui', 'substitui_identificacao', 'substituida_por',
         ]
         read_only_fields = ['criado_em', 'atualizado_em']
         extra_kwargs = {'arquivo': {'write_only': True, 'required': False}}
@@ -43,6 +47,14 @@ class NormaSerializer(serializers.ModelSerializer):
             return None
         request = self.context.get('request')
         return request.build_absolute_uri(obj.arquivo.url) if request else obj.arquivo.url
+
+    def get_substituida_por(self, obj):
+        return [{'id': n.id, 'identificacao': n.identificacao} for n in obj.substituida_por.all()]
+
+    def validate_substitui(self, valor):
+        if valor is not None and self.instance is not None and valor.pk == self.instance.pk:
+            raise serializers.ValidationError('Uma licença não substitui a si mesma.')
+        return valor
 
 
 class RequisitoSerializer(serializers.ModelSerializer):
@@ -54,6 +66,8 @@ class RequisitoSerializer(serializers.ModelSerializer):
     terceiros = serializers.PrimaryKeyRelatedField(many=True, required=False, queryset=Terceiro.objects.all())
     terceiros_nomes = serializers.SerializerMethodField()
     unidade_nome = serializers.CharField(source='unidade.nome', read_only=True, default=None)
+    herdado_de = serializers.PrimaryKeyRelatedField(read_only=True)
+    herdado_de_referencia = serializers.CharField(source='herdado_de.referencia', read_only=True, default=None)
 
     class Meta:
         model = Requisito
@@ -62,6 +76,7 @@ class RequisitoSerializer(serializers.ModelSerializer):
             'aplicabilidade', 'justificativa', 'unidade', 'unidade_nome', 'responsavel', 'responsavel_nome', 'terceiros', 'terceiros_nomes',
             'periodicidade_meses', 'prazo_legal', 'dias_aviso', 'situacao', 'ultima_verificacao', 'proxima_verificacao',
             'origem', 'trecho_fonte', 'pagina_fonte', 'ativo', 'planos_abertos', 'criado_em', 'atualizado_em',
+            'herdado_de', 'herdado_de_referencia',
         ]
         # O estado só muda registrando (ou apagando) uma verificação.
         read_only_fields = ['situacao', 'ultima_verificacao', 'proxima_verificacao', 'criado_em', 'atualizado_em']
@@ -88,17 +103,22 @@ class EvidenciaAnexoSerializer(serializers.ModelSerializer):
 class VerificacaoSerializer(serializers.ModelSerializer):
     verificado_por_nome = serializers.SerializerMethodField()
     anexos = EvidenciaAnexoSerializer(many=True, read_only=True)
+    # Resposta copiada da licença anterior na renovação.
+    herdada = serializers.SerializerMethodField()
 
     class Meta:
         model = Verificacao
         fields = [
             'id', 'requisito', 'data', 'resultado', 'evidencia', 'observacao',
-            'verificado_por_nome', 'anexos', 'criado_em',
+            'verificado_por_nome', 'anexos', 'criado_em', 'herdada',
         ]
         read_only_fields = ['requisito', 'criado_em']
 
     def get_verificado_por_nome(self, obj):
         return nome_usuario(obj.verificado_por)
+
+    def get_herdada(self, obj):
+        return obj.herdada_de_id is not None
 
 
 class PlanoAcaoSerializer(serializers.ModelSerializer):

@@ -76,6 +76,12 @@ class Norma(models.Model):
     unidade = models.ForeignKey(
         'management.Filial', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
         help_text='Vazio = vale para todas as unidades.')
+    # Nova versão de licença (23/11/2026, LO 05809/2026 revogando a LO 00893/2024): a licença nova
+    # aponta para a que ela substitui; as condicionantes são cruzadas e herdam o que cabe
+    # (conformidadeLegal/renovacao.py). A anterior fica guardada, revogada, com o histórico.
+    substitui = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='substituida_por',
+        help_text='Licença/documento anterior que esta nova versão substitui.')
     criado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
     )
@@ -158,6 +164,9 @@ class Requisito(models.Model):
     # Prestador ligado à obrigação (ex.: transportador de resíduos para a condicionante da LO).
     # Prestadores ligados à obrigação — pode ser mais de um (coleta de resíduo + laboratório, por exemplo).
     terceiros = models.ManyToManyField('Terceiro', blank=True, related_name='requisitos')
+    # Condicionante da versão anterior da licença de onde esta herdou responsável, aplicabilidade,
+    # periodicidade, terceiros e a última resposta (renovação de licença).
+    herdado_de = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='herdeiros')
 
     ativo = models.BooleanField(default=True)
     criado_por = models.ForeignKey(
@@ -217,6 +226,9 @@ class Verificacao(models.Model):
     verificado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
     )
+    # Resposta copiada da condicionante da licença anterior na renovação (opção A combinada com o
+    # Pedro): mantém data, resultado, evidência e anexos da original e fica marcada como herdada.
+    herdada_de = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:

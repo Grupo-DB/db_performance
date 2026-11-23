@@ -48,6 +48,13 @@ def ler_filtros(params) -> dict:
     return {k: params.get(k) for k in FILTROS if params.get(k) not in (None, '')}
 
 
+def vigentes(qs):
+    """Tira os requisitos de norma REVOGADA: lei revogada e licença substituída por nova versão
+    (renovação de 23/11/2026) não geram mais pendência. Continuam na lista de Requisitos e no
+    relatório anual da licença antiga, como histórico."""
+    return qs.exclude(norma__situacao='REVOGADA')
+
+
 def filtrar_requisitos(qs, filtros: dict, prefixo: str = ''):
     """Aplica os filtros a um queryset de Requisito (ou de algo ligado a ele, via `prefixo`)."""
     f = filtros or {}
@@ -61,7 +68,7 @@ def filtrar_requisitos(qs, filtros: dict, prefixo: str = ''):
 
 
 def requisitos_aplicaveis(filtros=None):
-    return filtrar_requisitos(Requisito.objects.filter(ativo=True, aplicabilidade='APLICAVEL'), filtros)
+    return filtrar_requisitos(vigentes(Requisito.objects.filter(ativo=True, aplicabilidade='APLICAVEL')), filtros)
 
 
 def planos_abertos(filtros=None):
@@ -232,7 +239,7 @@ def destinatarios(cfg: ConfiguracaoAvisos) -> list[tuple[str, str, dict, bool]]:
     ja = {e.lower() for e, *_ in lista}
     if cfg.email_responsaveis:
         from django.contrib.auth.models import User
-        ids = set(Requisito.objects.filter(ativo=True, aplicabilidade='APLICAVEL', responsavel__isnull=False)
+        ids = set(vigentes(Requisito.objects.filter(ativo=True, aplicabilidade='APLICAVEL', responsavel__isnull=False))
                   .values_list('responsavel', flat=True))
         ids |= set(PlanoAcao.objects.filter(PLANO_ABERTO, responsavel__isnull=False).values_list('responsavel', flat=True))
         for u in User.objects.filter(pk__in=ids, is_active=True).exclude(email=''):

@@ -62,3 +62,26 @@ class IndicadoresTests(SimpleTestCase):
         self.assertEqual(t['parados'], 1)
         self.assertEqual(r['top_valor'][0]['codigo'], 1)
         self.assertEqual(r['top_parados'][0]['dias_parado'], None)
+
+
+class SituacaoCompraTests(SimpleTestCase):
+    def test_classifica_pela_situacao_mais_critica(self):
+        req = {'etapa': 'requisicao'}
+        col = {'etapa': 'coleta'}
+        ordem = {'etapa': 'ordem', 'atrasada': False}
+        atras = {'etapa': 'ordem', 'atrasada': True}
+        nota = {'etapa': 'ordem', 'atrasada': True, 'nota_pendente': {'numero': 1, 'quantidade': 2}}
+        self.assertEqual([ind.situacao_compra(x) for x in (None, [], [req], [col, req], [ordem], [ordem, atras], [nota])],
+                         [None, None, 'requisicao', 'coleta', 'ordem', 'atrasada', 'nota'])
+
+    def test_contagem_e_por_grupo(self):
+        # 1 abaixo em ordem; 2 abaixo SEM compra; 3 ok em coleta; 4 ok sem compra (não conta)
+        df = a.preparar_itens(pd.DataFrame([item(1, 12, 1, 10), item(2, 12, 0, 10), item(3, 11, 50, 10), item(4, 10, 50, 10)]), GRUPOS)
+        a.juntar_compras(df, {1: [{'etapa': 'ordem', 'atrasada': False}], 3: [{'etapa': 'coleta'}]})
+        a.juntar_fotos(df, set())
+        c = ind.compras(df)
+        por = {s['chave']: (s['itens'], s['abaixo']) for s in c['situacoes']}
+        self.assertEqual((por['ordem'], por['coleta'], por['requisicao']), ((1, 1), (1, 0), (0, 0)))
+        self.assertEqual((c['em_compra'], c['abaixo'], c['abaixo_em_compra'], c['abaixo_sem_compra']), (2, 2, 1, 1))
+        g, = c['grupos']
+        self.assertEqual((g['total'], g['sem_compra'], g['ordem'], g['coleta']), (2, 1, 1, 1))
