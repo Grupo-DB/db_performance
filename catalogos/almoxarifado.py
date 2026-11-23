@@ -49,6 +49,9 @@ abertas e em que pé está o processo. Regras do dicionário do SGA
   desclassificada, 3 coleta cancelada, 4 contrato; PCOSITAPROV 0 pendente,
   1 aprovada, 2 reprovada, 9 não se aplica). ITEMPROCESSOCOMPRA.IPCOIPCOM liga
   ao item da requisição; IPCOQUANTFAT é o que já entrou por nota.
+  IPCOPCOOC > 0 e ≠ IPCOPCO = item desclassificado naquele processo (vermelho no
+  SGA): o item está em todas as ordens do grupo de cotação, mas só vale a linha
+  com IPCOPCOOC 0.
 - Previsão de entrega = IPCOMDATA + IPCOMPRAZO dias (o que o SGA mostra no
   acompanhamento); sem prazo no item vale o da ordem (IPCOPRENT/PCOPRENT sobre
   PCODATAPED). Mais da metade das ordens abertas não tem prazo nenhum: aí não
@@ -250,6 +253,10 @@ _SQL_COMPRAS = """
         LEFT JOIN FORNECEDOR F ON F.FORCOD = P.PCOFOR
         WHERE IP.IPCOIPCOM = I.IPCOMCOD AND P.PCOSIT IN (1, 4)
           AND P.PCOSITAPROV <> 2          -- reprovada não é compra ativa (23/11/2026, OC 142703)
+          -- Item desclassificado nesta ordem (IPCOPCOOC = a ordem que ficou com ele): o SGA
+          -- mostra em vermelho e não compra aqui. Sem isso a ordem mais nova do grupo de
+          -- cotação "roubava" o item (23/11/2026: OC 142972 × 142968, ~1/3 das linhas).
+          AND (IP.IPCOPCOOC = 0 OR IP.IPCOPCOOC = IP.IPCOPCO)
         ORDER BY P.PCODATAORDEM DESC
     ) O
     -- IPCOQUANTFAT já soma a nota no pré-lançamento: o que está em nota pendente (0)
