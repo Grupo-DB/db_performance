@@ -90,6 +90,17 @@ class InsumosPainelTests(SimpleTestCase):
         self.assertEqual([ins.passo_serie(d) for d in (30, 90, 180, 365)], [1, 7, 14, 30])
         self.assertEqual(len(self.painel(mov(), 90)['monitorados'][0]['serie']), 13)
 
+    def test_serie_anual_em_meses_de_calendario(self):
+        # 1 ano: 12 meses inteiros, dez/2025 a nov/2026 (o atual vai até hoje), e não blocos de 30 dias.
+        p = self.painel(mov((1, '2025-12-01', 2, -4, -8), (1, '2026-10-31', 2, -1, -2), (1, '2026-11-01', 2, -3, -6)), 365)
+        self.assertEqual(p['meses_serie'][0], '2025-12')
+        self.assertEqual(p['meses_serie'][-1], '2026-11')
+        self.assertEqual(len(p['meses_serie']), 12)
+        self.assertEqual(p['inicio_serie'], '2025-12-01')
+        i1 = next(i for i in p['itens'] if i['codigo'] == 1)
+        self.assertEqual((i1['serie'][0], i1['serie'][-2], i1['serie'][-1]), (4.0, 1.0, 3.0))
+        self.assertIsNone(self.painel(mov(), 90)['meses_serie'])
+
 
 class InsumosEdicaoTests(TestCase):
     def setUp(self):

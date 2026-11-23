@@ -6,7 +6,8 @@ grupos/itens que o gestor escolhe monitorar (models.InsumoMonitorado).
   valor, compra em andamento, foto). Um grupo monitorado leva os subgrupos.
   Item que cai em mais de um monitorado fica no mais específico: item avulso
   primeiro, depois o grupo mais fundo da árvore.
-- Consumo: MOVESTOQUE tipo 2 (requisição do almoxarifado), líquido de
+- Consumo: saída do almoxarifado GERAL (almoxarifado.sql_saidas_geral: requisição
+  + transferência para a fábrica por lançamento de produção, 23/11/2026), líquido de
   devolução — é por onde a fábrica tira matéria-prima, embalagem, energia e
   lenha/cavaco (conferido em 17/11: CAL R$ 2,2 mi e CAVACO R$ 2,1 mi em 90 dias).
   Entrada: tipo 1 (nota). Valor = MESTQCUSTO (com sinal).
@@ -33,12 +34,15 @@ DIAS_PADRAO = 90
 MESES_SERIE = 12
 
 _SQL_MOV = """
-    SELECT MESTQESTQ ESTQ, CAST(MESTQDATA AS DATE) DIA, MESTQREFTIPO TIPO,
-           SUM(MESTQQUANT) QUANT, SUM(MESTQCUSTO) VALOR
-    FROM MOVESTOQUE
-    WHERE MESTQEMP = :emp AND MESTQDATA >= :desde AND MESTQREFTIPO IN (1, 2)
-      AND MESTQESTQ IN ({codigos}) {filtro_filial}
-    GROUP BY MESTQESTQ, CAST(MESTQDATA AS DATE), MESTQREFTIPO
+    SELECT ESTQ, DIA, TIPO, SUM(QUANT) QUANT, SUM(VALOR) VALOR FROM (
+        SELECT MESTQESTQ ESTQ, CAST(MESTQDATA AS DATE) DIA, 1 TIPO, MESTQQUANT QUANT, MESTQCUSTO VALOR
+        FROM MOVESTOQUE
+        WHERE MESTQEMP = :emp AND MESTQDATA >= :desde AND MESTQDATA < :ate AND MESTQREFTIPO = 1
+          AND MESTQESTQ IN ({codigos}) {filtro_filial}
+        UNION ALL
+        SELECT ESTQ, DIA, 2 TIPO, QUANT, VALOR FROM ({saidas}) S
+    ) X
+    GROUP BY ESTQ, DIA, TIPO
 """
 
 
@@ -149,7 +153,7 @@ def ler_movimento(filial: int | None, codigos: list[int], desde: date) -> pd.Dat
     codigos = sorted({int(c) for c in codigos})
 
     def ler():
-        params = {'emp': ax.EMPRESA, 'desde': desde}
+        params = {'emp': ax.EMPRESA, 'desde': desde, 'ate': date.today() + timedelta(days=1)}
         filtro = ''
         if filial is not None:
             params['fil'] = filial
@@ -157,7 +161,8 @@ def ler_movimento(filial: int | None, codigos: list[int], desde: date) -> pd.Dat
         partes = []
         for i in range(0, len(codigos), 2000):          # limite de parâmetros do SQL Server
             lote = ','.join(str(c) for c in codigos[i:i + 2000])
-            partes.append(ax._ler(_SQL_MOV.format(codigos=lote, filtro_filial=filtro), **params))
+            saidas = ax.sql_saidas_geral(filtro, f'AND MESTQESTQ IN ({lote})')
+            partes.append(ax._ler(_SQL_MOV.format(codigos=lote, filtro_filial=filtro, saidas=saidas), **params))
         return pd.concat(partes, ignore_index=True)
 
     chave = f'almox:ins:mov:{"todas" if filial is None else filial}:{desde}:{hash(tuple(codigos))}'
@@ -183,10 +188,22 @@ def preparar_movimento(mov: pd.DataFrame) -> pd.DataFrame:
     return m[['ESTQ', 'DIA', 'CONS_Q', 'CONS_V', 'ENT_Q', 'ENT_V']]
 
 
+def meses_serie(fim: pd.Timestamp, dias: int) -> list[str]:
+    """Série mensal em meses de calendário inteiros (23/11/2026): 1 ano = os 12 meses
+    terminando no atual (o atual vai até hoje). Antes eram blocos de 30 dias (30/10 a 28/11)."""
+    n = max(1, round(dias / 30.44))
+    atual = fim.to_period('M')
+    return [str(atual - k) for k in range(n - 1, -1, -1)]
+
+
 def _serie(mov: pd.DataFrame, coluna: str, inicio: pd.Timestamp, passo: int, n: int) -> list[float]:
     if mov.empty:
         return [0.0] * n
-    idx = ((mov.DIA - inicio).dt.days // passo).astype(int)
+    if passo == 30:  # meses de calendário, a partir do mês de `inicio`
+        m0 = inicio.year * 12 + inicio.month - 1
+        idx = (mov.DIA.dt.year * 12 + mov.DIA.dt.month - 1 - m0).astype(int)
+    else:
+        idx = ((mov.DIA - inicio).dt.days // passo).astype(int)
     ok = (idx >= 0) & (idx < n)
     s = mov.loc[ok, coluna].groupby(idx[ok]).sum()
     return [round(float(s.get(i, 0.0)), 3) for i in range(n)]
@@ -216,8 +233,14 @@ def montar_painel(df: pd.DataFrame, grupos: pd.DataFrame, mov: pd.DataFrame, mon
     ini = fim - pd.Timedelta(days=dias - 1)
     ini_ant = ini - pd.Timedelta(days=dias)
     passo = passo_serie(dias)
-    n_serie = -(-dias // passo)
-    ini_serie = fim - pd.Timedelta(days=n_serie * passo - 1)
+    if passo == 30:
+        rotulos_serie = meses_serie(fim, dias)
+        n_serie = len(rotulos_serie)
+        ini_serie = pd.Period(rotulos_serie[0], 'M').to_timestamp()
+    else:
+        rotulos_serie = None
+        n_serie = -(-dias // passo)
+        ini_serie = fim - pd.Timedelta(days=n_serie * passo - 1)
 
     periodo = mov[(mov.DIA >= ini) & (mov.DIA <= fim)]
     anterior = mov[(mov.DIA >= ini_ant) & (mov.DIA < ini)]
@@ -332,6 +355,7 @@ def montar_painel(df: pd.DataFrame, grupos: pd.DataFrame, mov: pd.DataFrame, mon
         'fim': fim.date().isoformat(),
         'passo_serie': passo,
         'inicio_serie': ini_serie.date().isoformat(),
+        'meses_serie': rotulos_serie,
         'totais': {
             'valor': round(valor, 2),
             'consumo_valor': round(cv, 2),

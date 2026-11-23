@@ -44,7 +44,8 @@ PARADO_DIAS = 365
 _SQL_ULTIMA_SAIDA = """
     SELECT MESTQESTQ ESTQ, MAX(MESTQDATA) ULTIMA
     FROM MOVESTOQUE
-    WHERE MESTQEMP = :emp AND MESTQREFTIPO = 2 AND MESTQQUANT < 0 {filtro_filial}
+    WHERE MESTQEMP = :emp AND MESTQREFTIPO IN (2, 3) AND MESTQTIPO = 0 AND MESTQREF = 0
+      AND MESTQQUANT < 0 {filtro_filial}   -- requisição ou saída por lançamento de produção (transferência p/ a fábrica)
     GROUP BY MESTQESTQ
 """
 

@@ -25,9 +25,16 @@ Regras levantadas no SGA em 11/11/2026:
   tem (ex.: Mecânico Automotivo, 355 de 1.753 itens com saldo). Os sem mínimo
   saem contados à parte, para o almoxarifado ir completando no SGA.
 - MOVESTOQUE.MESTQREFTIPO: 1 = entrada por nota, 2 = requisição (baixa) do
-  almoxarifado, 3 = acerto/inventário, 6 = saída por nota (venda/transferência),
-  8 = só custo (quantidade zero). MESTQQUANT tem sinal; MESTQCUSTO é o valor
-  total da linha, também com sinal.
+  almoxarifado, 3 = item de lançamento de produção (ITEMBAIXAPRODUCAO — NÃO é
+  acerto de inventário, como se achava até 23/11/2026), 6 = saída por nota
+  (venda/transferência), 8 = só custo (quantidade zero). MESTQQUANT tem sinal;
+  MESTQCUSTO é o valor total da linha, também com sinal.
+- Posição do estoque = MESTQTIPO/MESTQREF (QUANTESTOQUETIPOREF): 0/0 = GERAL
+  (o almoxarifado, cujo saldo a tela mostra) e 0/100 = FÁBRICA. Muito insumo
+  sai do GERAL por TRANSFERÊNCIA para a FÁBRICA num lançamento de produção
+  (linha O na posição 0 e D na 100, mesmo item) e lá é consumido aos poucos —
+  pela produção (prego, tela inox, lenha) ou por requisição feita na FÁBRICA
+  (embalagens). Ver _SQL_SAIDAS_GERAL.
 
 COMPRA EM ANDAMENTO (16/11/2026): cada item mostra as requisições de compra
 abertas e em que pé está o processo. Regras do dicionário do SGA
@@ -96,7 +103,7 @@ RAIZES_FORA = {
 # Custo unitário acima disto é lixo de cadastro (há 3e151 num grupo de venda).
 CUSTO_UNITARIO_MAX = 10_000_000
 
-TIPOS_MOVIMENTO = {1: 'Entrada (nota)', 2: 'Requisição', 3: 'Acerto', 6: 'Saída (nota)'}
+TIPOS_MOVIMENTO = {1: 'Entrada (nota)', 2: 'Requisição', 3: 'Produção / transferência', 6: 'Saída (nota)'}
 
 FAIXAS = (
     (90, 'excelente', 'Excelente'),
@@ -150,14 +157,48 @@ _SQL_ITENS = """
          AND QESTQREF = 0 AND QESTQTIPO = 0 {filtro_filial}
 """
 
-# Consumo = requisições do almoxarifado (tipo 2) líquidas de devolução. Acerto
-# (3) é inventário e saída por nota (6) é venda/transferência: não entram.
-_SQL_CONSUMO = """
-    SELECT MESTQESTQ ESTQ, -SUM(MESTQQUANT) CONSUMO, -SUM(MESTQCUSTO) CONSUMO_VALOR
+# Saídas do almoxarifado GERAL (posição 0/0), uma linha por movimento, QUANT/VALOR
+# com sinal (negativo = saiu). Até 23/11/2026 só contava a requisição (tipo 2) e
+# tudo que saía por lançamento de produção sumia do consumo (relatório 12.02 do
+# SGA, "Consumo e Transf por Mês"). Agora:
+#  - requisição feita no GERAL (tipo 2, posição 0/0), líquida de devolução;
+#  - lançamento de produção (tipo 3), somado por lançamento e item na posição
+#    GERAL: transferência GERAL→FÁBRICA é saída, FÁBRICA→GERAL é devolução e
+#    consumo direto do GERAL pela produção é saída. Item que só ENTRA no
+#    lançamento (MENOR >= 0) é produção, não devolução: fica de fora.
+# Requisição feita na FÁBRICA (posição 0/100) não entra: o item já saiu do GERAL
+# na transferência — contar as duas seria em dobro (embalagens).
+_SQL_SAIDAS_GERAL = """
+    SELECT MESTQESTQ ESTQ, CAST(MESTQDATA AS DATE) DIA, MESTQQUANT QUANT, MESTQCUSTO VALOR
     FROM MOVESTOQUE
-    WHERE MESTQEMP = :emp AND MESTQDATA >= :desde AND MESTQDATA < :ate
-      AND MESTQREFTIPO = 2 {filtro_filial}
-    GROUP BY MESTQESTQ
+    WHERE MESTQEMP = :emp AND MESTQREFTIPO = 2 AND MESTQTIPO = 0 AND MESTQREF = 0
+      AND MESTQDATA >= :desde AND MESTQDATA < :ate {filtro_filial} {filtro_itens}
+    UNION ALL
+    SELECT ESTQ, DIA, Q0, V0 FROM (
+        SELECT MESTQESTQ ESTQ, CAST(MIN(MESTQDATA) AS DATE) DIA,
+               SUM(CASE WHEN MESTQREF = 0 THEN MESTQQUANT ELSE 0 END) Q0,
+               SUM(CASE WHEN MESTQREF = 0 THEN MESTQCUSTO ELSE 0 END) V0,
+               MIN(MESTQQUANT) MENOR
+        FROM MOVESTOQUE
+        JOIN ITEMBAIXAPRODUCAO ON IBPROCOD = MESTQREFCOD
+        WHERE MESTQEMP = :emp AND MESTQREFTIPO = 3 AND MESTQTIPO = 0
+          AND MESTQDATA >= :desde AND MESTQDATA < :ate {filtro_filial} {filtro_itens}
+        GROUP BY IBPROBPRO, MESTQESTQ, MESTQFIL
+    ) P
+    WHERE Q0 <> 0 AND MENOR < 0
+"""
+
+
+def sql_saidas_geral(filtro_filial: str = '', filtro_itens: str = '') -> str:
+    return _SQL_SAIDAS_GERAL.format(filtro_filial=filtro_filial, filtro_itens=filtro_itens)
+
+
+# Consumo = saída do GERAL no período (requisição + transferência para a fábrica
+# + consumo direto da produção). Saída por nota (6) é venda: não entra.
+_SQL_CONSUMO = """
+    SELECT ESTQ, -SUM(QUANT) CONSUMO, -SUM(VALOR) CONSUMO_VALOR
+    FROM ({saidas}) S
+    GROUP BY ESTQ
 """
 
 
@@ -166,6 +207,7 @@ _SQL_MOVIMENTOS = """
            MESTQCUSTO VALOR, MESTQFIL FIL
     FROM MOVESTOQUE
     WHERE MESTQEMP = :emp AND MESTQDATA >= :desde AND MESTQREFTIPO IN (1, 2, 3, 6)
+      AND MESTQTIPO = 0 AND MESTQREF = 0          -- só o GERAL: transferência p/ a fábrica é saída, não entrada+saída
       AND MESTQQUANT <> 0 {filtro_filial}
 """
 
@@ -796,13 +838,13 @@ def periodo_consumo(desde: date | None = None, ate: date | None = None,
 
 
 def _consumo(filial: int | None, desde: date, ate: date) -> dict:
-    """{quant: {item: q}, valor: {item: R$}} das requisições do período (cache próprio)."""
+    """{quant: {item: q}, valor: {item: R$}} das saídas do GERAL no período (cache próprio)."""
     def ler():
         params = {'emp': EMPRESA, 'desde': desde, 'ate': ate + timedelta(days=1)}
         if filial is not None:
             params['fil'] = filial
         f_m = '' if filial is None else 'AND MESTQFIL = :fil'
-        df = _ler(_SQL_CONSUMO.format(filtro_filial=f_m), **params)
+        df = _ler(_SQL_CONSUMO.format(saidas=sql_saidas_geral(f_m)), **params)
         return {'quant': {int(e): _num(c) for e, c in zip(df.ESTQ, df.CONSUMO)},
                 'valor': {int(e): _num(v) for e, v in zip(df.ESTQ, df.CONSUMO_VALOR)}}
     chave = f'almox:consumo:{"todas" if filial is None else filial}:{desde.isoformat()}:{ate.isoformat()}'
