@@ -205,8 +205,14 @@ class Requisito(models.Model):
         self.save(update_fields=['situacao', 'ultima_verificacao', 'proxima_verificacao', 'atualizado_em'])
 
 
+# Periodicidade "Sob demanda (quando aplicável)": verifica-se quando o fato acontece, sem data
+# programada. Valor-sentinela no mesmo campo (cabe no PositiveSmallIntegerField, sem migration).
+SOB_DEMANDA = 999
+
+
 def proxima_data(base: date, meses: int):
-    return base + relativedelta(months=meses) if meses else None
+    """0 = única e SOB_DEMANDA não geram próxima verificação."""
+    return base + relativedelta(months=meses) if meses and meses != SOB_DEMANDA else None
 
 
 class Verificacao(models.Model):
