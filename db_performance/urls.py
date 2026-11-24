@@ -53,6 +53,7 @@ urlpatterns = [
     path('recrutamento/', include('recrutamento.urls')),
     path('pesquisas/', include('pesquisas.urls')),
     path('pedidosVenda/', include('pedidosVenda.urls')),
+    path('bi/', include('biComercial.urls')),
     path('sipat/', include('sipat.urls')),
     path('comercialAgro/', include('comercialAgro.urls')),
     path('aprendizes/', include('aprendizes.urls')),

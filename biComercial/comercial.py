@@ -1,6 +1,6 @@
 """
 BI Comercial (23/11/2026): o relatório do Power BI "Comercial - Dagoberto Barcellos"
-dentro do Manager. As consultas são as MESMAS do modelo do Power BI (bi_sql/*.sql,
+dentro do Manager. As consultas são as MESMAS do modelo do Power BI (sql/*.sql,
 copiadas de INFO.PARTITIONS) e as contas reproduzem as medidas dele:
 
 - Faturamento      = soma de Valor Faturado nas linhas com flag FATURAMENTO
@@ -26,11 +26,11 @@ import pandas as pd
 from django.core.cache import cache
 from sqlalchemy import text
 
-from . import erp
+from pedidosVenda import erp
 
 logger = logging.getLogger(__name__)
 
-_SQL_DIR = Path(__file__).with_name('bi_sql')
+_SQL_DIR = Path(__file__).with_name('sql')
 CACHE_SEG = 10 * 60
 PERIODO_MAX_DIAS = 3 * 366
 

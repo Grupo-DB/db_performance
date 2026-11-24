@@ -1,7 +1,7 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from .views import BiComercialSaldoView, BiComercialView, CarteiraView, PacoteOfflineView, ErpViewSet, FolhaCargaViewSet, EuView, FotoProdutoViewSet, NotificacaoViewSet, PainelCargasView, PedidoVendaViewSet, VendedorPerfilViewSet
+from .views import CarteiraView, PacoteOfflineView, ErpViewSet, FolhaCargaViewSet, EuView, FotoProdutoViewSet, NotificacaoViewSet, PainelCargasView, PedidoVendaViewSet, VendedorPerfilViewSet
 
 router = DefaultRouter()
 router.register(r'pedidos', PedidoVendaViewSet, basename='pedido-venda')
@@ -16,6 +16,4 @@ urlpatterns = [
     path('cargas/', PainelCargasView.as_view(), name='pedido-venda-cargas'),
     path('carteira/', CarteiraView.as_view(), name='pedido-venda-carteira'),
     path('offline/', PacoteOfflineView.as_view(), name='pedido-venda-offline'),
-    path('bi-comercial/', BiComercialView.as_view(), name='bi-comercial'),
-    path('bi-comercial/saldo-pedidos/', BiComercialSaldoView.as_view(), name='bi-comercial-saldo'),
 ] + router.urls
