@@ -62,3 +62,23 @@ class BiComercialSaldoView(APIView):
         except Exception as exc:
             logger.exception('BI comercial — saldo de pedidos')
             return Response({'detail': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+class BiComercialMesView(APIView):
+    """Mês a mês (25/11/2026): ?mes=AAAA-MM → cada dia do mês; ?dia=AAAA-MM-DD → as notas do dia.
+    Mesmos filtros do painel (repetíveis)."""
+    permission_classes = [TemAcessoBiComercial]
+
+    def get(self, request):
+        from . import comercial as bi
+        p = request.query_params
+        filtros = _bi_filtros(p, bi.FILTROS)
+        try:
+            if p.get('dia'):
+                return Response(bi.dia_detalhe(date.fromisoformat(p['dia']), filtros))
+            return Response(bi.mes_diario(p.get('mes') or date.today().strftime('%Y-%m'), filtros))
+        except ValueError as exc:
+            return Response({'detail': str(exc) or 'Data inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            logger.exception('BI comercial — mês a mês')
+            return Response({'detail': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)

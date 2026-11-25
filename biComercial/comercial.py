@@ -225,6 +225,119 @@ def painel(desde: date | None = None, ate: date | None = None, filtros: dict[str
     return montar(filtrar(todos, filtros or {}), todos, desde, ate)
 
 
+# ── Mês a mês: cada dia do mês (25/11/2026) ────────────────────────────────
+
+DIAS_SEMANA = ('seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'dom')
+_ZERO = pd.Series({k: 0.0 for k in ('VALOR', 'TN', 'QTD', 'FAT_V', 'CARR_T', 'CARR_U')})
+
+
+def _mes_limites(mes: str) -> tuple[date, date]:
+    """'AAAA-MM' → (1º dia, último dia)."""
+    try:
+        a, m = (int(x) for x in mes.split('-'))
+        ini = date(a, m, 1)
+    except (ValueError, AttributeError):
+        raise ValueError('Mês inválido (AAAA-MM).')
+    fim = (date(a + (m == 12), m % 12 + 1, 1)) - timedelta(days=1)
+    return ini, fim
+
+
+def _ler_mes_e_anterior(mes: str) -> tuple[pd.DataFrame, date, date, date, date]:
+    ini, fim = _mes_limites(mes)
+    ant_fim = ini - timedelta(days=1)
+    ant_ini = ant_fim.replace(day=1)
+    return ler_faturamento(ant_ini, fim), ini, fim, ant_ini, ant_fim
+
+
+def _totais(df: pd.DataFrame) -> dict:
+    tot = _soma(df.assign(_=1), ['_'])
+    return {**_linha(tot.iloc[0] if len(tot) else _ZERO), 'notas': int(df[df.TIPO_NF == 'S'].NFCOD.nunique()),
+            'clientes': int(df[df.TIPO_NF == 'S'].CLIENTE_COD.nunique())}
+
+
+def mes_diario(mes: str, filtros: dict[str, list[str]] | None = None, hoje: date | None = None) -> dict:
+    """
+    Cada dia do mês (inclusive os sem nota), com as mesmas medidas do painel, e o mês anterior
+    para comparar: no mês corrente, o anterior vai só até o mesmo dia (comparação justa).
+    """
+    hoje = hoje or date.today()
+    todos, ini, fim, ant_ini, ant_fim = _ler_mes_e_anterior(mes)
+    df_all = filtrar(todos, filtros or {})
+    df = df_all[(df_all.DATA >= pd.Timestamp(ini)) & (df_all.DATA <= pd.Timestamp(fim))]
+    ant = df_all[(df_all.DATA >= pd.Timestamp(ant_ini)) & (df_all.DATA <= pd.Timestamp(ant_fim))]
+
+    corrente = ini <= hoje <= fim
+    ate_dia = hoje.day if corrente else fim.day
+    ant_corte = ant_ini + timedelta(days=min(ate_dia, ant_fim.day) - 1)
+    ant_mesmo = ant[ant.DATA <= pd.Timestamp(ant_corte)]
+
+    soma_dia = _soma(df, ['DATA']).set_index('DATA')
+    notas_dia = df[df.TIPO_NF == 'S'].groupby('DATA').NFCOD.nunique()
+    cli_dia = df[df.TIPO_NF == 'S'].groupby('DATA').CLIENTE_COD.nunique()
+    seg_dia = df.groupby(['SEGMENTO', 'DATA']).VALOR.sum()
+    ant_dia = ant.groupby(ant.DATA.dt.day).VALOR.sum()
+    ant_carr = ant[ant.CARR].groupby(ant[ant.CARR].DATA.dt.day).TN.sum()
+
+    dias = []
+    d = ini
+    while d <= fim:
+        ts = pd.Timestamp(d)
+        r = soma_dia.loc[ts] if ts in soma_dia.index else _ZERO
+        dias.append({**_linha(r, data=d.isoformat(), dia=d.day, semana=DIAS_SEMANA[d.weekday()]),
+                     'notas': int(notas_dia.get(ts, 0)), 'clientes': int(cli_dia.get(ts, 0)),
+                     'futuro': d > hoje, 'anterior_valor': _r(ant_dia.get(d.day, 0.0)),
+                     'anterior_carregamento_t': _r(ant_carr.get(d.day, 0.0), 3)})
+        d += timedelta(days=1)
+
+    segmentos = []
+    for seg in _soma(df, ['SEGMENTO']).sort_values('VALOR', ascending=False).SEGMENTO:
+        serie = seg_dia.loc[seg] if seg in seg_dia.index.get_level_values(0) else pd.Series(dtype=float)
+        segmentos.append({'segmento': seg or '(sem segmento)',
+                          'valores': [_r(serie.get(pd.Timestamp(x['data']), 0.0)) for x in dias]})
+
+    com_venda = [x for x in dias if x['notas'] or x['valor']]
+    melhor = max(com_venda, key=lambda x: x['valor'], default=None)
+    return {
+        'mes': ini.strftime('%Y-%m'), 'desde': ini.isoformat(), 'ate': fim.isoformat(), 'corrente': corrente,
+        'ate_dia': ate_dia,
+        'totais': {**_totais(df), 'dias_com_venda': len(com_venda),
+                   'media_dia': _r(sum(x['valor'] for x in com_venda) / len(com_venda)) if com_venda else 0.0,
+                   'media_dia_t': _r(sum(x['carregamento_t'] for x in com_venda) / len(com_venda), 3) if com_venda else 0.0},
+        'anterior': {'mes': ant_ini.strftime('%Y-%m'), 'ate': ant_corte.isoformat(), 'mesmo_periodo': _totais(ant_mesmo),
+                     'mes_inteiro': _totais(ant)},
+        'melhor_dia': {'data': melhor['data'], 'valor': melhor['valor']} if melhor else None,
+        'dias': dias,
+        'segmentos': segmentos,
+        'ultima_nota': df.DATA.max().date().isoformat() if len(df) else None,
+    }
+
+
+def dia_detalhe(dia: date, filtros: dict[str, list[str]] | None = None) -> dict:
+    """As notas de um dia (saídas e devoluções), com os produtos de cada uma, e os rankings do dia."""
+    todos, *_ = _ler_mes_e_anterior(dia.strftime('%Y-%m'))
+    df = filtrar(todos, filtros or {})
+    df = df[df.DATA == pd.Timestamp(dia)]
+    chave = ['NFCOD', 'NOTA', 'TIPO_NF', 'CLIENTE', 'REPRESENTANTE', 'CIDADE_FAT', 'UF_FAT', 'NATUREZA', 'FILIAL', 'SEGMENTO']
+    notas = []
+    if len(df):
+        itens = _soma(df, chave + ['PRODUTO', 'UNIDADE'])
+        for k, g in itens.groupby(chave, dropna=False, sort=False):
+            r = g[['VALOR', 'TN', 'QTD', 'FAT_V', 'CARR_T', 'CARR_U']].sum()
+            nfcod, nota, tipo, cliente, rep, cidade, uf, nat, filial, seg = k
+            notas.append(_linha(r, nfcod=int(nfcod), nota=int(nota), devolucao=tipo != 'S', cliente=cliente,
+                                representante=rep, cidade=cidade if not uf or cidade.upper().endswith(uf.upper()) else f'{cidade}/{uf}', natureza=nat,
+                                filial=filial, segmento=seg,
+                                produtos=[_linha(p, produto=p.PRODUTO, unidade=p.UNIDADE)
+                                          for p in g.sort_values('VALOR', ascending=False).itertuples()]))
+        notas.sort(key=lambda n: (-n['valor'], n['nota']))
+
+    def rank(col: str) -> list[dict]:
+        return [_linha(r, nome=getattr(r, col) or '—') for r in _soma(df, [col]).sort_values('VALOR', ascending=False).itertuples()]
+
+    return {'dia': dia.isoformat(), 'semana': DIAS_SEMANA[dia.weekday()], 'totais': _totais(df), 'notas': notas,
+            'representantes': rank('REPRESENTANTE'), 'produtos': rank('PRODUTO'), 'segmentos': rank('SEGMENTO')}
+
+
 # ── Saldo de pedidos (página 8) ────────────────────────────────────────────
 
 def preparar_saldo(raw: pd.DataFrame) -> pd.DataFrame:
