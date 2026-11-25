@@ -1082,6 +1082,26 @@ def almoxarifado_insumos(request):
     return Response(dados)
 
 
+@api_view(['GET'])
+def almoxarifado_insumos_serie(request, codigo):
+    """Consumo de um item em barras: ?filial=0|…|todas &passo=semana|mes|ano (12 semanas, 12 meses, 5 anos)."""
+    from . import almox_insumos
+
+    if (erro := _almox_acesso(request)):
+        return erro
+    filial, erro = _almox_filial(request.GET.get('filial'))
+    if erro:
+        return erro
+    passo = request.GET.get('passo') or 'mes'
+    if passo not in almox_insumos.PASSOS_SERIE:
+        return Response({'erro': 'passo deve ser semana, mes ou ano.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        return Response(almox_insumos.serie_item(codigo, filial, passo))
+    except Exception as exc:
+        logger.exception('série do insumo')
+        return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+
+
 @api_view(['POST', 'PUT', 'DELETE'])
 def almoxarifado_insumos_monitorados(request):
     """POST {"tipo": "grupo"|"item", "codigo": 1702, "filial": 0|…|"todas", "painel": "meu"|"padrao"} inclui;

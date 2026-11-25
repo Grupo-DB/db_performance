@@ -396,6 +396,65 @@ def painel(filial: int | None, dias: int = DIAS_PADRAO, fonte: str = 'sga', hoje
     return dados
 
 
+# ── Série de um item, por semana / mês / ano (25/11/2026) ─────────────────────
+# Pedido do planejamento: no detalhe do item, escolher a escala das barras sem
+# mudar o período do painel. Semana = segunda a domingo; o período atual vai até hoje.
+PASSOS_SERIE = {'semana': 12, 'mes': 12, 'ano': 5}
+_MESES_CURTOS = ('jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez')
+
+
+def periodos_serie(passo: str, hoje: date) -> list[tuple[date, date]]:
+    """(início, fim) de cada barra, do mais antigo ao atual; o fim do atual é hoje."""
+    n = PASSOS_SERIE[passo]
+    if passo == 'semana':
+        seg = hoje - timedelta(days=hoje.weekday())
+        ini = [seg - timedelta(weeks=k) for k in range(n - 1, -1, -1)]
+        return [(i, min(i + timedelta(days=6), hoje)) for i in ini]
+    if passo == 'mes':
+        out = []
+        for k in range(n - 1, -1, -1):
+            a, m = divmod(hoje.year * 12 + hoje.month - 1 - k, 12)
+            i = date(a, m + 1, 1)
+            prox = date(a + (m + 1) // 12, (m + 1) % 12 + 1, 1)
+            out.append((i, min(prox - timedelta(days=1), hoje)))
+        return out
+    return [(date(hoje.year - k, 1, 1), min(date(hoje.year - k, 12, 31), hoje)) for k in range(n - 1, -1, -1)]
+
+
+def montar_serie_item(mov: pd.DataFrame, codigo: int, passo: str, hoje: date) -> dict:
+    mov = preparar_movimento(mov)
+    mov = mov[mov.ESTQ == int(codigo)]
+    barras = []
+    for ini, fim in periodos_serie(passo, hoje):
+        sel = mov[(mov.DIA >= pd.Timestamp(ini)) & (mov.DIA <= pd.Timestamp(fim))]
+        if passo == 'semana':
+            eixo = f'{ini:%d/%m}'
+            rotulo = f'{ini:%d/%m} a {fim:%d/%m/%Y}'
+        elif passo == 'mes':
+            eixo = f'{_MESES_CURTOS[ini.month - 1]}/{ini:%y}'
+            rotulo = f'{_MESES_CURTOS[ini.month - 1]}/{ini.year}'
+        else:
+            eixo = rotulo = str(ini.year)
+        amanha = hoje + timedelta(days=1)
+        ultimo_dia = {'semana': hoje.weekday() == 6, 'mes': amanha.day == 1, 'ano': amanha.timetuple().tm_yday == 1}[passo]
+        parcial = fim == hoje and not ultimo_dia
+        if parcial:
+            rotulo += f' (até {hoje:%d/%m})'
+        barras.append({'inicio': ini.isoformat(), 'fim': fim.isoformat(), 'eixo': eixo, 'rotulo': rotulo,
+                       'parcial': bool(parcial),
+                       'quantidade': _r(sel.CONS_Q.sum(), 3), 'valor': _r(sel.CONS_V.sum(), 2)})
+    return {'codigo': int(codigo), 'passo': passo, 'barras': barras}
+
+
+def serie_item(codigo: int, filial: int | None, passo: str, hoje: date | None = None) -> dict:
+    if passo not in PASSOS_SERIE:
+        raise ValueError(f'passo deve ser um de: {", ".join(PASSOS_SERIE)}.')
+    hoje = hoje or date.today()
+    desde = periodos_serie(passo, hoje)[0][0]
+    mov = ler_movimento(filial, [int(codigo)], desde)
+    return montar_serie_item(mov, codigo, passo, hoje)
+
+
 # ── Edição ──────────────────────────────────────────────────────────────────
 # Duas seleções por filial: o PADRÃO (usuario vazio, só o gestor edita) e o painel de cada pessoa.
 # Quem ainda não personalizou vê o padrão; a 1ª mudança dele em "meu" copia o padrão para ele

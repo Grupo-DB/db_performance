@@ -222,3 +222,42 @@ class InsumosEdicaoTests(TestCase):
             r = self.cli(self.leitor).get('/catalogos/erp/almoxarifado/insumos/', {'dias': 90})
             self.assertEqual((r.status_code, r.data['pode_editar']), (200, False))
             self.assertEqual(self.cli(self.leitor).get('/catalogos/erp/almoxarifado/insumos/', {'dias': 7}).status_code, 400)
+
+
+class SerieItemTest(SimpleTestCase):
+    """Série do detalhe do item por semana / mês / ano (25/11/2026)."""
+
+    def _mov(self):
+        return pd.DataFrame([
+            {'ESTQ': 7, 'DIA': '2026-11-24', 'TIPO': 2, 'QUANT': -10, 'VALOR': -5},   # semana atual (seg 23/11)
+            {'ESTQ': 7, 'DIA': '2026-11-20', 'TIPO': 2, 'QUANT': -4, 'VALOR': -2},    # semana anterior
+            {'ESTQ': 7, 'DIA': '2026-10-05', 'TIPO': 2, 'QUANT': -1, 'VALOR': -1},
+            {'ESTQ': 7, 'DIA': '2025-03-01', 'TIPO': 2, 'QUANT': -100, 'VALOR': -50},
+            {'ESTQ': 7, 'DIA': '2026-11-24', 'TIPO': 1, 'QUANT': 999, 'VALOR': 999},  # entrada não conta
+            {'ESTQ': 8, 'DIA': '2026-11-24', 'TIPO': 2, 'QUANT': -50, 'VALOR': -50},  # outro item
+        ])
+
+    def test_semana(self):
+        r = ins.montar_serie_item(self._mov(), 7, 'semana', date(2026, 11, 25))
+        b = r['barras']
+        self.assertEqual(len(b), 12)
+        self.assertEqual(b[-1]['inicio'], '2026-11-23')
+        self.assertEqual(b[-1]['fim'], '2026-11-25')
+        self.assertTrue(b[-1]['parcial'])
+        self.assertEqual(b[-1]['quantidade'], 10)
+        self.assertEqual(b[-2]['quantidade'], 4)
+
+    def test_mes(self):
+        b = ins.montar_serie_item(self._mov(), 7, 'mes', date(2026, 11, 25))['barras']
+        self.assertEqual(len(b), 12)
+        self.assertEqual(b[0]['inicio'], '2025-12-01')
+        self.assertEqual(b[-1]['quantidade'], 14)
+        self.assertEqual(b[-2]['quantidade'], 1)
+        self.assertEqual(b[-1]['eixo'], 'nov/26')
+
+    def test_ano(self):
+        b = ins.montar_serie_item(self._mov(), 7, 'ano', date(2026, 11, 25))['barras']
+        self.assertEqual([x['eixo'] for x in b], ['2022', '2023', '2024', '2025', '2026'])
+        self.assertEqual(b[-2]['quantidade'], 100)
+        self.assertEqual(b[-1]['quantidade'], 15)
+        self.assertFalse(b[-2]['parcial'])
