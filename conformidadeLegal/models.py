@@ -774,3 +774,35 @@ class MatrizVinculoNorma(models.Model):
 
     class Meta:
         unique_together = [('item', 'norma')]
+
+
+class ComparativoRenovacao(models.Model):
+    """
+    Comparativo guardado entre a licença anterior e a nova (25/11/2026): retrato de como ficou cada
+    condicionante (igual / alterada / nova / removida) no momento em que a renovação foi aplicada,
+    com o texto de antes e de depois e o PDF gerado. Não muda se as condicionantes forem editadas
+    depois — é o registro da renovação (conformidadeLegal/renovacao.py).
+    """
+
+    norma = models.ForeignKey(Norma, on_delete=models.CASCADE, related_name='comparativos')
+    anterior = models.ForeignKey(Norma, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    # Os nomes ficam gravados: o comparativo continua legível se a anterior for apagada.
+    identificacao_nova = models.CharField(max_length=300, blank=True, default='')
+    identificacao_anterior = models.CharField(max_length=300, blank=True, default='')
+    contagem = models.JSONField(default=dict, blank=True)
+    capitulos = models.JSONField(default=dict, blank=True)
+    itens = models.JSONField(default=list, blank=True)
+    removidas = models.JSONField(default=list, blank=True)
+    arquivo = models.FileField(upload_to='conformidade/comparativos/%Y/', blank=True, default='')
+    criado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-criado_em', '-id']
+        verbose_name = 'Comparativo de renovação'
+        verbose_name_plural = 'Comparativos de renovação'
+
+    def __str__(self):
+        return f'{self.identificacao_anterior} → {self.identificacao_nova} ({self.criado_em:%d/%m/%Y})'

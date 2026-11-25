@@ -10,13 +10,13 @@ from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from kanban.models import KanbanColumn, KanbanTask
 
-from . import avisos, ia, importar_relatorio, matriz, normas_tecnicas, relatorio_anual, renovacao
+from . import avisos, comparativo, ia, importar_relatorio, matriz, normas_tecnicas, relatorio_anual, renovacao
 from .models import (
     TEMAS, ConfiguracaoMonitor, EvidenciaAnexo, ExecucaoMonitor, ExtracaoIA, MatrizItem, MatrizVinculo, MatrizVinculoNorma, Norma, OrgaoMonitor, PalavraChaveMonitor,
     PlanoAcao, PublicacaoMonitorada, Requisito, Terceiro, DocumentoTerceiro, Verificacao, ConfiguracaoAvisos,
@@ -263,6 +263,52 @@ class NormaViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             raise ValidationError({'detail': str(e)})
         return Response(r, status=status.HTTP_201_CREATED)
+
+    # ── Comparativo guardado da renovação (25/11/2026) ──────────────────────────
+    @staticmethod
+    def _comparativo_json(c, request):
+        from .serializers import nome_usuario
+        return {
+            'id': c.id, 'norma': c.norma_id, 'anterior': c.anterior_id,
+            'identificacao_nova': c.identificacao_nova, 'identificacao_anterior': c.identificacao_anterior,
+            'contagem': c.contagem, 'capitulos': c.capitulos, 'itens': c.itens, 'removidas': c.removidas,
+            'tem_pdf': bool(c.arquivo), 'criado_em': c.criado_em,
+            'criado_por_nome': nome_usuario(c.criado_por) if c.criado_por_id else None,
+        }
+
+    @action(detail=True, methods=['get', 'post'])
+    def comparativos(self, request, pk=None):
+        """GET: comparativos guardados desta licença nova (o mais recente primeiro). POST: gera um agora."""
+        norma = self.get_object()
+        if request.method == 'POST':
+            try:
+                c = comparativo.gerar(norma, request.user)
+            except ValueError as e:
+                raise ValidationError({'detail': str(e)})
+            return Response(self._comparativo_json(c, request), status=status.HTTP_201_CREATED)
+        lista = norma.comparativos.select_related('criado_por__colaborador')
+        return Response([self._comparativo_json(c, request) for c in lista])
+
+    @action(detail=True, methods=['get'], url_path=r'comparativos/(?P<cid>\d+)/pdf')
+    def comparativo_pdf(self, request, pk=None, cid=None):
+        """O PDF guardado do comparativo (refeito e guardado se faltar)."""
+        norma = self.get_object()
+        c = norma.comparativos.filter(pk=cid).first()
+        if c is None:
+            raise NotFound('Comparativo não encontrado.')
+        conteudo = None
+        if c.arquivo:
+            try:
+                with c.arquivo.open('rb') as f:
+                    conteudo = f.read()
+            except (FileNotFoundError, OSError):
+                conteudo = None
+        if conteudo is None:
+            conteudo = comparativo.salvar_pdf(c)
+        resposta = HttpResponse(conteudo, content_type='application/pdf')
+        resposta['Content-Disposition'] = f'attachment; filename="{comparativo.nome_arquivo(c)}"'
+        resposta['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return resposta
 
     @action(detail=True, methods=['post'], url_path='monitorar-nbr')
     def monitorar_nbr(self, request, pk=None):

@@ -344,8 +344,11 @@ def aplicar(norma, itens: list[dict], usuario, revogar_anterior: bool = True) ->
             anterior.observacao = f'{anterior.observacao}\n{nota}'.strip()
             anterior.save(update_fields=['situacao', 'observacao', 'atualizado_em'])
 
+    # Comparativo guardado (25/11/2026): retrato de como ficou a renovação + PDF.
+    from . import comparativo
+    comp = comparativo.gerar(norma, usuario)
     return {'criados': len(criados), 'herdados': herdados, 'com_resposta': com_resposta,
-            'anterior_revogada': anterior.situacao == 'REVOGADA', 'ids': criados}
+            'anterior_revogada': anterior.situacao == 'REVOGADA', 'ids': criados, 'comparativo': comp.id}
 
 
 def nova_versao(anterior, dados: dict, arquivo, usuario):

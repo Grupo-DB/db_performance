@@ -1920,6 +1920,47 @@ class RenovacaoLicencaTests(APITestCase):
         # Já aplicada: a comparação marca o que já existe na nova.
         self.assertTrue(all(i['ja_criado'] for i in self.client.get(f'/conformidadeLegal/normas/{nova.id}/renovacao/').data['itens']))
 
+    def test_comparativo_guardado_com_pdf(self):
+        from .models import ComparativoRenovacao, ExtracaoIA
+        nova = self._nova()
+        ex = ExtracaoIA.objects.create(norma=nova, status='CONCLUIDA', itens=[
+            {'referencia': '2.7', 'descricao': 'Atender as demais obrigações', 'tema': 'AMBIENTAL', 'periodicidade_meses': 12,
+             'trecho': 'Esta licença não exime o empreendedor do atendimento às demais obrigações legais;'},
+            {'referencia': '11.2', 'descricao': 'Monitorar águas', 'tema': 'AMBIENTAL', 'periodicidade_meses': 6,
+             'trecho': 'Deverá ser monitorada trimestralmente a qualidade das Águas Subsuperficiais e Superficiais.'},
+            {'referencia': '1.1', 'descricao': 'Revoga a LO', 'tema': 'AMBIENTAL', 'periodicidade_meses': 0,
+             'trecho': 'este documento REVOGA a LO nº 00893/2024 ≥ x'},
+        ])
+        itens = [{'indice': 0, 'herdar_de': self.r1.id, 'herdar_resposta': True, 'dados': ex.itens[0]},
+                 {'indice': 1, 'herdar_de': self.r2.id, 'herdar_resposta': False, 'dados': ex.itens[1]},
+                 {'indice': 2, 'herdar_de': None, 'herdar_resposta': False, 'dados': ex.itens[2]}]
+        r = self.client.post(f'/conformidadeLegal/normas/{nova.id}/renovacao/aplicar/', {'itens': itens}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        c = ComparativoRenovacao.objects.get(pk=r.data['comparativo'])
+        self.assertEqual(c.contagem, {'igual': 1, 'alterada': 1, 'nova': 1, 'removida': 0})
+        self.assertEqual(c.capitulos, {'1': '2', '10': '11'})
+        self.assertEqual([i['referencia'] for i in c.itens], ['1.1', '2.7', '11.2'])     # ordem da licença
+        alterada = next(i for i in c.itens if i['situacao'] == 'alterada')
+        self.assertEqual((alterada['anterior']['referencia'], alterada['resposta_herdada']), ('10.2', False))
+        self.assertTrue(next(i for i in c.itens if i['situacao'] == 'igual')['resposta_herdada'])
+        self.assertTrue(c.arquivo.name.endswith('.pdf'))
+
+        lista = self.client.get(f'/conformidadeLegal/normas/{nova.id}/comparativos/').data
+        self.assertEqual((len(lista), lista[0]['id'], lista[0]['tem_pdf']), (1, c.id, True))
+        pdf = self.client.get(f'/conformidadeLegal/normas/{nova.id}/comparativos/{c.id}/pdf/')
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(b''.join(pdf.streaming_content if pdf.streaming else [pdf.content]).startswith(b'%PDF'))
+
+        # Retrato: editar depois não muda o guardado; gerar de novo cria outro, com a removida.
+        Requisito.objects.filter(norma=nova, referencia='11.2').update(herdado_de=None)
+        r = self.client.post(f'/conformidadeLegal/normas/{nova.id}/comparativos/')
+        self.assertEqual((r.status_code, r.data['contagem']), (201, {'igual': 1, 'alterada': 0, 'nova': 2, 'removida': 1}))
+        self.assertEqual(r.data['removidas'][0]['referencia'], '10.2')
+        c.refresh_from_db()
+        self.assertEqual(c.contagem['alterada'], 1)
+        self.assertEqual(self.client.get(f'/conformidadeLegal/normas/{nova.id}/comparativos/999/pdf/').status_code, 404)
+        self.assertEqual(self.client.post(f'/conformidadeLegal/normas/{self.antiga.id}/comparativos/').status_code, 400)
+
     def test_par_invalido_e_repetido(self):
         from .models import ExtracaoIA
         nova = self._nova()
