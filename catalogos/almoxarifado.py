@@ -149,6 +149,8 @@ _SQL_FILIAIS = text("""
 # entra com saldo zero (LEFT JOIN) — conta como item do grupo, sem saldo.
 _SQL_ITENS = """
     SELECT ESTQCOD, ESTQNOME, ESTQREF, ESTQGALM, ESPSIGLA,
+           ESTQLOC1, ESTQLOC2, ESTQLOC3, ESTQLOC4,
+           QESTQLOC1, QESTQLOC2, QESTQLOC3, QESTQLOC4,
            COALESCE(QESTQFIL, -1)    FIL,
            COALESCE(QESTQESTOQUE, 0) SALDO,
            COALESCE(QESTQESTMIN, 0)  MINIMO,
@@ -440,9 +442,11 @@ def preparar_itens(itens: pd.DataFrame, grupos: pd.DataFrame,
         df['MIN_MANAGER'] = [k in minimos for k in chaves]
         df['MINIMO'] = [float(minimos[k]) if k in minimos else m for k, m in zip(chaves, df.MINIMO)]
 
+    df['LOCAL'] = localizacao(df)
+
     # Filiais somadas: saldo, mínimo e valor somam; custo vira médio ponderado.
     df = (df.groupby(['ESTQCOD', 'ESTQNOME', 'ESTQREF', 'ESTQGALM', 'ESPSIGLA'], dropna=False, as_index=False)
-            .agg(SALDO=('SALDO', 'sum'), MINIMO=('MINIMO', 'sum'), MINIMO_SGA=('MINIMO_SGA', 'sum'),
+            .agg(LOCAL=('LOCAL', _primeiro_local), SALDO=('SALDO', 'sum'), MINIMO=('MINIMO', 'sum'), MINIMO_SGA=('MINIMO_SGA', 'sum'),
                  MIN_MANAGER=('MIN_MANAGER', 'any'), MAXIMO=('MAXIMO', 'sum'), VALOR=('VALOR', 'sum')))
 
     df['GALM'] = df.ESTQGALM.map(lambda c: int(_num(c)))
@@ -650,6 +654,41 @@ def _contas(df: pd.DataFrame) -> dict:
     }
 
 
+def _texto_loc(v) -> str:
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ''
+    return str(v).strip()
+
+
+def localizacao(df: pd.DataFrame) -> pd.Series:
+    """Localização física do item no almoxarifado (25/11/2026), ex. "ALMOX CENTRAL · C2 · 09".
+
+    O SGA tem 4 níveis por filial (QESTQLOC1..4, quase vazio: 33 itens na filial 3)
+    e 4 gerais do item (ESTQLOC1..4, ~11,6 mil itens). Vale a da filial quando
+    preenchida; senão a geral.
+    """
+    def montar(cols):
+        if not all(c in df.columns for c in cols):
+            return pd.Series([''] * len(df), index=df.index)
+        res = pd.Series([''] * len(df), index=df.index, dtype=object)
+        for c in cols:
+            p = df[c].fillna('').astype(str).str.strip()
+            res = p.where(res == '', res + ' · ' + p).where(p != '', res)
+        return res
+    fil = montar(('QESTQLOC1', 'QESTQLOC2', 'QESTQLOC3', 'QESTQLOC4'))
+    ger = montar(('ESTQLOC1', 'ESTQLOC2', 'ESTQLOC3', 'ESTQLOC4'))
+    return fil.where(fil != '', ger)
+
+
+def _primeiro_local(s: pd.Series) -> str:
+    """Filiais somadas: a primeira localização não vazia."""
+    for v in s:
+        t = _texto_loc(v)
+        if t:
+            return t
+    return ''
+
+
 def _item(r) -> dict:
     falta = max(0.0, float(r.MINIMO) - float(r.SALDO))
     consumo = float(getattr(r, 'CONSUMO_DIA', 0.0) or 0.0)
@@ -670,6 +709,7 @@ def _item(r) -> dict:
         'grupo': r.RAIZ_NOME,
         'subgrupo': r.SUB_NOME,
         'grupo_item': getattr(r, 'GALM_NOME', r.SUB_NOME),
+        'localizacao': _texto_loc(getattr(r, 'LOCAL', '')),
         'saldo': round(float(r.SALDO), 3),
         # Já transferido para a FÁBRICA e ainda não consumido (fora do saldo acima).
         'saldo_fabrica': round(float(getattr(r, 'SALDO_FABRICA', 0.0) or 0.0), 3),
