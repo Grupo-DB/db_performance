@@ -437,3 +437,44 @@ def pecas_identificar(request, catalogo):
                                        str(request.data.get('equipamento') or '')[:200]))
     except ValueError as exc:
         return _erro(str(exc))
+
+
+
+@api_view(['GET'])
+def pecas_ficha(request, codigo):
+    if (erro := _acesso(request)):
+        return erro
+    try:
+        return Response(po.ficha_equipamento(codigo))
+    except ValueError as exc:
+        return _erro(str(exc), status.HTTP_404_NOT_FOUND)
+    except Exception:
+        logger.exception('peças: ficha do equipamento %s', codigo)
+        return _erro('Não foi possível ler o equipamento no SGA agora.', status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+@api_view(['GET', 'POST', 'DELETE'])
+def pecas_foto_equipamento(request, codigo):
+    if (erro := _acesso(request)):
+        return erro
+    if request.method in ('POST', 'DELETE'):
+        if not _tem(request.user, GRUPOS_LIGAR):
+            return _erro('Só o chefe da oficina ou o gestor trocam a foto do equipamento.', status.HTTP_403_FORBIDDEN)
+        if request.method == 'DELETE':
+            po.remover_foto_equipamento(codigo)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        try:
+            po.salvar_foto_equipamento(codigo, request.FILES.get('foto'), request.user)
+        except ValueError as exc:
+            return _erro(str(exc))
+        return Response(po.ficha_equipamento(codigo), status=status.HTTP_201_CREATED)
+    try:
+        jpg = po.foto_equipamento(codigo, request.GET.get('tam') or 'p')
+    except Exception:
+        logger.exception('peças: foto do equipamento %s', codigo)
+        jpg = None
+    if jpg is None:
+        return _erro('Equipamento sem foto.', status.HTTP_404_NOT_FOUND)
+    resp = HttpResponse(jpg, content_type='image/jpeg')
+    resp['Cache-Control'] = 'private, max-age=3600'
+    return resp

@@ -36,7 +36,8 @@ from . import almoxarifado as ax
 from . import pecas_catalogo as pc
 from . import pecas_ia, pecas_ocr
 from .models import (CatalogoPecas, ConjuntoPecas, DeParaPeca, EquipamentoPecas, ItemErpCatalogo, ItemKitPecas,
-                     ItemSolicitacaoPecas, KitPecas, NotificacaoPecas, PecaCatalogo, PreferenciaPecas, SolicitacaoPecas)
+                     FotoEquipamentoPecas, ItemSolicitacaoPecas, KitPecas, NotificacaoPecas, PecaCatalogo, PreferenciaPecas,
+                     SolicitacaoPecas)
 
 logger = logging.getLogger(__name__)
 
@@ -147,9 +148,12 @@ def caminho_desenho(conjunto: ConjuntoPecas) -> Path | None:
 # ---------------------------------------------------------------------------------------------------------
 
 _SQL_EQUIPAMENTOS = """
-SELECT E.EQPCOD, E.EQPNOME, E.EQPAUTOMTAG, E.EQPDADOS, T.TEQPNOME
+SELECT E.EQPCOD, E.EQPNOME, E.EQPAUTOMTAG, E.EQPDADOS, T.TEQPNOME, E.EQPPLACA, E.EQPCC, C.CCNOME, E.EQPANOFAB,
+       E.EQPPROPTERC, E.EQPKMSN, E.EQPHRSN,
+       CASE WHEN DATALENGTH(E.EQPDESENHO) > 100 THEN 1 ELSE 0 END AS FOTO_SGA
 FROM EQUIPAMENTO E
 LEFT JOIN TIPOEQUIPAMENTO T ON T.TEQPCOD = E.EQPTEQP
+LEFT JOIN CENTROCUSTO C ON C.CCCOD = E.EQPCC
 WHERE ISNULL(E.EQPINATIVO, 'N') <> 'S'
 """
 
@@ -196,9 +200,18 @@ def equipamentos_sga() -> list[dict]:
             if not nome:
                 continue
             dados = texto_dados(r.EQPDADOS)
+            ano = getattr(r, 'EQPANOFAB', None)
+            ano = ano.year if hasattr(ano, 'year') and ano.year > 1950 else None  # 1899-12-30 é o "vazio" do SGA
             out.append({
                 'codigo': int(r.EQPCOD), 'nome': nome, 'tag': str(r.EQPAUTOMTAG or '').strip(),
                 'tipo': str(r.TEQPNOME or '').strip(), 'dados': dados[:1500], 'serie_sugerida': sugerir_serie(dados),
+                'placa': str(getattr(r, 'EQPPLACA', '') or '').strip(),
+                'centro_custo': str(getattr(r, 'CCNOME', '') or '').strip(),
+                'ano_fabricacao': ano,
+                'terceiro': str(getattr(r, 'EQPPROPTERC', '') or '').strip().upper() == 'T',
+                'medidor': 'horimetro' if str(getattr(r, 'EQPHRSN', '') or '').upper() == 'S'
+                           else 'km' if str(getattr(r, 'EQPKMSN', '') or '').upper() == 'S' else '',
+                'foto_sga': bool(getattr(r, 'FOTO_SGA', 0)),
             })
         out.sort(key=lambda e: e['nome'])
         return out
@@ -212,10 +225,11 @@ def equipamento_sga(codigo: int) -> dict | None:
 def lista_equipamentos() -> list[dict]:
     """Ativos do SGA + o que o Manager sabe (catálogo/série). Ligados primeiro."""
     ligados = {e.equipamento: e for e in EquipamentoPecas.objects.select_related('catalogo')}
+    fotos = set(FotoEquipamentoPecas.objects.values_list('equipamento', flat=True))
     out = []
     for e in equipamentos_sga():
         lig = ligados.get(e['codigo'])
-        out.append({**e, **_ligacao(lig)})
+        out.append({**e, **_ligacao(lig), 'tem_foto': e['codigo'] in fotos or bool(e.get('foto_sga'))})
     out.sort(key=lambda e: (e['catalogo'] is None, e['nome']))
     return out
 
@@ -1253,4 +1267,143 @@ def identificar(cat: CatalogoPecas, foto, texto: str, serie: int | None, equipam
         'conjuntos': [{'id': por_codigo[c['codigo']].id, 'codigo': c['codigo'], 'nome': por_codigo[c['codigo']].nome,
                        'motivo': c['motivo']} for c in (ia['conjuntos'] if ia else []) if c['codigo'] in por_codigo],
         'pecas': [pecas[i] for i in ordem],
+    }
+
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Ficha do equipamento: foto, horímetro, preventivas, pedidos (26/11/2026)
+# ---------------------------------------------------------------------------------------------------------
+
+PASTA_FOTOS = PASTA / 'equipamentos'
+TAMANHOS_FOTO = {'p': 480, 'g': 1400}
+FOTO_EQP_MAX_MB = 15
+
+
+def _arquivo_foto(codigo: int, tam: str) -> Path:
+    return PASTA_FOTOS / f'{int(codigo)}_{tam}.jpg'
+
+
+def _limpar_cache_foto(codigo: int) -> None:
+    for tam in TAMANHOS_FOTO:
+        _arquivo_foto(codigo, tam).unlink(missing_ok=True)
+
+
+def _para_jpeg(bruto: bytes, lado: int) -> bytes:
+    """Qualquer formato que o Pillow abre (o SGA guarda BMP de até 4 MB) → JPEG com o lado maior em `lado`."""
+    import io
+    from PIL import Image, ImageOps
+    img = Image.open(io.BytesIO(bruto))
+    img = ImageOps.exif_transpose(img)  # foto de celular deitada
+    img.thumbnail((lado, lado))
+    if img.mode not in ('RGB', 'L'):
+        img = img.convert('RGB')
+    out = io.BytesIO()
+    img.save(out, 'JPEG', quality=82, optimize=True)
+    return out.getvalue()
+
+
+def _foto_sga(codigo: int) -> bytes | None:
+    df = ax._ler(f'SELECT EQPDESENHO FROM EQUIPAMENTO WHERE EQPCOD = {int(codigo)}')
+    if df.empty or df.iloc[0, 0] is None:
+        return None
+    bruto = bytes(df.iloc[0, 0])
+    return bruto if len(bruto) > 100 else None
+
+
+def foto_equipamento(codigo: int, tam: str = 'p') -> bytes | None:
+    """JPEG da foto: a enviada no Manager vale mais que a do SGA. Convertida uma vez e guardada em disco."""
+    tam = tam if tam in TAMANHOS_FOTO else 'p'
+    pronto = _arquivo_foto(codigo, tam)
+    if pronto.exists():
+        return pronto.read_bytes()
+    bruto = None
+    reg = FotoEquipamentoPecas.objects.filter(equipamento=codigo).first()
+    if reg is not None:
+        original = PASTA / reg.arquivo
+        if original.exists():
+            bruto = original.read_bytes()
+    if bruto is None:
+        e = equipamento_sga(codigo)
+        if not e or not e.get('foto_sga'):
+            return None
+        bruto = _foto_sga(codigo)
+        if bruto is None:
+            return None
+    jpg = _para_jpeg(bruto, TAMANHOS_FOTO[tam])
+    PASTA_FOTOS.mkdir(parents=True, exist_ok=True)
+    pronto.write_bytes(jpg)
+    return jpg
+
+
+def salvar_foto_equipamento(codigo: int, arquivo, usuario: User) -> None:
+    if equipamento_sga(codigo) is None:
+        raise ValueError('Equipamento não encontrado (ou inativo) no SGA.')
+    if arquivo is None:
+        raise ValueError('Escolha a foto.')
+    if arquivo.size > FOTO_EQP_MAX_MB * 1024 * 1024:
+        raise ValueError(f'A foto passa de {FOTO_EQP_MAX_MB} MB.')
+    bruto = arquivo.read()
+    try:
+        jpg = _para_jpeg(bruto, 2000)  # o original guardado já reduzido: confere que é imagem e economiza disco
+    except Exception:
+        raise ValueError('O arquivo não é uma imagem (use JPG ou PNG).')
+    PASTA_FOTOS.mkdir(parents=True, exist_ok=True)
+    nome = f'{int(codigo)}_original.jpg'
+    (PASTA_FOTOS / nome).write_bytes(jpg)
+    FotoEquipamentoPecas.objects.update_or_create(
+        equipamento=codigo, defaults={'arquivo': str((PASTA_FOTOS / nome).relative_to(PASTA)), 'enviado_por': usuario})
+    _limpar_cache_foto(codigo)
+
+
+def remover_foto_equipamento(codigo: int) -> None:
+    reg = FotoEquipamentoPecas.objects.filter(equipamento=codigo).first()
+    if reg is not None:
+        (PASTA / reg.arquivo).unlink(missing_ok=True)
+        reg.delete()
+    _limpar_cache_foto(codigo)
+
+
+def _horimetro_e_preventivas(codigo: int) -> tuple[dict | None, list[dict]]:
+    """Reaproveita o Combustível: horímetro confirmado pelos abastecimentos e a próxima preventiva por plano."""
+    from combustivel import erp as cerp
+    from combustivel import lubrificacao
+    from combustivel.views import _leituras_horimetro
+    hoje = timezone.localdate()
+    leituras = [l for l in _leituras_horimetro(hoje - timedelta(days=120), hoje) if l.get('equipamento') == codigo]
+    atual = lubrificacao.horimetros(leituras).get(codigo)
+    pend = lubrificacao.pendentes()
+    pend = {**pend, 'planos': [p for p in pend['planos'] if p['equipamento'] == codigo]}
+    planos = lubrificacao.preventivas(pend, {codigo: atual} if atual else {}, cerp.mapa_equipamentos(), hoje)
+    return atual, [{k: p.get(k) for k in ('plano_nome', 'periodo', 'proxima_h', 'restante', 'previsao', 'situacao', 'data_ultima')}
+                   for p in planos]
+
+
+def ficha_equipamento(codigo: int) -> dict:
+    e = equipamento_sga(codigo)
+    if e is None:
+        raise ValueError('Equipamento não encontrado (ou inativo) no SGA.')
+    lig = EquipamentoPecas.objects.select_related('catalogo').filter(equipamento=codigo).first()
+    reg_foto = FotoEquipamentoPecas.objects.select_related('enviado_por').filter(equipamento=codigo).first()
+    horimetro, preventivas, aviso = None, [], ''
+    try:
+        horimetro, preventivas = _horimetro_e_preventivas(codigo)
+    except Exception:  # noqa: BLE001 — SGA fora: a ficha abre sem esses números
+        logger.exception('peças: horímetro/preventivas do equipamento %s', codigo)
+        aviso = 'Horímetro e preventivas indisponíveis agora (SGA não respondeu).'
+    sols = SolicitacaoPecas.objects.filter(equipamento=codigo)
+    abertas = sols.filter(status__in=('aberta', 'em_compra'))
+    ultima = sols.order_by('-criado_em').first()
+    return {
+        **e, **_ligacao(lig),
+        'tem_foto': reg_foto is not None or bool(e.get('foto_sga')),
+        'foto_origem': 'manager' if reg_foto else ('sga' if e.get('foto_sga') else ''),
+        'foto_enviada_por': nome_usuario(reg_foto.enviado_por) if reg_foto else '',
+        'horimetro': horimetro,
+        'preventivas': preventivas,
+        'solicitacoes_abertas': abertas.count(),
+        'urgentes_abertas': abertas.filter(urgente=True).count(),
+        'solicitacoes_12m': sols.filter(criado_em__gte=timezone.now() - timedelta(days=365)).exclude(status='cancelada').count(),
+        'ultima_solicitacao': ultima.criado_em.isoformat() if ultima else None,
+        'aviso': aviso,
     }

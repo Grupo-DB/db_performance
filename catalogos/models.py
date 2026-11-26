@@ -651,3 +651,12 @@ class PreferenciaPecas(models.Model):
     usuario = models.OneToOneField(User, on_delete=models.CASCADE, related_name='preferencia_pecas')
     whatsapp = models.CharField(max_length=20, blank=True, default='')
     avisar_whatsapp = models.BooleanField(default=False)
+
+
+
+class FotoEquipamentoPecas(models.Model):
+    """Foto do equipamento tirada pelo Manager (26/11/2026): só 17 dos 986 ativos têm imagem no SGA (EQPDESENHO)."""
+    equipamento = models.IntegerField(unique=True, help_text='EQPCOD do SGA')
+    arquivo = models.CharField(max_length=255, help_text='JPEG em privado/catalogos_pecas/equipamentos/')
+    enviado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    enviado_em = models.DateTimeField(auto_now=True)

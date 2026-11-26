@@ -1033,7 +1033,8 @@ def almoxarifado_catalogo_item(request, cod):
     """Para onde foi o item: baixas no período (?desde&ate&cc&eqp&req&filial), por destino e por mês."""
     from . import almox_catalogo
 
-    if (erro := _almox_acesso(request, tela='catalogo')):
+    # 26/11/2026: a Peças da Oficina consulta compras e saídas da peça por aqui (chefe da oficina não tem o Catálogo).
+    if (erro := _almox_acesso(request, tela='catalogo')) and _almox_acesso(request, tela='pecas'):
         return erro
     filial, erro = _almox_filial(request.GET.get('filial'))
     if erro:

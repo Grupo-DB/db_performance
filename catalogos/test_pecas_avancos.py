@@ -346,3 +346,86 @@ class RevisaoIdentificarTests(Base):
         self.assertEqual(r.data['conjuntos'][0]['id'], self.cj.id)
         txt = SimpleUploadedFile('p.txt', b'x', content_type='text/plain')
         self.assertEqual(self.cli(self.oficina).post(url, {'foto': txt}, format='multipart').status_code, 400)
+
+
+class FichaEquipamentoTests(Base):
+    def setUp(self):
+        super().setUp()
+        self.tmp = tempfile.mkdtemp()
+        self.p_pasta = mock.patch.object(po, 'PASTA', Path(self.tmp))
+        self.p_fotos = mock.patch.object(po, 'PASTA_FOTOS', Path(self.tmp) / 'equipamentos')
+        self.p_pasta.start()
+        self.p_fotos.start()
+
+    def tearDown(self):
+        self.p_pasta.stop()
+        self.p_fotos.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        super().tearDown()
+
+    def _png(self):
+        import io
+        from PIL import Image
+        b = io.BytesIO()
+        Image.new('RGB', (3000, 1500), (200, 30, 30)).save(b, 'PNG')
+        return SimpleUploadedFile('eqp.png', b.getvalue(), content_type='image/png')
+
+    def test_ficha_com_horimetro_e_preventiva(self):
+        self.solicitar(urgente=True)
+        hor = {'horimetro': 12345.6, 'data': '2026-11-20', 'origem': 'SGA', 'por_dia': 14.2}
+        prev = [{'plano_nome': 'PREVENTIVA 500H', 'periodo': 500, 'proxima_h': 12500, 'restante': 154.4,
+                 'previsao': '2026-12-07', 'situacao': 'EM_DIA', 'data_ultima': '2026-10-01'}]
+        with mock.patch.object(po, '_horimetro_e_preventivas', return_value=(hor, prev)):
+            r = self.cli(self.oficina).get(f'{BASE}equipamentos/528/ficha/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((r.data['horimetro']['horimetro'], r.data['preventivas'][0]['situacao']), (12345.6, 'EM_DIA'))
+        self.assertEqual((r.data['solicitacoes_abertas'], r.data['urgentes_abertas'], r.data['tem_foto']), (1, 1, False))
+        with mock.patch.object(po, '_horimetro_e_preventivas', side_effect=RuntimeError('sga fora')):
+            r = self.cli(self.oficina).get(f'{BASE}equipamentos/528/ficha/')
+        self.assertEqual((r.status_code, r.data['horimetro']), (200, None))
+        self.assertIn('indisponíveis', r.data['aviso'])
+        self.assertEqual(self.cli(self.oficina).get(f'{BASE}equipamentos/999/ficha/').status_code, 404)
+
+    def test_enviar_ver_e_remover_foto(self):
+        url = f'{BASE}equipamentos/528/foto/'
+        self.assertEqual(self.cli(self.oficina).get(url).status_code, 404)
+        self.assertEqual(self.cli(self.comprador).post(url, {'foto': self._png()}, format='multipart').status_code, 403)
+        with mock.patch.object(po, '_horimetro_e_preventivas', return_value=(None, [])):
+            r = self.cli(self.oficina).post(url, {'foto': self._png()}, format='multipart')
+        self.assertEqual((r.status_code, r.data['tem_foto'], r.data['foto_origem']), (201, True, 'manager'))
+        r = self.cli(self.oficina).get(url, {'tam': 'p'})
+        self.assertEqual((r.status_code, r['Content-Type']), (200, 'image/jpeg'))
+        from PIL import Image
+        import io
+        self.assertEqual(max(Image.open(io.BytesIO(r.content)).size), 480)
+        self.assertTrue(po.lista_equipamentos()[0]['tem_foto'])
+        txt = SimpleUploadedFile('x.png', b'nao sou imagem', content_type='image/png')
+        self.assertEqual(self.cli(self.oficina).post(url, {'foto': txt}, format='multipart').status_code, 400)
+        self.assertEqual(self.cli(self.oficina).delete(url).status_code, 204)
+        self.assertEqual(self.cli(self.oficina).get(url).status_code, 404)
+
+    def test_foto_do_sga_em_bmp_vira_jpeg(self):
+        import io
+        from PIL import Image
+        b = io.BytesIO()
+        Image.new('RGB', (800, 600), (0, 90, 200)).save(b, 'BMP')
+        equips = [{**EQUIPS[0], 'foto_sga': True}]
+        with mock.patch.object(po, 'equipamentos_sga', return_value=equips), \
+                mock.patch.object(po, '_foto_sga', return_value=b.getvalue()) as sga:
+            jpg = po.foto_equipamento(528, 'g')
+            self.assertEqual(Image.open(io.BytesIO(jpg)).format, 'JPEG')
+            po.foto_equipamento(528, 'g')  # 2ª vez sai do disco
+        sga.assert_called_once()
+
+
+class ConsultaItemSgaTests(Base):
+    """26/11/2026: a oficina consulta compras e saídas da peça pelo endpoint do Catálogo de Itens."""
+
+    def test_oficina_ve_o_item_mas_quem_nao_tem_peca_nem_catalogo_nao(self):
+        from catalogos import almox_catalogo
+        with mock.patch.object(almox_catalogo, 'detalhe', return_value={'item': {'codigo': 1}}):
+            r = self.cli(self.oficina).get('/catalogos/erp/almoxarifado/catalogo/1/')
+            self.assertEqual(r.status_code, 200, r.content)
+            outro = User.objects.create(username='outro')
+            r = self.cli(outro).get('/catalogos/erp/almoxarifado/catalogo/1/')
+            self.assertEqual(r.status_code, 403)
