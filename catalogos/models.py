@@ -446,6 +446,11 @@ class CatalogoPecas(models.Model):
     paginas = models.PositiveIntegerField(default=0)
     importado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     importado_em = models.DateTimeField(auto_now=True)
+    # 26/11/2026: o PDF sobe pela tela e é lido em segundo plano (Celery); a tela acompanha pela situação.
+    STATUS_CHOICES = (('pronto', 'Pronto'), ('importando', 'Importando'), ('erro', 'Erro'))
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='pronto')
+    erro = models.TextField(blank=True, default='', help_text='Falha da última importação (o catálogo anterior fica)')
+    enviado_em = models.DateTimeField(null=True, blank=True, help_text='Quando o último PDF foi enviado')
 
     class Meta:
         verbose_name = 'Catálogo de peças do fabricante'

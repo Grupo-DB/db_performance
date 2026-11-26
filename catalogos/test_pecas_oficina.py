@@ -1,10 +1,16 @@
 """26/11/2026 — Peças da Oficina: leitura do catálogo do fabricante e solicitações do chefe da oficina."""
 import importlib
+import shutil
+import tempfile
+from datetime import timedelta
+from pathlib import Path
 from unittest import mock
 
 from django.apps import apps as django_apps
 from django.contrib.auth.models import Group, User
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from catalogos import pecas_catalogo as pc
@@ -260,3 +266,126 @@ class MigrationTests(TestCase):
         Group.objects.filter(name='comprasOficina').delete()
         mig.criar_grupo(django_apps, None)
         self.assertTrue(Group.objects.filter(name='comprasOficina').exists())
+
+
+PDF_FALSO = b'%PDF-1.4 catalogo de teste'
+
+
+def _ler_pdf_falso(_caminho):
+    return pc.ler_paginas_xml(_pagina(linhas=[
+        {'fig': '0', 'codigo': '218004461', 'qtd': '01', 'descricao': 'CAPO COMPLETO', 'inicio': '233', 'fim': '233'},
+    ]))
+
+
+def _desenho_falso(_pdf, _pagina, _larg, _y, destino):
+    Path(destino).write_bytes(b'jpg')
+
+
+class EnvioCatalogoTests(TestCase):
+    """26/11/2026 — o PDF do catálogo sobe pela tela e é lido em segundo plano."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.oficina = User.objects.create(username='oficina')
+        self.oficina.groups.add(Group.objects.get_or_create(name='comprasOficina')[0])
+        self.comprador = User.objects.create(username='comprador')
+        self.comprador.groups.add(Group.objects.get_or_create(name='comprasComprador')[0])
+        self.patches = [
+            mock.patch.object(po, 'PASTA', Path(self.tmp)),
+            mock.patch.object(pc, 'tem_poppler', return_value=True),
+            mock.patch.object(pc, 'ler_pdf', side_effect=_ler_pdf_falso),
+            mock.patch.object(pc, 'renderizar_desenho', side_effect=_desenho_falso),
+            # Celery síncrono: o .delay roda a importação na hora.
+            mock.patch('catalogos.tasks.importar_catalogo_pecas.delay', side_effect=po.executar_importacao),
+        ]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def cli(self, u):
+        c = APIClient()
+        c.force_authenticate(u)
+        return c
+
+    def enviar(self, u, url=f'{BASE}catalogos/', conteudo=PDF_FALSO, **campos):
+        arq = SimpleUploadedFile('RK430.pdf', conteudo, content_type='application/pdf')
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.cli(u).post(url, {'pdf': arq, **campos}, format='multipart')
+
+    def test_envia_e_importa_em_segundo_plano(self):
+        r = self.enviar(self.oficina, fabricante='Randon')
+        self.assertEqual(r.status_code, 202)
+        self.assertEqual(r.data['status'], 'importando')
+        cat = CatalogoPecas.objects.get(pk=r.data['id'])
+        self.assertEqual((cat.status, cat.nome, cat.fabricante, cat.erro), ('pronto', 'RK 430M DC13', 'Randon', ''))
+        self.assertEqual(cat.conjuntos.count(), 1)
+        self.assertTrue(cat.conjuntos.get().desenho)
+        self.assertFalse((Path(self.tmp) / str(cat.pk) / 'enviado.pdf').exists())
+        self.assertTrue((Path(self.tmp) / str(cat.pk) / 'catalogo.pdf').exists())
+        lista = self.cli(self.oficina).get(f'{BASE}catalogos/').data
+        self.assertEqual((lista[0]['status'], lista[0]['conjuntos']), ('pronto', 1))
+        self.assertTrue(self.cli(self.oficina).get(BASE).data['pode_importar'])
+
+    def test_quem_pode_e_o_que_aceita(self):
+        self.assertEqual(self.enviar(self.comprador).status_code, 403)
+        self.assertFalse(self.cli(self.comprador).get(BASE).data['pode_importar'])
+        r = self.enviar(self.oficina, conteudo=b'nao sou pdf')
+        self.assertEqual((r.status_code, r.data['erro']), (400, 'O arquivo não é um PDF.'))
+        r = self.cli(self.oficina).post(f'{BASE}catalogos/', {}, format='multipart')
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(CatalogoPecas.objects.exists())
+
+    def test_pdf_sem_pagina_de_pecas_vira_erro(self):
+        with mock.patch.object(pc, 'ler_pdf', return_value=pc.ler_paginas_xml(_indice())):
+            r = self.enviar(self.oficina, nome='Volvo A30')
+        cat = CatalogoPecas.objects.get(pk=r.data['id'])
+        self.assertEqual((cat.status, cat.nome), ('erro', 'Volvo A30'))
+        self.assertIn('Nenhuma página de peças', cat.erro)
+
+    def test_nova_edicao_que_falha_mantem_a_anterior(self):
+        cat = CatalogoPecas.objects.get(pk=self.enviar(self.oficina).data['id'])
+        with mock.patch.object(pc, 'ler_pdf', side_effect=RuntimeError('pdf quebrado')):
+            r = self.enviar(self.oficina, url=f'{BASE}catalogos/{cat.pk}/pdf/', edicao='2020')
+        self.assertEqual(r.status_code, 202)
+        cat.refresh_from_db()
+        self.assertEqual((cat.status, cat.erro, cat.edicao), ('pronto', 'Não foi possível ler este PDF.', '2020'))
+        self.assertEqual(cat.conjuntos.count(), 1)
+
+    def test_celery_fora_le_numa_thread(self):
+        class ThreadNaHora:
+            def __init__(self, target, args, daemon):
+                self.target, self.args = target, args
+
+            def start(self):
+                self.target(*self.args)
+
+        with mock.patch('catalogos.tasks.importar_catalogo_pecas.delay', side_effect=ConnectionError('redis')), \
+                mock.patch.object(po.threading, 'Thread', ThreadNaHora):
+            r = self.enviar(self.oficina)
+        self.assertEqual(CatalogoPecas.objects.get(pk=r.data['id']).status, 'pronto')
+
+    def test_importacao_travada_libera_reenvio(self):
+        cat = CatalogoPecas.objects.create(nome='X', status='importando',
+                                           enviado_em=timezone.now() - timedelta(hours=1))
+        self.assertEqual(self.cli(self.oficina).get(f'{BASE}catalogos/').data[0]['status'], 'erro')
+        self.assertEqual(self.enviar(self.oficina, url=f'{BASE}catalogos/{cat.pk}/pdf/').status_code, 202)
+        recente = CatalogoPecas.objects.create(nome='Y', status='importando', enviado_em=timezone.now())
+        r = self.enviar(self.oficina, url=f'{BASE}catalogos/{recente.pk}/pdf/')
+        self.assertEqual(r.status_code, 400)
+
+    def test_renomeia_e_exclui(self):
+        cat = CatalogoPecas.objects.get(pk=self.enviar(self.oficina).data['id'])
+        EquipamentoPecas.objects.create(equipamento=528, catalogo=cat, serie=300)
+        r = self.cli(self.oficina).patch(f'{BASE}catalogos/{cat.pk}/', {'nome': 'RK 430M', 'edicao': '2014'},
+                                         format='json')
+        self.assertEqual((r.status_code, r.data['nome'], r.data['edicao']), (200, 'RK 430M', '2014'))
+        self.assertEqual(self.cli(self.oficina).patch(f'{BASE}catalogos/{cat.pk}/', {'nome': ' '},
+                                                      format='json').status_code, 400)
+        self.assertEqual(self.cli(self.comprador).delete(f'{BASE}catalogos/{cat.pk}/').status_code, 403)
+        self.assertEqual(self.cli(self.oficina).delete(f'{BASE}catalogos/{cat.pk}/').status_code, 204)
+        self.assertFalse((Path(self.tmp) / str(cat.pk)).exists())
+        self.assertIsNone(EquipamentoPecas.objects.get(equipamento=528).catalogo)

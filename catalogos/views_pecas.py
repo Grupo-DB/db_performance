@@ -18,6 +18,8 @@ GRUPOS_TRATAR = {'Admin', 'Master', 'comprasGestor', 'comprasComprador'}
 GRUPOS_LIGAR = {'Admin', 'Master', 'comprasGestor', 'comprasOficina'}
 # Faz pedido (os outros com acesso à tela só consultam).
 GRUPOS_PEDIR = {'Admin', 'Master', 'comprasGestor', 'comprasOficina'}
+# Envia, renomeia e exclui catálogo de fabricante (PDF) pela tela.
+GRUPOS_IMPORTAR = {'Admin', 'Master', 'comprasGestor', 'comprasOficina'}
 
 
 def _tem(user, grupos) -> bool:
@@ -47,6 +49,8 @@ def pecas_inicio(request):
         'pode_tratar': _tem(u, GRUPOS_TRATAR),
         'pode_ligar': _tem(u, GRUPOS_LIGAR),
         'pode_pedir': _tem(u, GRUPOS_PEDIR),
+        'pode_importar': _tem(u, GRUPOS_IMPORTAR),
+        'pdf_max_mb': po.PDF_MAX_MB,
         'usuario_id': u.id,
     })
 
@@ -73,6 +77,61 @@ def pecas_equipamento(request, codigo):
                                              request.user))
     except ValueError as exc:
         return _erro(str(exc))
+
+
+def _pode_importar(request):
+    if (erro := _acesso(request)):
+        return erro
+    if not _tem(request.user, GRUPOS_IMPORTAR):
+        return _erro('Só o chefe da oficina ou o gestor enviam catálogo.', status.HTTP_403_FORBIDDEN)
+    return None
+
+
+@api_view(['GET', 'POST'])
+def pecas_catalogos(request):
+    """GET: catálogos com a situação (a tela consulta enquanto importa). POST multipart: pdf, nome, fabricante, edicao."""
+    if request.method == 'GET':
+        if (erro := _acesso(request)):
+            return erro
+        return Response(po.catalogos())
+    if (erro := _pode_importar(request)):
+        return erro
+    try:
+        cat = po.enviar_catalogo(request.FILES.get('pdf'), request.data, request.user)
+    except ValueError as exc:
+        return _erro(str(exc))
+    return Response(po.catalogo_dict(cat), status=status.HTTP_202_ACCEPTED)
+
+
+@api_view(['PATCH', 'DELETE'])
+def pecas_catalogo(request, pk):
+    if (erro := _pode_importar(request)):
+        return erro
+    cat = CatalogoPecas.objects.filter(pk=pk).first()
+    if cat is None:
+        return _erro('Catálogo não encontrado.', status.HTTP_404_NOT_FOUND)
+    if request.method == 'DELETE':
+        po.excluir_catalogo(cat)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    try:
+        return Response(po.catalogo_dict(po.editar_catalogo(cat, request.data)))
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+@api_view(['POST'])
+def pecas_catalogo_pdf(request, pk):
+    """Nova edição: reenvia o PDF de um catálogo existente (equipamentos ligados continuam ligados)."""
+    if (erro := _pode_importar(request)):
+        return erro
+    cat = CatalogoPecas.objects.filter(pk=pk).first()
+    if cat is None:
+        return _erro('Catálogo não encontrado.', status.HTTP_404_NOT_FOUND)
+    try:
+        cat = po.enviar_catalogo(request.FILES.get('pdf'), request.data, request.user, catalogo=cat)
+    except ValueError as exc:
+        return _erro(str(exc))
+    return Response(po.catalogo_dict(cat), status=status.HTTP_202_ACCEPTED)
 
 
 @api_view(['GET'])

@@ -2,7 +2,9 @@
 Peças da oficina (26/11/2026) — o chefe da oficina pede peças a partir do catálogo oficial do fabricante.
 
 Fluxo:
-1. O catálogo em PDF é importado uma vez (`manage.py importar_catalogo_pecas`), ver pecas_catalogo.py.
+1. O catálogo em PDF sobe pela própria tela (gestor ou chefe da oficina) e é lido em segundo plano no Celery
+   (`enviar_catalogo` → tasks.importar_catalogo_pecas → `executar_importacao`); o comando
+   `manage.py importar_catalogo_pecas` faz o mesmo pelo terminal. Leitura em pecas_catalogo.py.
 2. O chefe escolhe o equipamento do SGA (EQUIPAMENTO, ativos) e liga a um catálogo + número de série
    (EquipamentoPecas). O SGA não tem campo de modelo/série: está no texto livre "Dados Técnicos"
    (EQUIPAMENTO.EQPDADOS), que a tela mostra para ele conferir.
@@ -18,7 +20,8 @@ Isso é sugestão: o pedido guarda o código e a descrição do fabricante, e o 
 import logging
 import re
 import shutil
-from datetime import datetime
+import threading
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -26,6 +29,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import Count, Max
+from django.utils import timezone
 
 from . import almoxarifado as ax
 from . import pecas_catalogo as pc
@@ -68,6 +72,8 @@ def importar(caminho_pdf, nome: str = '', fabricante: str = '', edicao: str = ''
             catalogo.conjuntos.all().delete()
             if nome:
                 catalogo.nome = nome
+            elif not catalogo.nome:  # enviado pela tela sem nome: usa o modelo escrito nas páginas
+                catalogo.nome = (lido['modelo'] or 'Catálogo')[:120]
             if fabricante:
                 catalogo.fabricante = fabricante
             if edicao:
@@ -80,6 +86,7 @@ def importar(caminho_pdf, nome: str = '', fabricante: str = '', edicao: str = ''
             shutil.copyfile(caminho_pdf, destino_pdf)
         catalogo.arquivo = str(destino_pdf.relative_to(PASTA))
         catalogo.paginas = len(paginas)
+        catalogo.status, catalogo.erro = 'pronto', ''
         catalogo.save()
         pecas = []
         for ordem, (codigo, cj) in enumerate(lido['conjuntos'].items()):
@@ -222,10 +229,127 @@ def ligar_equipamento(codigo: int, catalogo_id: int | None, serie, usuario: User
 # Catálogo para a tela
 # ---------------------------------------------------------------------------------------------------------
 
+def _status(c: CatalogoPecas) -> tuple[str, str]:
+    """Importação que passou do prazo (worker caiu, servidor reiniciou) aparece como erro, para dar para reenviar."""
+    if c.status == 'importando' and c.enviado_em and timezone.now() - c.enviado_em > IMPORTACAO_TRAVADA:
+        return ('pronto' if c.n_conjuntos else 'erro'), 'A importação não terminou (o servidor pode ter reiniciado). Envie o PDF de novo.'
+    return c.status, c.erro
+
+
+def catalogo_dict(c: CatalogoPecas) -> dict:
+    if not hasattr(c, 'n_conjuntos'):
+        c.n_conjuntos = c.conjuntos.count()
+    st, erro = _status(c)
+    return {'id': c.id, 'nome': c.nome or 'Catálogo novo', 'fabricante': c.fabricante, 'edicao': c.edicao,
+            'conjuntos': c.n_conjuntos, 'paginas': c.paginas, 'status': st, 'erro': erro,
+            'importado_em': c.importado_em.isoformat(),
+            'enviado_em': c.enviado_em.isoformat() if c.enviado_em else None,
+            'importado_por': nome_usuario(c.importado_por)}
+
+
 def catalogos() -> list[dict]:
-    return [{'id': c.id, 'nome': c.nome, 'fabricante': c.fabricante, 'edicao': c.edicao,
-             'conjuntos': c.n_conjuntos, 'importado_em': c.importado_em.isoformat()}
-            for c in CatalogoPecas.objects.annotate(n_conjuntos=Count('conjuntos'))]
+    return [catalogo_dict(c) for c in
+            CatalogoPecas.objects.select_related('importado_por').annotate(n_conjuntos=Count('conjuntos'))]
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Envio pela tela (26/11/2026): o PDF sobe, a leitura roda no Celery e a tela acompanha pela situação
+# ---------------------------------------------------------------------------------------------------------
+
+PDF_MAX_MB = 200
+IMPORTACAO_TRAVADA = timedelta(minutes=30)
+_ENVIADO = 'enviado.pdf'
+
+
+def _texto(dados, campo: str, limite: int) -> str | None:
+    v = dados.get(campo)
+    return None if v is None else str(v).strip()[:limite]
+
+
+def enviar_catalogo(arquivo, dados, usuario: User, catalogo: CatalogoPecas | None = None) -> CatalogoPecas:
+    """Grava o PDF enviado e dispara a leitura. `catalogo` = nova edição de um catálogo já existente."""
+    if arquivo is None:
+        raise ValueError('Escolha o PDF do catálogo.')
+    if arquivo.size > PDF_MAX_MB * 1024 * 1024:
+        raise ValueError(f'O PDF passa de {PDF_MAX_MB} MB.')
+    cabeca = arquivo.read(5)
+    arquivo.seek(0)
+    if cabeca != b'%PDF-':
+        raise ValueError('O arquivo não é um PDF.')
+    if not pc.tem_poppler():
+        raise ValueError('O servidor não tem o poppler-utils (pdftotext/pdftoppm) para ler o PDF.')
+    if catalogo is not None and _status(_com_conjuntos(catalogo))[0] == 'importando':
+        raise ValueError('Este catálogo ainda está sendo importado. Espere terminar.')
+    if catalogo is None:
+        catalogo = CatalogoPecas(nome='', status='importando')
+    for campo, limite in (('nome', 120), ('fabricante', 80), ('edicao', 60)):
+        v = _texto(dados, campo, limite)
+        if v is not None and (v or campo != 'nome'):
+            setattr(catalogo, campo, v)
+    catalogo.status, catalogo.erro, catalogo.enviado_em = 'importando', '', timezone.now()
+    catalogo.importado_por = usuario
+    catalogo.save()
+    pasta = PASTA / str(catalogo.pk)
+    pasta.mkdir(parents=True, exist_ok=True)
+    with open(pasta / _ENVIADO, 'wb') as f:
+        for pedaco in arquivo.chunks():
+            f.write(pedaco)
+    pk = catalogo.pk
+    transaction.on_commit(lambda: _disparar(pk))
+    return catalogo
+
+
+def _com_conjuntos(c: CatalogoPecas) -> CatalogoPecas:
+    c.n_conjuntos = c.conjuntos.count()
+    return c
+
+
+def _disparar(catalogo_id: int) -> None:
+    """Celery; se o broker não responder, lê numa thread do próprio gunicorn para o envio não se perder."""
+    from .tasks import importar_catalogo_pecas
+    try:
+        importar_catalogo_pecas.delay(catalogo_id)
+    except Exception:  # noqa: BLE001 — Redis fora: não deixa o catálogo preso em "importando"
+        logger.exception('catálogo de peças %s: Celery indisponível, importando numa thread', catalogo_id)
+        threading.Thread(target=executar_importacao, args=(catalogo_id,), daemon=True).start()
+
+
+def executar_importacao(catalogo_id: int) -> None:
+    cat = CatalogoPecas.objects.filter(pk=catalogo_id).first()
+    if cat is None:
+        return
+    pdf = PASTA / str(cat.pk) / _ENVIADO
+    try:
+        if not pdf.exists():
+            raise ValueError('O PDF enviado não foi encontrado no servidor. Envie de novo.')
+        importar(pdf, catalogo=cat, usuario=cat.importado_por)
+    except Exception as exc:  # noqa: BLE001 — qualquer falha precisa sair do "importando"
+        logger.exception('catálogo de peças %s: falha na importação', catalogo_id)
+        msg = str(exc) if isinstance(exc, (ValueError, pc.PopplerAusente)) else 'Não foi possível ler este PDF.'
+        tem = cat.conjuntos.exists()  # nova edição que falhou: a anterior continua valendo (importar é atômico)
+        CatalogoPecas.objects.filter(pk=cat.pk).update(status='pronto' if tem else 'erro', erro=msg)
+    else:
+        CatalogoPecas.objects.filter(pk=cat.pk).update(status='pronto', erro='')
+    finally:
+        pdf.unlink(missing_ok=True)
+
+
+def editar_catalogo(cat: CatalogoPecas, dados) -> CatalogoPecas:
+    for campo, limite in (('nome', 120), ('fabricante', 80), ('edicao', 60)):
+        v = _texto(dados, campo, limite)
+        if v is not None:
+            if campo == 'nome' and not v:
+                raise ValueError('O catálogo precisa de um nome.')
+            setattr(cat, campo, v)
+    cat.save(update_fields=['nome', 'fabricante', 'edicao'])
+    return cat
+
+
+def excluir_catalogo(cat: CatalogoPecas) -> None:
+    """Equipamentos ligados ficam sem catálogo; pedidos já feitos guardam código e descrição."""
+    pasta = PASTA / str(cat.pk)
+    cat.delete()
+    shutil.rmtree(pasta, ignore_errors=True)
 
 
 def faixas_catalogo(catalogo: CatalogoPecas) -> list[list[int]]:
