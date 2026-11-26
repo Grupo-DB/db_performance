@@ -72,23 +72,33 @@ def _da_filial(qs, filial: int | None):
     return qs.filter(filial__isnull=True) if filial is None else qs.filter(filial=filial)
 
 
-def _selecao(filial: int | None, usuario=None):
-    """Linhas de UMA seleção: a do usuário (painel próprio) ou, com usuario=None, o padrão da filial."""
+def eh_setor(qual) -> bool:
+    """`qual` é 'meu' | 'padrao' | um PainelInsumosSetor (26/11/2026)."""
+    return not isinstance(qual, str) and qual is not None
+
+
+def _selecao(filial: int | None, usuario=None, setor=None):
+    """Linhas de UMA seleção: a de um painel de setor, a do usuário (painel próprio) ou, com
+    usuario=None, o padrão da filial."""
     from .models import InsumoMonitorado
-    qs = _da_filial(InsumoMonitorado.objects.all(), filial)
+    if setor is not None:
+        return InsumoMonitorado.objects.filter(painel_setor=setor)
+    qs = _da_filial(InsumoMonitorado.objects.filter(painel_setor__isnull=True), filial)
     return qs.filter(usuario__isnull=True) if usuario is None else qs.filter(usuario=usuario)
 
 
 _CAMPOS = ('id', 'tipo', 'codigo', 'ordem', 'foto_item')
 
 
-def monitorados_app(filial: int | None = None, usuario=None) -> list[dict]:
-    """Seleção exata (padrão com usuario=None; a do usuário, sem cair no padrão)."""
-    return list(_selecao(filial, usuario).values(*_CAMPOS))
+def monitorados_app(filial: int | None = None, usuario=None, setor=None) -> list[dict]:
+    """Seleção exata (padrão com usuario=None; a do usuário, sem cair no padrão; a do setor)."""
+    return list(_selecao(filial, usuario, setor).values(*_CAMPOS))
 
 
 def selecao_efetiva(filial: int | None, usuario=None, painel: str = 'meu') -> tuple[list[dict], bool]:
     """(o que a pessoa vê, se é o painel próprio). 'meu' cai no padrão enquanto ela não personalizou."""
+    if eh_setor(painel):
+        return monitorados_app(setor=painel), False
     if painel == 'meu' and usuario is not None:
         proprio = monitorados_app(filial, usuario)
         if proprio:
@@ -391,7 +401,11 @@ def painel(filial: int | None, dias: int = DIAS_PADRAO, fonte: str = 'sga', hoje
     mov = ler_movimento(filial, codigos, hoje - timedelta(days=janela))
     dados = montar_painel(df, erp['grupos'], mov, monitorados, hoje, dias)
     dados['lido_em'] = erp.get('lido_em')
-    dados['painel'] = qual
+    if eh_setor(qual):
+        dados['painel'] = f'setor:{qual.pk}'
+        dados['setor'] = setor_dict(qual)
+    else:
+        dados['painel'] = qual
     dados['personalizado'] = personalizado
     return dados
 
@@ -455,6 +469,24 @@ def serie_item(codigo: int, filial: int | None, passo: str, hoje: date | None = 
     return montar_serie_item(mov, codigo, passo, hoje)
 
 
+def item_no_setor(codigo: int, setor) -> bool:
+    """O item entra no painel do setor? (avulso, ou dentro de um grupo monitorado — com os subgrupos).
+    Usado para o chefe não ler a série de item fora do painel dele (26/11/2026)."""
+    monitorados = monitorados_app(setor=setor)
+    if any(m['tipo'] == 'item' and int(m['codigo']) == int(codigo) for m in monitorados):
+        return True
+    grupos_mon = [int(m['codigo']) for m in monitorados if m['tipo'] == 'grupo']
+    if not grupos_mon:
+        return False
+    df, erp, _ = ax._preparado(setor.filial, 'sga')
+    linha = df[df.ESTQCOD == int(codigo)]
+    if linha.empty:
+        return False
+    galm = int(linha.GALM.iloc[0])
+    _nome, _raiz, pai = ax.arvore(erp['grupos'])
+    filhos = ax.filhos_por_grupo(pai)
+    return any(galm in ax.descendentes(g, filhos) for g in grupos_mon)
+
 # ── Edição ──────────────────────────────────────────────────────────────────
 # Duas seleções por filial: o PADRÃO (usuario vazio, só o gestor edita) e o painel de cada pessoa.
 # Quem ainda não personalizou vê o padrão; a 1ª mudança dele em "meu" copia o padrão para ele
@@ -478,6 +510,8 @@ def _no_proprio(pk: int, usuario):
     m = InsumoMonitorado.objects.filter(pk=pk).first()
     if m is None:
         return None
+    if m.painel_setor_id is not None:
+        return None                                       # linha de painel de setor
     if m.usuario_id == usuario.id:
         return m
     if m.usuario_id is not None:
@@ -489,8 +523,10 @@ def _no_proprio(pk: int, usuario):
 def alvo(pk: int, usuario, qual: str):
     """Linha a editar. 'padrao' só aceita linha do padrão; 'meu' converte para a do usuário."""
     from .models import InsumoMonitorado
+    if eh_setor(qual):
+        return InsumoMonitorado.objects.filter(pk=pk, painel_setor=qual).first()
     if qual == 'padrao':
-        return InsumoMonitorado.objects.filter(pk=pk, usuario__isnull=True).first()
+        return InsumoMonitorado.objects.filter(pk=pk, usuario__isnull=True, painel_setor__isnull=True).first()
     return _no_proprio(pk, usuario)
 
 
@@ -507,16 +543,19 @@ def incluir(tipo: str, codigo: int, usuario, filial: int | None = None, qual: st
         codigo = int(codigo)
     except (TypeError, ValueError):
         raise ValueError('codigo deve ser um número.')
+    setor = qual if eh_setor(qual) else None
+    if setor is not None:
+        filial = setor.filial
     dono = usuario if qual == 'meu' else None
     if dono is not None:
         garantir_proprio(filial, dono)
-    sel = _selecao(filial, dono)
+    sel = _selecao(filial, dono, setor)
     existente = sel.filter(tipo=tipo, codigo=codigo).first()
     if existente:                       # NULL não entra no unique do MySQL: o padrão confere aqui
         return {'id': existente.id, 'criado': False}
     ordem = (sel.aggregate(m=Max('ordem'))['m'] or 0) + 1
     obj = InsumoMonitorado.objects.create(tipo=tipo, codigo=codigo, filial=filial, usuario=dono, ordem=ordem,
-                                          incluido_por=usuario)
+                                          painel_setor=setor, incluido_por=usuario)
     return {'id': obj.id, 'criado': True}
 
 
@@ -544,3 +583,89 @@ def reordenar(ids: list[int], usuario=None, qual: str = 'padrao') -> None:
         if m is not None:
             m.ordem = i
             m.save(update_fields=['ordem'])
+
+
+# ── Painéis de setor (26/11/2026) ────────────────────────────────────────────
+# Pedido do usuário: Admin/Master/comprasGestor montam painéis de consumo para os chefes de setor,
+# e cada chefe acompanha só o(s) dele(s). O chefe entra/sai do grupo GRUPO_CHEFE sozinho, conforme
+# esteja em algum painel — é o grupo que faz o menu mostrar o Insumos para ele.
+GRUPO_CHEFE = 'comprasChefeSetor'
+
+
+def nome_usuario(u) -> str:
+    return (u.get_full_name() or u.username).strip()
+
+
+def setor_dict(p) -> dict:
+    return {'id': p.pk, 'nome': p.nome, 'filial': p.filial,
+            'responsaveis': [{'id': u.pk, 'nome': nome_usuario(u)} for u in p.responsaveis.all()],
+            'itens': p.monitorados.count()}
+
+
+def paineis_visiveis(usuario, todos: bool):
+    from .models import PainelInsumosSetor
+    qs = PainelInsumosSetor.objects.prefetch_related('responsaveis')
+    return qs if todos else qs.filter(responsaveis=usuario)
+
+
+def sincronizar_chefes(usuarios) -> None:
+    """Põe no grupo de chefe quem está em algum painel de setor e tira quem não está mais."""
+    from django.contrib.auth.models import Group
+    grupo, _ = Group.objects.get_or_create(name=GRUPO_CHEFE)
+    for u in usuarios:
+        if u.paineis_insumos_setor.exists():
+            u.groups.add(grupo)
+        else:
+            u.groups.remove(grupo)
+
+
+def _usuarios(ids) -> list:
+    from django.contrib.auth.models import User
+    try:
+        ids = {int(i) for i in (ids or [])}
+    except (TypeError, ValueError):
+        raise ValueError('responsaveis deve ser uma lista de ids de usuário.')
+    achados = list(User.objects.filter(pk__in=ids, is_active=True))
+    if len(achados) != len(ids):
+        raise ValueError('Usuário inexistente ou inativo em responsaveis.')
+    return achados
+
+
+_MANTER = object()
+
+
+def salvar_setor(dados: dict, usuario, painel=None, filial=_MANTER):
+    """Cria (painel=None) ou altera um painel de setor. `dados`: nome, responsaveis, copiar_padrao;
+    `filial` já validada pela view (None = Todas; _MANTER = não mexe)."""
+    from .models import PainelInsumosSetor, InsumoMonitorado
+    nome = str(dados.get('nome', painel.nome if painel else '') or '').strip()
+    if not nome:
+        raise ValueError('Dê um nome ao painel (ex.: o setor).')
+    if len(nome) > 80:
+        raise ValueError('Nome com no máximo 80 caracteres.')
+    antigos = set(painel.responsaveis.all()) if painel else set()
+    if painel is None:
+        painel = PainelInsumosSetor.objects.create(nome=nome, filial=None if filial is _MANTER else filial,
+                                                   criado_por=usuario)
+        if dados.get('copiar_padrao'):
+            InsumoMonitorado.objects.bulk_create([
+                InsumoMonitorado(painel_setor=painel, filial=painel.filial, tipo=m.tipo, codigo=m.codigo,
+                                 ordem=m.ordem, foto_item=m.foto_item, incluido_por=usuario)
+                for m in _selecao(painel.filial, None).order_by('ordem', 'id')])
+    else:
+        painel.nome = nome
+        if filial is not _MANTER and filial != painel.filial:
+            painel.filial = filial
+            painel.monitorados.update(filial=filial)
+        painel.save(update_fields=['nome', 'filial'])
+    if 'responsaveis' in dados:
+        novos = _usuarios(dados.get('responsaveis'))
+        painel.responsaveis.set(novos)
+        sincronizar_chefes(antigos | set(novos))
+    return painel
+
+
+def apagar_setor(painel) -> None:
+    antigos = list(painel.responsaveis.all())
+    painel.delete()
+    sincronizar_chefes(antigos)

@@ -9,6 +9,7 @@ from .views import (
     almoxarifado_itens, almoxarifado_foto, almoxarifado_catalogo,
     almoxarifado_catalogo_opcoes, almoxarifado_catalogo_item, almoxarifado_minimos, almoxarifado_prazo,
     almoxarifado_insumos, almoxarifado_insumos_serie, almoxarifado_indicadores, almoxarifado_insumos_monitorados, almoxarifado_insumos_monitorado,
+    almoxarifado_insumos_setores, almoxarifado_insumos_setor, almoxarifado_insumos_usuarios,
     serve_catalogo_pdf_inline,
 )
 
@@ -46,5 +47,8 @@ urlpatterns = [
     path('erp/almoxarifado/insumos/serie/<int:codigo>/', almoxarifado_insumos_serie, name='erp-almoxarifado-insumos-serie'),
     path('erp/almoxarifado/insumos/monitorados/', almoxarifado_insumos_monitorados, name='erp-almoxarifado-insumos-monitorados'),
     path('erp/almoxarifado/insumos/monitorados/<int:pk>/', almoxarifado_insumos_monitorado, name='erp-almoxarifado-insumos-monitorado'),
+    path('erp/almoxarifado/insumos/setores/', almoxarifado_insumos_setores, name='erp-almoxarifado-insumos-setores'),
+    path('erp/almoxarifado/insumos/setores/<int:pk>/', almoxarifado_insumos_setor, name='erp-almoxarifado-insumos-setor'),
+    path('erp/almoxarifado/insumos/usuarios/', almoxarifado_insumos_usuarios, name='erp-almoxarifado-insumos-usuarios'),
     path('catalogos-pdf/<int:pk>/inline/', serve_catalogo_pdf_inline, name='catalogo-pdf-inline'),
 ]

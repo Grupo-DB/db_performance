@@ -1,4 +1,5 @@
 import base64
+import re
 import logging
 import os
 import threading
@@ -752,19 +753,38 @@ def serve_catalogo_pdf_inline(request, pk):
 # Visão geral do almoxarifado (SGA) — ver catalogos/almoxarifado.py
 # ---------------------------------------------------------------------------
 
-GRUPOS_ALMOXARIFADO = {'Admin', 'Master', 'comprasClientes', 'comprasCliente', 'comprasGestor'}
+# 26/11/2026 — acesso por tela do Suprimentos (pedido do Gustavo, WhatsApp 25/11):
+#   comprasGestor     (Gustavo, Ryan, Jesse): tudo + edição (mínimo, prazo, painel padrão de Insumos)
+#   comprasComprador  (Lucibele, Katriel, Ari): Visão Geral, Catálogo de Itens e Insumos
+#   comprasAlmoxarife (conta única do balcão): Visão Geral e Catálogo de Itens
+#   comprasPesada     (Abel, por enquanto): só o Catálogo de Itens
+#   comprasClientes/comprasCliente: grupos antigos do Minerion, seguem vendo tudo (só leitura).
+# Espelho no front: src/app/pages/catalogos/suprimentos-grupos.ts. Grupos criados na migration 0014.
+_GRUPOS_SUPRIMENTOS_BASE = {'Admin', 'Master', 'comprasGestor', 'comprasClientes', 'comprasCliente'}
+GRUPOS_SUPRIMENTOS_TELA = {
+    'visao': _GRUPOS_SUPRIMENTOS_BASE | {'comprasComprador', 'comprasAlmoxarife'},
+    'indicadores': set(_GRUPOS_SUPRIMENTOS_BASE),
+    'catalogo': _GRUPOS_SUPRIMENTOS_BASE | {'comprasComprador', 'comprasAlmoxarife', 'comprasPesada'},
+    'insumos': _GRUPOS_SUPRIMENTOS_BASE | {'comprasComprador'},
+}
+# Qualquer tela (ex.: foto do item, usada na Visão Geral, no Catálogo e nos Insumos). O chefe de setor
+# (26/11/2026) entra aqui só pela foto: o Insumos dele passa por _insumos_contexto (só os painéis dele).
+GRUPOS_ALMOXARIFADO = set().union(*GRUPOS_SUPRIMENTOS_TELA.values()) | {'comprasChefeSetor'}
 # Quem altera estoque mínimo e prazo de atenção (o resto só consulta).
 GRUPOS_ALMOXARIFADO_EDITAR = {'Admin', 'Master', 'comprasGestor'}
 
 
-def _almox_acesso(request, editar=False):
-    """None se pode; senão a Response de erro."""
+def _almox_acesso(request, editar=False, tela=None):
+    """None se pode; senão a Response de erro. `tela`: visao | indicadores | catalogo | insumos (None = qualquer)."""
     user = request.user
     if not user.is_authenticated:
         return Response({'erro': 'Não autenticado.'}, status=status.HTTP_401_UNAUTHORIZED)
-    grupos = GRUPOS_ALMOXARIFADO_EDITAR if editar else GRUPOS_ALMOXARIFADO
+    if editar:
+        grupos = GRUPOS_ALMOXARIFADO_EDITAR
+    else:
+        grupos = GRUPOS_SUPRIMENTOS_TELA[tela] if tela else GRUPOS_ALMOXARIFADO
     if not (user.is_superuser or user.groups.filter(name__in=grupos).exists()):
-        msg = 'Sem permissão para alterar o almoxarifado.' if editar else 'Sem acesso ao almoxarifado.'
+        msg = 'Sem permissão para alterar o almoxarifado.' if editar else 'Sem acesso a esta tela do Suprimentos.'
         return Response({'erro': msg}, status=status.HTTP_403_FORBIDDEN)
     return None
 
@@ -780,10 +800,46 @@ def _almox_fonte(request):
 
 
 def _insumos_painel(request, padrao='meu'):
-    """Qual seleção do painel de Insumos: 'meu' (o da pessoa, ou o padrão enquanto não personalizou) | 'padrao'."""
+    """Qual seleção do painel de Insumos: 'meu' (o da pessoa, ou o padrão enquanto não personalizou) |
+    'padrao' | 'setor:<id>' (painel de setor, 26/11/2026)."""
     bruto = request.data.get('painel') if request.method in ('POST', 'PUT', 'PATCH') else None
     qual = str(bruto or request.GET.get('painel') or padrao).strip().lower()
-    return qual if qual in ('meu', 'padrao') else padrao
+    if qual in ('meu', 'padrao') or re.fullmatch(r'setor:\d+', qual):
+        return qual
+    return padrao
+
+
+def _insumos_pleno(user) -> bool:
+    """Acesso normal ao Insumos (meu painel / padrão), fora os painéis de setor."""
+    return user.is_superuser or user.groups.filter(name__in=GRUPOS_SUPRIMENTOS_TELA['insumos']).exists()
+
+
+def _insumos_contexto(request, padrao='meu', editando=False):
+    """(qual, erro). qual = 'meu' | 'padrao' | PainelInsumosSetor.
+    Painel de setor: o gestor vê e edita todos; o chefe só VÊ os dele. Quem só é chefe (sem o acesso
+    normal) não tem meu/padrão: sem painel pedido, cai no primeiro dele."""
+    from .models import PainelInsumosSetor
+    user = request.user
+    if not user.is_authenticated:
+        return None, Response({'erro': 'Não autenticado.'}, status=status.HTTP_401_UNAUTHORIZED)
+    gestor = _almox_pode_editar(user)
+    qual = _insumos_painel(request, padrao=padrao)
+    proibido = Response({'erro': 'Sem acesso a este painel de Insumos.'}, status=status.HTTP_403_FORBIDDEN)
+    if qual.startswith('setor:'):
+        setor = PainelInsumosSetor.objects.filter(pk=int(qual[6:])).first()
+        if setor is None:
+            return None, Response({'erro': 'Painel de setor não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        if gestor:
+            return setor, None
+        if editando or not setor.responsaveis.filter(pk=user.pk).exists():
+            return None, proibido
+        return setor, None
+    if not _insumos_pleno(user):
+        primeiro = None if editando else user.paineis_insumos_setor.order_by('nome', 'id').first()
+        return (primeiro, None) if primeiro else (None, proibido)
+    if editando and qual == 'padrao' and not gestor:
+        return None, Response({'erro': 'Sem permissão para alterar o almoxarifado.'}, status=status.HTTP_403_FORBIDDEN)
+    return qual, None
 
 
 def _almox_filial(bruto):
@@ -820,7 +876,7 @@ def almoxarifado_resumo(request):
     """
     from . import almoxarifado
 
-    if (erro := _almox_acesso(request)):
+    if (erro := _almox_acesso(request, tela='visao')):
         return erro
     filial, erro = _almox_filial(request.GET.get('filial'))
     if erro:
@@ -868,7 +924,7 @@ def almoxarifado_itens(request):
     """
     from . import almoxarifado
 
-    if (erro := _almox_acesso(request)):
+    if (erro := _almox_acesso(request, tela='visao')):
         return erro
     filial, erro = _almox_filial(request.GET.get('filial'))
     if erro:
@@ -924,7 +980,7 @@ def almoxarifado_catalogo(request):
     """
     from . import almox_catalogo
 
-    if (erro := _almox_acesso(request)):
+    if (erro := _almox_acesso(request, tela='catalogo')):
         return erro
     filial, erro = _almox_filial(request.GET.get('filial'))
     if erro:
@@ -958,7 +1014,7 @@ def almoxarifado_catalogo_opcoes(request):
     """Opções dos filtros: centros de custo, equipamentos e requisitantes usados nas baixas, e os grupos."""
     from . import almox_catalogo
 
-    if (erro := _almox_acesso(request)):
+    if (erro := _almox_acesso(request, tela='catalogo')):
         return erro
     filial, erro = _almox_filial(request.GET.get('filial'))
     if erro:
@@ -975,7 +1031,7 @@ def almoxarifado_catalogo_item(request, cod):
     """Para onde foi o item: baixas no período (?desde&ate&cc&eqp&req&filial), por destino e por mês."""
     from . import almox_catalogo
 
-    if (erro := _almox_acesso(request)):
+    if (erro := _almox_acesso(request, tela='catalogo')):
         return erro
     filial, erro = _almox_filial(request.GET.get('filial'))
     if erro:
@@ -1040,7 +1096,7 @@ def almoxarifado_indicadores(request):
     """Painel de indicadores: ?filial=0|…|todas &fonte=sga|manager."""
     from . import almox_indicadores
 
-    if (erro := _almox_acesso(request)):
+    if (erro := _almox_acesso(request, tela='indicadores')):
         return erro
     filial, erro = _almox_filial(request.GET.get('filial'))
     if erro:
@@ -1059,11 +1115,14 @@ def almoxarifado_insumos(request):
     """Painel: ?filial=0|…|todas &dias=30|90|180|365 &fonte=sga|manager &painel=meu|padrao."""
     from . import almox_insumos
 
-    if (erro := _almox_acesso(request)):
+    qual, erro = _insumos_contexto(request)
+    if erro:
         return erro
     filial, erro = _almox_filial(request.GET.get('filial'))
     if erro:
         return erro
+    if almox_insumos.eh_setor(qual):
+        filial = qual.filial                 # o painel de setor é de uma filial só
     try:
         dias = int(request.GET.get('dias') or almox_insumos.DIAS_PADRAO)
     except ValueError:
@@ -1072,22 +1131,29 @@ def almoxarifado_insumos(request):
         return Response({'erro': f'dias deve ser um de: {", ".join(map(str, almox_insumos.DIAS_OPCOES))}.'},
                         status=status.HTTP_400_BAD_REQUEST)
     try:
-        dados = almox_insumos.painel(filial, dias, _almox_fonte(request), usuario=request.user,
-                                     qual=_insumos_painel(request))
+        dados = almox_insumos.painel(filial, dias, _almox_fonte(request), usuario=request.user, qual=qual)
         dados['filiais'] = almox_insumos.ax.filiais()
     except Exception as exc:
         logger.exception('painel de insumos')
         return Response({'erro': f'Falha na consulta ao SGA: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
-    dados['pode_editar'] = _almox_pode_editar(request.user)
+    gestor = _almox_pode_editar(request.user)
+    dados['pode_editar'] = gestor
+    # Só chefe de setor: sem meu/padrão, sem trocar filial, sem configurar.
+    dados['so_setor'] = not _insumos_pleno(request.user)
+    dados['paineis_setor'] = [almox_insumos.setor_dict(p) for p in almox_insumos.paineis_visiveis(request.user, gestor)]
     return Response(dados)
 
 
 @api_view(['GET'])
 def almoxarifado_insumos_serie(request, codigo):
-    """Consumo de um item em barras: ?filial=0|…|todas &passo=semana|mes|ano (12 semanas, 12 meses, 5 anos)."""
+    """Consumo de um item em barras: ?filial=0|…|todas &passo=semana|mes|ano (12 semanas, 12 meses, 5 anos)
+    &painel=meu|padrao|setor:<id>."""
     from . import almox_insumos
 
-    if (erro := _almox_acesso(request)):
+    # ?painel= como no painel (26/11/2026): no de setor a filial é a dele, e quem só é chefe só lê
+    # a série de item que está no painel dele.
+    qual, erro = _insumos_contexto(request)
+    if erro:
         return erro
     filial, erro = _almox_filial(request.GET.get('filial'))
     if erro:
@@ -1096,6 +1162,10 @@ def almoxarifado_insumos_serie(request, codigo):
     if passo not in almox_insumos.PASSOS_SERIE:
         return Response({'erro': 'passo deve ser semana, mes ou ano.'}, status=status.HTTP_400_BAD_REQUEST)
     try:
+        if almox_insumos.eh_setor(qual):
+            filial = qual.filial
+            if not _insumos_pleno(request.user) and not almox_insumos.item_no_setor(codigo, qual):
+                return Response({'erro': 'Item fora do painel do seu setor.'}, status=status.HTTP_403_FORBIDDEN)
         return Response(almox_insumos.serie_item(codigo, filial, passo))
     except Exception as exc:
         logger.exception('série do insumo')
@@ -1109,14 +1179,16 @@ def almoxarifado_insumos_monitorados(request):
     "padrao" (o default, como antes do painel por usuário) é só do gestor; "meu" é de qualquer um com acesso."""
     from . import almox_insumos
 
-    qual = 'meu' if request.method == 'DELETE' else _insumos_painel(request, padrao='padrao')
-    if (erro := _almox_acesso(request, editar=(qual == 'padrao'))):
-        return erro
     if request.method == 'DELETE':
+        if not _insumos_pleno(request.user):
+            return _almox_acesso(request, tela='insumos')
         filial, erro = _almox_filial(request.GET.get('filial'))
         if erro:
             return erro
         return Response({'removidos': almox_insumos.voltar_ao_padrao(filial, request.user)})
+    qual, erro = _insumos_contexto(request, padrao='padrao', editando=True)
+    if erro:
+        return erro
     if request.method == 'PUT':
         ids = request.data.get('ids')
         if not isinstance(ids, list):
@@ -1142,8 +1214,8 @@ def almoxarifado_insumos_monitorado(request, pk):
     ?painel=meu|padrao (padrão: padrao). Em "meu", um id do padrão vira o do painel próprio (criado na hora)."""
     from . import almox_insumos
 
-    qual = _insumos_painel(request, padrao='padrao')
-    if (erro := _almox_acesso(request, editar=(qual == 'padrao'))):
+    qual, erro = _insumos_contexto(request, padrao='padrao', editando=True)
+    if erro:
         return erro
     if request.method == 'PATCH':
         bruto = request.data.get('foto_item')
@@ -1157,3 +1229,72 @@ def almoxarifado_insumos_monitorado(request, pk):
     if not almox_insumos.remover(int(pk), request.user, qual):
         return Response({'erro': 'Não está no painel.'}, status=status.HTTP_404_NOT_FOUND)
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Painéis de Insumos por setor (26/11/2026) — ver almox_insumos.salvar_setor
+# ---------------------------------------------------------------------------
+
+@api_view(['GET', 'POST'])
+def almoxarifado_insumos_setores(request):
+    """GET: painéis de setor visíveis (gestor: todos; chefe: os dele).
+    POST {"nome", "filial": 0|…|"todas", "responsaveis": [ids], "copiar_padrao": bool}: cria (só gestor)."""
+    from . import almox_insumos
+
+    gestor = _almox_pode_editar(request.user) if request.user.is_authenticated else False
+    if request.method == 'GET':
+        if not (gestor or (request.user.is_authenticated and request.user.paineis_insumos_setor.exists())):
+            return _almox_acesso(request, editar=True)
+        return Response([almox_insumos.setor_dict(p) for p in almox_insumos.paineis_visiveis(request.user, gestor)])
+    if (erro := _almox_acesso(request, editar=True)):
+        return erro
+    filial, erro = _almox_filial(request.data.get('filial'))
+    if erro:
+        return erro
+    try:
+        p = almox_insumos.salvar_setor(request.data, request.user, filial=filial)
+    except ValueError as exc:
+        return Response({'erro': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(almox_insumos.setor_dict(p), status=status.HTTP_201_CREATED)
+
+
+@api_view(['PATCH', 'DELETE'])
+def almoxarifado_insumos_setor(request, pk):
+    """PATCH {"nome"?, "filial"?, "responsaveis"?} altera; DELETE apaga o painel (e as linhas dele). Só gestor."""
+    from . import almox_insumos
+    from .models import PainelInsumosSetor
+
+    if (erro := _almox_acesso(request, editar=True)):
+        return erro
+    p = PainelInsumosSetor.objects.filter(pk=pk).first()
+    if p is None:
+        return Response({'erro': 'Painel de setor não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'DELETE':
+        almox_insumos.apagar_setor(p)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    filial = almox_insumos._MANTER
+    if 'filial' in request.data:
+        filial, erro = _almox_filial(request.data.get('filial'))
+        if erro:
+            return erro
+    try:
+        p = almox_insumos.salvar_setor(request.data, request.user, painel=p, filial=filial)
+    except ValueError as exc:
+        return Response({'erro': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(almox_insumos.setor_dict(p))
+
+
+@api_view(['GET'])
+def almoxarifado_insumos_usuarios(request):
+    """Usuários ativos para escolher os chefes de um painel de setor: ?busca= (nome ou login). Só gestor."""
+    from django.contrib.auth.models import User
+    from django.db.models import Q
+    from . import almox_insumos
+
+    if (erro := _almox_acesso(request, editar=True)):
+        return erro
+    qs = User.objects.filter(is_active=True).order_by('first_name', 'last_name', 'username')
+    busca = (request.GET.get('busca') or '').strip()
+    for parte in busca.split():
+        qs = qs.filter(Q(first_name__icontains=parte) | Q(last_name__icontains=parte) | Q(username__icontains=parte))
+    return Response([{'id': u.pk, 'nome': almox_insumos.nome_usuario(u), 'login': u.username} for u in qs[:300]])

@@ -381,6 +381,24 @@ class PrazoAtencaoGrupo(models.Model):
         return f'Grupo {self.grupo}: {self.dias} dias'
 
 
+class PainelInsumosSetor(models.Model):
+    """Painel de Insumos de um setor (26/11/2026): o gestor de compras monta e escolhe os chefes que o
+    acompanham. O chefe (grupo comprasChefeSetor, posto e tirado sozinho) só vê os painéis dele."""
+    nome = models.CharField(max_length=80)
+    filial = models.IntegerField(null=True, blank=True, help_text='FILCOD do SGA (0 = matriz); vazio = "Todas as filiais"')
+    responsaveis = models.ManyToManyField(User, blank=True, related_name='paineis_insumos_setor')
+    criado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Painel de insumos do setor'
+        verbose_name_plural = 'Painéis de insumos dos setores'
+        ordering = ('nome', 'id')
+
+    def __str__(self):
+        return self.nome
+
+
 class InsumoMonitorado(models.Model):
     """O que aparece no painel de Insumos (17/11/2026): um grupo do SGA (com os subgrupos) ou um item avulso."""
     TIPOS = [('grupo', 'Grupo de itens'), ('item', 'Item')]
@@ -397,6 +415,9 @@ class InsumoMonitorado(models.Model):
     # Foto do cartão: item do SGA cuja foto representa o monitorado. Vazio = automática
     # (o item de maior consumo do cartão que tiver foto).
     foto_item = models.IntegerField(null=True, blank=True, help_text='ESTQCOD da foto do cartão; vazio = automática')
+    # 26/11/2026: linha de um painel de setor (aí usuario fica vazio e filial = a do painel).
+    painel_setor = models.ForeignKey(PainelInsumosSetor, on_delete=models.CASCADE, null=True, blank=True,
+                                     related_name='monitorados')
     ordem = models.PositiveIntegerField(default=0)
     incluido_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     incluido_em = models.DateTimeField(auto_now_add=True)
@@ -404,7 +425,7 @@ class InsumoMonitorado(models.Model):
     class Meta:
         verbose_name = 'Insumo monitorado'
         verbose_name_plural = 'Insumos monitorados'
-        unique_together = ('usuario', 'filial', 'tipo', 'codigo')
+        unique_together = ('usuario', 'painel_setor', 'filial', 'tipo', 'codigo')
         ordering = ('ordem', 'id')
 
     def __str__(self):
