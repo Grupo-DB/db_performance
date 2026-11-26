@@ -593,7 +593,13 @@ GRUPO_CHEFE = 'comprasChefeSetor'
 
 
 def nome_usuario(u) -> str:
-    return (u.get_full_name() or u.username).strip()
+    """Nome do colaborador ligado ao usuário (cadastro de Pessoas); sem vínculo, o nome do usuário ou o login."""
+    try:
+        colab = u.colaborador
+    except Exception:                    # sem colaborador ligado (RelatedObjectDoesNotExist)
+        colab = None
+    nome = (getattr(colab, 'nome', '') or '').strip()
+    return nome or (u.get_full_name() or u.username).strip()
 
 
 def setor_dict(p) -> dict:
@@ -604,7 +610,7 @@ def setor_dict(p) -> dict:
 
 def paineis_visiveis(usuario, todos: bool):
     from .models import PainelInsumosSetor
-    qs = PainelInsumosSetor.objects.prefetch_related('responsaveis')
+    qs = PainelInsumosSetor.objects.prefetch_related('responsaveis__colaborador')
     return qs if todos else qs.filter(responsaveis=usuario)
 
 

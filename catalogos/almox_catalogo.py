@@ -31,7 +31,7 @@ from . import almoxarifado as ax
 
 logger = logging.getLogger(__name__)
 
-DIAS_PADRAO = 90
+DIAS_PADRAO = 365              # 26/11/2026: era 90; pedido do usuário (abrir já com 1 ano)
 DIAS_MAX = 3 * 366
 DIAS_OPCOES = 2 * 365          # centros/equipamentos/requisitantes oferecidos no filtro
 MAX_BAIXAS = 1000

@@ -1293,8 +1293,12 @@ def almoxarifado_insumos_usuarios(request):
 
     if (erro := _almox_acesso(request, editar=True)):
         return erro
-    qs = User.objects.filter(is_active=True).order_by('first_name', 'last_name', 'username')
+    # 26/11/2026: aparece o nome do colaborador (cadastro de Pessoas), não o login.
+    qs = User.objects.filter(is_active=True).select_related('colaborador')
     busca = (request.GET.get('busca') or '').strip()
     for parte in busca.split():
-        qs = qs.filter(Q(first_name__icontains=parte) | Q(last_name__icontains=parte) | Q(username__icontains=parte))
-    return Response([{'id': u.pk, 'nome': almox_insumos.nome_usuario(u), 'login': u.username} for u in qs[:300]])
+        qs = qs.filter(Q(first_name__icontains=parte) | Q(last_name__icontains=parte) | Q(username__icontains=parte)
+                       | Q(colaborador__nome__icontains=parte))
+    lista = [{'id': u.pk, 'nome': almox_insumos.nome_usuario(u), 'login': u.username} for u in qs[:500]]
+    lista.sort(key=lambda x: x['nome'].lower())
+    return Response(lista)

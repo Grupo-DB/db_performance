@@ -125,3 +125,12 @@ class InsumosSetorTests(TestCase):
             self.assertEqual(self.cli(self.outro).get(url % 1, q).status_code, 403)
             self.assertEqual(self.cli(self.gestor).get(url % 2, q).status_code, 200)   # gestor lê tudo
             self.assertEqual(self.cli(self.comprador).get(url % 2).status_code, 200)
+
+    def test_nome_do_colaborador_no_lugar_do_login(self):
+        from types import SimpleNamespace
+        sem = User.objects.create(username='jose.silva')
+        self.assertEqual(ins.nome_usuario(sem), 'jose.silva')               # sem colaborador: o login
+        self.assertEqual(ins.nome_usuario(self.chefe), 'Chefe Moagem')      # sem colaborador: nome do usuário
+        com = SimpleNamespace(colaborador=SimpleNamespace(nome='José da Silva'), username='jose.silva',
+                              get_full_name=lambda: '')
+        self.assertEqual(ins.nome_usuario(com), 'José da Silva')

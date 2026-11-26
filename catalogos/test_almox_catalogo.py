@@ -69,7 +69,7 @@ class CatalogoListaTests(SimpleTestCase):
 
     def test_periodo(self):
         hoje = date(2026, 11, 17)
-        self.assertEqual(c.periodo(None, None, hoje), (date(2026, 8, 20), hoje))
+        self.assertEqual(c.periodo(None, None, hoje), (date(2025, 11, 18), hoje))
         self.assertEqual(c.periodo(date(2026, 11, 20), date(2026, 11, 1), hoje), (date(2026, 11, 1), date(2026, 11, 20)))
         self.assertEqual(c.periodo(date(2000, 1, 1), hoje, hoje)[0], hoje - pd.Timedelta(days=c.DIAS_MAX).to_pytimedelta())
 
