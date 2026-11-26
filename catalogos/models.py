@@ -447,10 +447,15 @@ class CatalogoPecas(models.Model):
     importado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     importado_em = models.DateTimeField(auto_now=True)
     # 26/11/2026: o PDF sobe pela tela e é lido em segundo plano (Celery); a tela acompanha pela situação.
-    STATUS_CHOICES = (('pronto', 'Pronto'), ('importando', 'Importando'), ('erro', 'Erro'))
+    # revisao: lido pela IA (layout que o leitor não conhece) e esperando alguém conferir antes de valer.
+    STATUS_CHOICES = (('pronto', 'Pronto'), ('importando', 'Importando'), ('erro', 'Erro'), ('revisao', 'Em revisão'))
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='pronto')
+    ORIGEM_CHOICES = (('leitor', 'Leitor do layout'), ('ia', 'Lido pela IA'))
+    origem = models.CharField(max_length=8, choices=ORIGEM_CHOICES, default='leitor')
     erro = models.TextField(blank=True, default='', help_text='Falha da última importação (o catálogo anterior fica)')
     enviado_em = models.DateTimeField(null=True, blank=True, help_text='Quando o último PDF foi enviado')
+    progresso = models.CharField(max_length=120, blank=True, default='', help_text='Etapa da importação em andamento')
+    progresso_em = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = 'Catálogo de peças do fabricante'
@@ -468,6 +473,9 @@ class ConjuntoPecas(models.Model):
     nome = models.CharField(max_length=200)
     pagina = models.PositiveIntegerField(help_text='Primeira página no PDF (1 = capa)')
     desenho = models.CharField(max_length=255, blank=True, default='', help_text='JPEG em privado/')
+    # 26/11/2026: números do desenho achados por OCR, para clicar no desenho e achar a linha (e vice-versa).
+    # [{"fig": "4", "x": 0.12, "y": 0.30, "w": 0.02, "h": 0.03}] — posições em fração da imagem.
+    marcadores = models.JSONField(default=list, blank=True)
     ordem = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -564,3 +572,82 @@ class ItemSolicitacaoPecas(models.Model):
         verbose_name = 'Item da solicitação de peças'
         verbose_name_plural = 'Itens das solicitações de peças'
         ordering = ('id',)
+
+
+
+class DeParaPeca(models.Model):
+    """Código do fabricante → item do SGA, ensinado pelo uso (26/11/2026).
+
+    Nasce quando o comprador escolhe o item do SGA numa solicitação ou vincula direto no catálogo (com ou sem a
+    sugestão da IA). Vale para todos os catálogos: o código da Randon é o mesmo em qualquer edição.
+    """
+    ORIGEM = (('manual', 'Vinculado no catálogo'), ('solicitacao', 'Escolhido na solicitação'), ('ia', 'Sugestão da IA aceita'))
+    codigo = models.CharField(max_length=40, db_index=True, help_text='Código do fabricante, em maiúsculas')
+    item_sga = models.IntegerField(help_text='ESTQCOD')
+    nome_sga = models.CharField(max_length=200, blank=True, default='')
+    origem = models.CharField(max_length=12, choices=ORIGEM, default='manual')
+    criado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'De-para peça do fabricante → item do SGA'
+        verbose_name_plural = 'De-para peças do fabricante → itens do SGA'
+        unique_together = (('codigo', 'item_sga'),)
+        ordering = ('codigo', '-criado_em')
+
+    def __str__(self):
+        return f'{self.codigo} → {self.item_sga}'
+
+
+class KitPecas(models.Model):
+    """Lista pronta de peças (ex.: revisão 500 h do RK 430) para pedir com um clique."""
+    nome = models.CharField(max_length=120)
+    descricao = models.TextField(blank=True, default='')
+    catalogo = models.ForeignKey(CatalogoPecas, on_delete=models.SET_NULL, null=True, blank=True, related_name='kits')
+    criado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Kit de peças da oficina'
+        verbose_name_plural = 'Kits de peças da oficina'
+        ordering = ('nome', 'id')
+
+    def __str__(self):
+        return self.nome
+
+
+class ItemKitPecas(models.Model):
+    kit = models.ForeignKey(KitPecas, on_delete=models.CASCADE, related_name='itens')
+    peca = models.ForeignKey(PecaCatalogo, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    codigo = models.CharField(max_length=30, blank=True, default='')
+    descricao = models.CharField(max_length=300)
+    conjunto = models.CharField(max_length=250, blank=True, default='')
+    quantidade = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('1'))
+    item_sga = models.IntegerField(null=True, blank=True)
+    ordem = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ('ordem', 'id')
+
+
+class NotificacaoPecas(models.Model):
+    """Aviso no sino: solicitação nova para o comprador; mudança de situação/recado para quem pediu."""
+    TIPOS = (('NOVA', 'Solicitação nova'), ('URGENTE', 'Solicitação urgente'), ('STATUS', 'Situação mudou'),
+             ('RESPOSTA', 'Recado do comprador'), ('CANCELADA', 'Cancelada por quem pediu'))
+    usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notificacoes_pecas')
+    solicitacao = models.ForeignKey(SolicitacaoPecas, on_delete=models.CASCADE, related_name='notificacoes')
+    tipo = models.CharField(max_length=10, choices=TIPOS)
+    mensagem = models.CharField(max_length=300)
+    lido = models.BooleanField(default=False, db_index=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-criado_em', '-id')
+
+
+class PreferenciaPecas(models.Model):
+    """Celular para o aviso por WhatsApp (o cadastro de colaborador não tem telefone)."""
+    usuario = models.OneToOneField(User, on_delete=models.CASCADE, related_name='preferencia_pecas')
+    whatsapp = models.CharField(max_length=20, blank=True, default='')
+    avisar_whatsapp = models.BooleanField(default=False)

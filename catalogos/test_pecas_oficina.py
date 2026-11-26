@@ -293,6 +293,9 @@ class EnvioCatalogoTests(TestCase):
         self.patches = [
             mock.patch.object(po, 'PASTA', Path(self.tmp)),
             mock.patch.object(pc, 'tem_poppler', return_value=True),
+            # O .env local tem a IA configurada: teste nunca chama a API de verdade.
+            mock.patch.object(po.pecas_ia, 'configurada', return_value=False),
+            mock.patch.object(po.pecas_ocr, 'tem_tesseract', return_value=False),
             mock.patch.object(pc, 'ler_pdf', side_effect=_ler_pdf_falso),
             mock.patch.object(pc, 'renderizar_desenho', side_effect=_desenho_falso),
             # Celery síncrono: o .delay roda a importação na hora.
