@@ -766,6 +766,8 @@ GRUPOS_SUPRIMENTOS_TELA = {
     'indicadores': set(_GRUPOS_SUPRIMENTOS_BASE),
     'catalogo': _GRUPOS_SUPRIMENTOS_BASE | {'comprasComprador', 'comprasAlmoxarife', 'comprasPesada'},
     'insumos': _GRUPOS_SUPRIMENTOS_BASE | {'comprasComprador'},
+    # 26/11/2026: Peças da Oficina — o chefe da oficina pede peças pelo catálogo do fabricante.
+    'pecas': _GRUPOS_SUPRIMENTOS_BASE | {'comprasComprador', 'comprasOficina'},
 }
 # Qualquer tela (ex.: foto do item, usada na Visão Geral, no Catálogo e nos Insumos). O chefe de setor
 # (26/11/2026) entra aqui só pela foto: o Insumos dele passa por _insumos_contexto (só os painéis dele).

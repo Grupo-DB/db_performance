@@ -1,3 +1,4 @@
+from . import views_pecas
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
@@ -51,4 +52,14 @@ urlpatterns = [
     path('erp/almoxarifado/insumos/setores/<int:pk>/', almoxarifado_insumos_setor, name='erp-almoxarifado-insumos-setor'),
     path('erp/almoxarifado/insumos/usuarios/', almoxarifado_insumos_usuarios, name='erp-almoxarifado-insumos-usuarios'),
     path('catalogos-pdf/<int:pk>/inline/', serve_catalogo_pdf_inline, name='catalogo-pdf-inline'),
+    # 26/11/2026 — Peças da Oficina
+    path('pecas-oficina/', views_pecas.pecas_inicio, name='pecas-inicio'),
+    path('pecas-oficina/equipamentos/', views_pecas.pecas_equipamentos, name='pecas-equipamentos'),
+    path('pecas-oficina/equipamentos/<int:codigo>/', views_pecas.pecas_equipamento, name='pecas-equipamento'),
+    path('pecas-oficina/catalogos/<int:catalogo>/conjuntos/', views_pecas.pecas_conjuntos, name='pecas-conjuntos'),
+    path('pecas-oficina/catalogos/<int:catalogo>/busca/', views_pecas.pecas_busca, name='pecas-busca'),
+    path('pecas-oficina/conjuntos/<int:pk>/', views_pecas.pecas_conjunto, name='pecas-conjunto'),
+    path('pecas-oficina/conjuntos/<int:pk>/desenho/', views_pecas.pecas_desenho, name='pecas-desenho'),
+    path('pecas-oficina/solicitacoes/', views_pecas.pecas_solicitacoes, name='pecas-solicitacoes'),
+    path('pecas-oficina/solicitacoes/<int:pk>/', views_pecas.pecas_solicitacao, name='pecas-solicitacao'),
 ]

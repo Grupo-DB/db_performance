@@ -430,3 +430,132 @@ class InsumoMonitorado(models.Model):
 
     def __str__(self):
         return f'{self.get_tipo_display()} {self.codigo}'
+
+
+# ---------------------------------------------------------------------------------------------------------
+# 26/11/2026 — Peças da oficina: catálogo do fabricante (PDF importado) e solicitações do chefe da oficina.
+# Os desenhos ficam em privado/catalogos_pecas/<catalogo>/ (caminho relativo guardado em `desenho`).
+# ---------------------------------------------------------------------------------------------------------
+
+class CatalogoPecas(models.Model):
+    """Um catálogo de peças do fabricante (ex.: Randon RK 430M DC13), importado do PDF oficial."""
+    nome = models.CharField(max_length=120)
+    fabricante = models.CharField(max_length=80, blank=True, default='')
+    edicao = models.CharField(max_length=60, blank=True, default='')
+    arquivo = models.CharField(max_length=255, blank=True, default='', help_text='PDF original (caminho em privado/)')
+    paginas = models.PositiveIntegerField(default=0)
+    importado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    importado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Catálogo de peças do fabricante'
+        verbose_name_plural = 'Catálogos de peças do fabricante'
+        ordering = ('nome', 'id')
+
+    def __str__(self):
+        return self.nome
+
+
+class ConjuntoPecas(models.Model):
+    """Uma página (ou sequência de páginas) do catálogo: um conjunto com desenho explodido."""
+    catalogo = models.ForeignKey(CatalogoPecas, on_delete=models.CASCADE, related_name='conjuntos')
+    codigo = models.CharField(max_length=30, help_text='Código do conjunto no catálogo, ex. "2A300 00.0"')
+    nome = models.CharField(max_length=200)
+    pagina = models.PositiveIntegerField(help_text='Primeira página no PDF (1 = capa)')
+    desenho = models.CharField(max_length=255, blank=True, default='', help_text='JPEG em privado/')
+    ordem = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name = 'Conjunto do catálogo'
+        verbose_name_plural = 'Conjuntos do catálogo'
+        unique_together = ('catalogo', 'codigo')
+        ordering = ('catalogo', 'ordem', 'id')
+
+    def __str__(self):
+        return f'{self.codigo} {self.nome}'
+
+
+class PecaCatalogo(models.Model):
+    """Uma linha da tabela do conjunto. `faixas` = [[início, fim], ...] de número de série em que vale."""
+    conjunto = models.ForeignKey(ConjuntoPecas, on_delete=models.CASCADE, related_name='pecas')
+    fig = models.CharField(max_length=10, help_text='Número no desenho')
+    codigo = models.CharField(max_length=30, blank=True, default='', db_index=True)
+    quantidade = models.CharField(max_length=10, blank=True, default='', help_text='Como no catálogo ("01", "CN")')
+    descricao = models.CharField(max_length=300)
+    nota = models.CharField(max_length=200, blank=True, default='')
+    ver = models.CharField(max_length=30, blank=True, default='', help_text='Subconjunto com página própria')
+    faixas = models.JSONField(default=list, blank=True)
+    ordem = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name = 'Peça do catálogo'
+        verbose_name_plural = 'Peças do catálogo'
+        ordering = ('conjunto', 'ordem', 'id')
+
+    def __str__(self):
+        return f'{self.fig} {self.codigo} {self.descricao}'
+
+
+class EquipamentoPecas(models.Model):
+    """Equipamento do SGA (EQPCOD) → catálogo do fabricante e número de série (filtra as faixas)."""
+    equipamento = models.IntegerField(unique=True, help_text='EQPCOD do SGA')
+    nome = models.CharField(max_length=200, blank=True, default='', help_text='Nome no SGA quando foi ligado')
+    catalogo = models.ForeignKey(CatalogoPecas, on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name='equipamentos')
+    serie = models.PositiveIntegerField(null=True, blank=True, help_text='Nº de série do catálogo (colunas Início/Fim)')
+    alterado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    alterado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Equipamento × catálogo de peças'
+        verbose_name_plural = 'Equipamentos × catálogos de peças'
+
+    def __str__(self):
+        return f'{self.equipamento} {self.nome}'
+
+
+class SolicitacaoPecas(models.Model):
+    """Pedido de peças do chefe da oficina para um equipamento. Fica só no Manager (o comprador lança no SGA)."""
+    STATUS = [
+        ('aberta', 'Aberta'),
+        ('em_compra', 'Em compra'),
+        ('atendida', 'Atendida'),
+        ('cancelada', 'Cancelada'),
+    ]
+    numero = models.PositiveIntegerField(unique=True, null=True, blank=True)
+    equipamento = models.IntegerField(null=True, blank=True, help_text='EQPCOD do SGA')
+    equipamento_nome = models.CharField(max_length=200, blank=True, default='')
+    catalogo = models.ForeignKey(CatalogoPecas, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    serie = models.PositiveIntegerField(null=True, blank=True)
+    solicitante = models.ForeignKey(User, on_delete=models.PROTECT, related_name='solicitacoes_pecas')
+    status = models.CharField(max_length=10, choices=STATUS, default='aberta', db_index=True)
+    urgente = models.BooleanField(default=False)
+    observacao = models.TextField(blank=True, default='')
+    resposta = models.TextField(blank=True, default='', help_text='Recado do comprador')
+    tratado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    criado_em = models.DateTimeField(auto_now_add=True, db_index=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Solicitação de peças da oficina'
+        verbose_name_plural = 'Solicitações de peças da oficina'
+        ordering = ('-criado_em', '-id')
+
+    def __str__(self):
+        return f'Solicitação {self.numero or self.pk} — {self.equipamento_nome}'
+
+
+class ItemSolicitacaoPecas(models.Model):
+    solicitacao = models.ForeignKey(SolicitacaoPecas, on_delete=models.CASCADE, related_name='itens')
+    peca = models.ForeignKey(PecaCatalogo, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    codigo = models.CharField(max_length=30, blank=True, default='', help_text='Código do fabricante')
+    descricao = models.CharField(max_length=300)
+    conjunto = models.CharField(max_length=250, blank=True, default='', help_text='Conjunto e figura, para achar no catálogo')
+    quantidade = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    item_sga = models.IntegerField(null=True, blank=True, help_text='ESTQCOD sugerido no momento do pedido')
+    observacao = models.CharField(max_length=300, blank=True, default='')
+
+    class Meta:
+        verbose_name = 'Item da solicitação de peças'
+        verbose_name_plural = 'Itens das solicitações de peças'
+        ordering = ('id',)
