@@ -63,12 +63,26 @@ for f in "$AQUI"/migrations/vistorias/*.py; do
   fi
   cp "$f" "$destino"; ok "$nome copiada"
 done
-# A 0001 da VM pode ser a versão que já trazia desenhos/foto/marcações (gerada depois do 1º commit):
-# nesse caso as colunas da 0002 já existem e ela só é registrada (--fake).
-if grep -q "ImagemTipo" vistorias/migrations/0001_initial.py && ! aplicada vistorias 0002_imagens_foto_marcacoes; then
-  aviso "a 0001 da VM já cria ImagemTipo — 0002 registrada com --fake"
-  "$PY" manage.py migrate vistorias 0002_imagens_foto_marcacoes --fake 2>&1 | grep -E 'Applying|FAKED|Error|error' | sed 's/^/   /' || true
-fi
+# O que vale é o BANCO, não o arquivo: a 0001 aplicada na VM foi a versão sem desenhos/foto/marcações,
+# mas o arquivo que ficou lá pode ser o mais novo. Conferir o que existe de fato antes da 0002.
+ESTADO=$("$PY" manage.py shell -c "
+from django.db import connection
+c = connection.cursor()
+tabelas = connection.introspection.table_names(c)
+def cols(t): return {x.name for x in connection.introspection.get_table_description(c, t)} if t in tabelas else set()
+partes = ['vistorias_imagemtipo' in tabelas, 'foto' in cols('vistorias_equipamento'), 'marcacoes' in cols('vistorias_vistoria')]
+print('TUDO' if all(partes) else 'NADA' if not any(partes) else 'PARCIAL', partes)
+" 2>/dev/null | grep -E '^(TUDO|NADA|PARCIAL)' || true)
+echo "   banco (imagemtipo, equipamento.foto, vistoria.marcacoes): ${ESTADO:-?}"
+case "$ESTADO" in
+  TUDO*) aplicada vistorias 0002_imagens_foto_marcacoes || { "$PY" manage.py migrate vistorias 0002_imagens_foto_marcacoes --fake 2>&1 | grep -E 'FAKED|rror' | sed 's/^/   /' || true; ok "0002 já estava no banco — registrada (--fake)"; } ;;
+  NADA*) if aplicada vistorias 0002_imagens_foto_marcacoes; then
+           "$PY" manage.py migrate vistorias 0001_initial --fake 2>&1 | grep -E 'FAKED|rror' | sed 's/^/   /' || true
+           aviso "0002 estava registrada sem ter rodado — desmarcada para aplicar de verdade"
+         fi ;;
+  PARCIAL*) erro "0002 pela metade no banco ($ESTADO) — me mande esta tela antes de seguir." ;;
+  *) erro "não consegui ler o banco para conferir a 0002." ;;
+esac
 "$PY" manage.py migrate vistorias 2>&1 | grep -E 'Applying|No migrations|Error|error' | sed 's/^/   /' || true
 "$PY" manage.py showmigrations vistorias 2>/dev/null | sed 's/^/   /'
 

@@ -681,11 +681,13 @@ class BuscarEquipamentoView(APIView):
         qs = equipamentos_visiveis(request.user).filter(ativo=True)
         if q:
             qs = qs.filter(Q(tag__icontains=q) | Q(descricao__icontains=q) | Q(placa__icontains=q))
-        qs = qs.select_related('tipo__ficha', 'unidade', 'setor', 'gerente')[:40]
-        susp = mapa_suspensoes([e.pk for e in qs])
+        # list(): o MySQL não aceita LIMIT dentro de subconsulta IN (NotSupportedError)
+        qs = list(qs.select_related('tipo__ficha', 'unidade', 'setor', 'gerente')[:40])
+        ids = [e.pk for e in qs]
+        susp = mapa_suspensoes(ids)
         hoje = timezone.localdate()
         itens = {i.equipamento_id: i for i in ProgramaItem.objects.filter(
-            equipamento__in=qs, ano=hoje.year, mes=hoje.month, situacao=ProgramaItem.PROGRAMADA)}
+            equipamento_id__in=ids, ano=hoje.year, mes=hoje.month, situacao=ProgramaItem.PROGRAMADA)}
         return Response([{**EquipamentoSerializer(e, context={'suspensoes': susp}).data,
                           'item_do_mes': itens[e.pk].id if e.pk in itens else None} for e in qs])
 
