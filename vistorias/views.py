@@ -17,7 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import execucao, indicador, regras, servicos
-from .models import (Auditoria, DestinatarioNotificacao, EmailVistoria, Equipamento, Evidencia, Ficha, Impedimento,
+from .models import (Auditoria, DestinatarioNotificacao, EmailVistoria, Equipamento, Evidencia, Ficha, ImagemTipo, Impedimento,
                      NCCritica, PerfilUsuario, ProgramaItem, Resposta, Setor, Suspensao, TipoEquipamento, Unidade,
                      Vistoria)
 from .permissions import (PERFIS, Gestao, LeituraOuGestao, NoModulo, eh_avaliador,
@@ -132,7 +132,56 @@ class SetorViewSet(Auditado, SemExcluir, viewsets.ModelViewSet):
 class TipoViewSet(Auditado, SemExcluir, viewsets.ModelViewSet):
     permission_classes = [LeituraOuGestao]
     serializer_class = TipoEquipamentoSerializer
-    queryset = TipoEquipamento.objects.select_related('ficha')
+    queryset = TipoEquipamento.objects.select_related('ficha').prefetch_related('imagens')
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    @action(detail=True, methods=['post'])
+    def imagens(self, request, pk=None):
+        """Desenho/foto de referência para marcar avarias (GEO)."""
+        tipo = self.get_object()
+        arquivo = request.FILES.get('arquivo')
+        if not arquivo:
+            raise ValidationError({'arquivo': 'Envie a imagem.'})
+        conteudo, tipo_midia, _ = processar_midia(arquivo)
+        if tipo_midia != Evidencia.FOTO:
+            raise ValidationError({'arquivo': 'Envie uma imagem (não vídeo).'})
+        from PIL import Image as PImage
+        import io as _io
+        with PImage.open(_io.BytesIO(conteudo.read())) as im:
+            larg, alt = im.size
+        conteudo.seek(0)
+        ordem = (tipo.imagens.order_by('-ordem').values_list('ordem', flat=True).first() or 0) + 1
+        img = ImagemTipo(tipo=tipo, legenda=str(request.data.get('legenda') or '')[:120], ordem=ordem, largura=larg, altura=alt)
+        img.arquivo.save('desenho.jpg', conteudo, save=True)
+        servicos.auditar(request.user, 'imagem_tipo', 'tipo', tipo.pk, f'{tipo.descricao}: imagem incluída')
+        return Response(self.get_serializer(tipo).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['patch'], url_path=r'imagens/(?P<img>\d+)')
+    def imagem(self, request, pk=None, img=None):
+        """Legenda, ordem ou ativa. Não apaga: vistorias antigas marcaram sobre ela."""
+        tipo = self.get_object()
+        i = get_object_or_404(tipo.imagens, pk=img)
+        for campo in ('legenda', 'ordem', 'ativa'):
+            if campo in request.data:
+                setattr(i, campo, request.data[campo] if campo != 'legenda' else str(request.data[campo])[:120])
+        i.save()
+        servicos.auditar(request.user, 'imagem_tipo', 'tipo', tipo.pk, f'{tipo.descricao}: imagem {i.pk} alterada')
+        return Response(self.get_serializer(tipo).data)
+
+
+class ImagemArquivoView(APIView):
+    permission_classes = [NoModulo]
+
+    def get(self, request, pk):
+        i = get_object_or_404(ImagemTipo, pk=pk)
+        try:
+            arq = i.arquivo.open('rb')
+        except FileNotFoundError:
+            raise Http404
+        nome_arq = i.arquivo.name.lower()
+        resp = FileResponse(arq, content_type='image/png' if nome_arq.endswith('.png') else 'image/jpeg')
+        resp['Cache-Control'] = 'private, max-age=604800'
+        return resp
 
 
 class DestinatarioViewSet(Auditado, viewsets.ModelViewSet):
@@ -250,6 +299,62 @@ class EquipamentoViewSet(viewsets.ModelViewSet):
                          f'{eq.tag}: {"em manutenção" if eq.em_manutencao else "em operação"}')
         return Response(self.get_serializer(eq).data)
 
+    @action(detail=True, methods=['get', 'post', 'delete'], parser_classes=[MultiPartParser, FormParser, JSONParser])
+    def foto(self, request, pk=None):
+        """
+        Foto do equipamento. Com código do SGA é a MESMA de Peças da Oficina (foto do Manager; senão a do SGA):
+        trocar aqui troca lá. Sem SGA, fica no próprio cadastro. Enviar/remover: GEO.
+        """
+        eq = self.get_object()
+        if request.method == 'GET':
+            dados = None
+            if eq.foto:
+                try:
+                    with eq.foto.open('rb') as f:
+                        dados = f.read()
+                except FileNotFoundError:
+                    dados = None
+            elif eq.sga_codigo:
+                try:
+                    from catalogos import pecas_oficina
+                    dados = pecas_oficina.foto_equipamento(eq.sga_codigo, request.query_params.get('tam', 'p'))
+                except Exception:  # noqa: BLE001 — SGA fora: a tela mostra o ícone
+                    dados = None
+            if not dados:
+                raise Http404
+            from django.http import HttpResponse
+            resp = HttpResponse(dados, content_type='image/jpeg')
+            resp['Cache-Control'] = 'private, max-age=3600'
+            return resp
+        if not eh_gestor(request.user):
+            raise PermissionDenied('Só o Gerente Executivo Operacional altera a foto.')
+        if request.method == 'DELETE':
+            if eq.foto:
+                eq.foto.delete(save=True)
+            elif eq.sga_codigo:
+                from catalogos import pecas_oficina
+                pecas_oficina.remover_foto_equipamento(eq.sga_codigo)
+            servicos.auditar(request.user, 'foto_equipamento', 'equipamento', eq.pk, f'{eq.tag}: foto removida')
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        arquivo = request.FILES.get('arquivo')
+        if not arquivo:
+            raise ValidationError({'arquivo': 'Escolha a foto.'})
+        if eq.sga_codigo:
+            from catalogos import pecas_oficina
+            try:
+                pecas_oficina.salvar_foto_equipamento(eq.sga_codigo, arquivo, request.user)
+            except ValueError as exc:
+                raise ValidationError({'arquivo': str(exc)})
+        else:
+            conteudo, tipo_midia, _ = processar_midia(arquivo)
+            if tipo_midia != Evidencia.FOTO:
+                raise ValidationError({'arquivo': 'Envie uma foto.'})
+            if eq.foto:
+                eq.foto.delete(save=False)
+            eq.foto.save('foto.jpg', conteudo, save=True)
+        servicos.auditar(request.user, 'foto_equipamento', 'equipamento', eq.pk, f'{eq.tag}: foto enviada')
+        return Response(self.get_serializer(eq).data)
+
     @action(detail=True, methods=['get'])
     def historico(self, request, pk=None):
         eq = self.get_object()
@@ -284,6 +389,24 @@ class EquipamentoViewSet(viewsets.ModelViewSet):
                                   'centro_custo_nome')},
              'importado': e['cod'] in ja or (e['tag'] or '').upper() in tags}
             for e in lista], 'aviso': None})
+
+    @action(detail=False, methods=['post'], url_path='importar-sga-todos')
+    def importar_sga_todos(self, request):
+        """Lote automático: tipo pelo prefixo da TAG (vistorias/sga.py). ``aplicar=false`` devolve só a prévia."""
+        if not eh_gestor(request.user):
+            raise PermissionDenied()
+        try:
+            from combustivel import erp
+            lista = erp.equipamentos()
+        except Exception as exc:  # noqa: BLE001
+            raise ValidationError({'detail': f'SGA indisponível: {exc}'[:300]})
+        from . import sga
+        if request.data.get('aplicar'):
+            per = request.data.get('periodicidade') or 'MENSAL'
+            if per not in ('MENSAL', 'BIMESTRAL', 'TRIMESTRAL'):
+                raise ValidationError({'periodicidade': 'Inválida.'})
+            return Response(sga.importar(lista, request.user, per))
+        return Response(sga.planejar(lista))
 
     @action(detail=False, methods=['post'], url_path='importar-sga')
     @transaction.atomic

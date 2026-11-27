@@ -22,6 +22,7 @@ urlpatterns = [
     path('minhas/', views.MinhasView.as_view()),
     path('buscar-equipamento/', views.BuscarEquipamentoView.as_view()),
     path('evidencias/<uuid:uuid>/arquivo/', views.EvidenciaArquivoView.as_view()),
+    path('imagens/<int:pk>/arquivo/', views.ImagemArquivoView.as_view()),
     path('painel/', views.PainelView.as_view()),
     path('resultados/', views.ResultadosView.as_view()),
     path('resultados/resumo/', views.ResultadosResumoView.as_view()),

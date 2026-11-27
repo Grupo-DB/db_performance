@@ -102,6 +102,9 @@ def salvar_identificacao(v: Vistoria, usuario, dados: dict) -> Vistoria:
                 raise ValidationError({'medicao': 'Valor inválido.'})
         v.medicao_menor_confirmada = bool(dados.get('medicao_menor_confirmada', v.medicao_menor_confirmada))
         campos += ['medicao', 'medicao_menor_confirmada']
+    if 'marcacoes' in dados:
+        v.marcacoes = validar_marcacoes(v, dados.get('marcacoes'))
+        campos.append('marcacoes')
     for c in ('acompanhante_nome', 'acompanhante_cargo', 'observacoes'):
         if c in dados:
             setattr(v, c, str(dados.get(c) or '').strip()[:5000 if c == 'observacoes' else 120])
@@ -109,6 +112,24 @@ def salvar_identificacao(v: Vistoria, usuario, dados: dict) -> Vistoria:
     if campos:
         v.save(update_fields=campos + ['atualizada_em'])
     return v
+
+
+def validar_marcacoes(v: Vistoria, bruto) -> list:
+    if bruto in (None, ''):
+        return []
+    if not isinstance(bruto, list) or len(bruto) > 80:
+        raise ValidationError({'marcacoes': 'Marcações inválidas.'})
+    validas = set(v.equipamento.tipo.imagens.values_list('id', flat=True))
+    saida = []
+    for m in bruto:
+        try:
+            img, x, y = int(m['imagem']), float(m['x']), float(m['y'])
+        except (KeyError, TypeError, ValueError):
+            raise ValidationError({'marcacoes': 'Marcações inválidas.'})
+        if img not in validas or not (0 <= x <= 1 and 0 <= y <= 1):
+            raise ValidationError({'marcacoes': 'Marcação fora do desenho.'})
+        saida.append({'imagem': img, 'x': round(x, 4), 'y': round(y, 4), 'nota': str(m.get('nota') or '')[:120]})
+    return saida
 
 
 def medicao_menor(v: Vistoria) -> bool:

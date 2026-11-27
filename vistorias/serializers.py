@@ -5,7 +5,7 @@ from django.core.files.base import ContentFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from rest_framework import serializers
 
-from .models import (DestinatarioNotificacao, Equipamento, Evidencia, Ficha, FichaVersao, Impedimento, NCCritica,
+from .models import (DestinatarioNotificacao, Equipamento, Evidencia, Ficha, FichaVersao, ImagemTipo, Impedimento, NCCritica,
                      ProgramaItem, Questao, Resposta, Setor, Suspensao, TipoEquipamento, Unidade, Vistoria)
 
 User = get_user_model()
@@ -114,13 +114,22 @@ class FichaSerializer(serializers.ModelSerializer):
                  'criada_por_nome': nome(v.criada_por)} for v in o.versoes.order_by('-numero')]
 
 
+def imagem_dict(i: ImagemTipo) -> dict:
+    return {'id': i.id, 'url': f'/vistorias/imagens/{i.id}/arquivo/', 'legenda': i.legenda, 'ordem': i.ordem,
+            'ativa': i.ativa, 'largura': i.largura, 'altura': i.altura}
+
+
 class TipoEquipamentoSerializer(serializers.ModelSerializer):
     ficha_nome = serializers.CharField(source='ficha.nome', read_only=True)
     equipamentos = serializers.SerializerMethodField()
+    imagens = serializers.SerializerMethodField()
 
     class Meta:
         model = TipoEquipamento
-        fields = ['id', 'codigo', 'descricao', 'ficha', 'ficha_nome', 'medicao', 'ativo', 'equipamentos']
+        fields = ['id', 'codigo', 'descricao', 'ficha', 'ficha_nome', 'medicao', 'ativo', 'equipamentos', 'imagens']
+
+    def get_imagens(self, o):
+        return [imagem_dict(i) for i in o.imagens.all()]
 
     def get_equipamentos(self, o):
         return o.equipamentos.filter(ativo=True).count()
@@ -145,13 +154,18 @@ class EquipamentoSerializer(serializers.ModelSerializer):
     gerente_nome = serializers.SerializerMethodField()
     situacao = serializers.SerializerMethodField()
     suspensao = serializers.SerializerMethodField()
+    foto_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Equipamento
         fields = ['id', 'tag', 'descricao', 'tipo', 'tipo_descricao', 'ficha_nome', 'medicao', 'marca_modelo', 'placa',
                   'unidade', 'unidade_sigla', 'setor', 'setor_nome', 'gerente', 'gerente_nome', 'periodicidade',
-                  'ativo', 'em_manutencao', 'sga_codigo', 'situacao', 'suspensao', 'criado_em', 'atualizado_em']
+                  'ativo', 'em_manutencao', 'sga_codigo', 'situacao', 'suspensao', 'foto_url', 'criado_em', 'atualizado_em']
         read_only_fields = ['criado_em', 'atualizado_em']
+
+    def get_foto_url(self, o):
+        """Pode não haver foto (404): a tela mostra o ícone do tipo."""
+        return f'/vistorias/equipamentos/{o.pk}/foto/' if (o.sga_codigo or o.foto) else None
 
     def _susp(self, o):
         mapa = self.context.get('suspensoes')
@@ -284,15 +298,27 @@ class VistoriaSerializer(VistoriaListaSerializer):
     tag_placa = serializers.CharField(source='equipamento.placa', read_only=True)
     marca_modelo = serializers.CharField(source='equipamento.marca_modelo', read_only=True)
     tipo_equipamento = serializers.CharField(source='equipamento.tipo.descricao', read_only=True)
+    imagens_avarias = serializers.SerializerMethodField()
+    foto_url = serializers.SerializerMethodField()
 
     class Meta(VistoriaListaSerializer.Meta):
-        fields = VistoriaListaSerializer.Meta.fields + [
+        fields = VistoriaListaSerializer.Meta.fields + ['marcacoes', 'imagens_avarias', 'foto_url',
+                                                        
             'medicao_tipo', 'medicao', 'medicao_anterior', 'medicao_menor', 'medicao_menor_confirmada',
             'acompanhante_nome', 'acompanhante_cargo', 'observacoes', 'validada_por_nome', 'respostas',
             'devolucoes', 'suspensoes', 'tag_placa', 'marca_modelo', 'tipo_equipamento']
 
     def get_validada_por_nome(self, o):
         return nome(o.validada_por)
+
+    def get_imagens_avarias(self, o):
+        """Desenhos ativos do tipo + os que esta vistoria já marcou (mesmo se depois desativados)."""
+        usadas = {m.get('imagem') for m in (o.marcacoes or [])}
+        return [imagem_dict(i) for i in o.equipamento.tipo.imagens.all() if i.ativa or i.id in usadas]
+
+    def get_foto_url(self, o):
+        e = o.equipamento
+        return f'/vistorias/equipamentos/{e.pk}/foto/' if (e.sga_codigo or e.foto) else None
 
     def get_devolucoes(self, o):
         return [{'justificativa': d.justificativa, 'por': nome(d.devolvida_por), 'em': d.devolvida_em}

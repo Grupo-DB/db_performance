@@ -144,6 +144,24 @@ class TipoEquipamento(models.Model):
         return self.descricao
 
 
+class ImagemTipo(models.Model):
+    """
+    Desenho/foto de referência do tipo (vista lateral, frontal…): na planilha era "Em caso de danos
+    (amassados, riscos, etc), marque com um círculo a área afetada". A vistoria marca pontos sobre ele.
+    Não se apaga (as marcações antigas apontam para cá): ``ativa=False`` tira das vistorias novas.
+    """
+    tipo = models.ForeignKey(TipoEquipamento, on_delete=models.CASCADE, related_name='imagens')
+    arquivo = models.FileField(upload_to='tipos/', storage=PRIVADO)
+    legenda = models.CharField(max_length=120, blank=True, default='')
+    ordem = models.PositiveSmallIntegerField(default=0)
+    ativa = models.BooleanField(default=True)
+    largura = models.PositiveIntegerField(default=0)
+    altura = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['tipo', 'ordem', 'id']
+
+
 class Equipamento(models.Model):
     tag = models.CharField(max_length=30, unique=True)
     descricao = models.CharField(max_length=160)
@@ -158,6 +176,9 @@ class Equipamento(models.Model):
     # Informativa: não suspende, não libera e não mexe no Indicador (9.4). PCM ou GEO marcam.
     em_manutencao = models.BooleanField(default=False)
     sga_codigo = models.PositiveIntegerField(null=True, blank=True, help_text='EQPCOD do SGA, quando importado de lá')
+    # Com sga_codigo a foto é a mesma de Peças da Oficina (catalogos.FotoEquipamentoPecas → SGA);
+    # este campo é só para equipamento que não existe no SGA.
+    foto = models.FileField(upload_to='equipamentos/', storage=PRIVADO, null=True, blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
 
@@ -263,6 +284,8 @@ class Vistoria(models.Model):
     acompanhante_nome = models.CharField(max_length=120, blank=True, default='')
     acompanhante_cargo = models.CharField(max_length=120, blank=True, default='')
     observacoes = models.TextField(blank=True, default='')
+    # Avarias marcadas nos desenhos do tipo: [{"imagem": id ImagemTipo, "x": 0..1, "y": 0..1, "nota": ""}]
+    marcacoes = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=10, choices=STATUS, default=ANDAMENTO)
     resultado_inicial = models.CharField(max_length=1, choices=RESULTADOS, blank=True, default='')
     resultado_final = models.CharField(max_length=1, choices=RESULTADOS, blank=True, default='')

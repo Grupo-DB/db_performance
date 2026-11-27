@@ -446,3 +446,56 @@ class ApiTestes(Base):
         self.assertEqual(f.versao_atual().questoes.count(), 41)
         self.assertEqual(TipoEquipamento.objects.filter(ficha=f).count(), 7)
         self.assertTrue(f.versao_atual().questoes.get(descricao='Danos na pintura').permite_abono)
+
+
+@override_settings(VISTORIAS_PRIVADO=TMP, VISTORIAS_EMAIL_SINCRONO=True)
+class ImagensESgaTestes(Base):
+    def test_carga_traz_desenhos_e_marcacao_valida(self):
+        from django.core.management import call_command
+        from .models import ImagemTipo
+        call_command('carregar_fichas_vistoria', stdout=io.StringIO())
+        call_command('carregar_fichas_vistoria', stdout=io.StringIO())   # não duplica
+        carreg = TipoEquipamento.objects.get(codigo='CARREGADEIRA')
+        self.assertEqual(carreg.imagens.count(), 3)
+        self.assertEqual(ImagemTipo.objects.filter(tipo__codigo='PICADOR').count(), 0)
+        eq = Equipamento.objects.create(tag='VEC-PC-03', descricao='Pá', tipo=carreg, unidade=self.un, setor=self.setor)
+        servicos.registrar_vinculo(eq)
+        hoje = timezone.localdate()
+        v = execucao.iniciar(eq, self.aval, item=ProgramaItem.objects.create(equipamento=eq, ano=hoje.year, mes=hoje.month))
+        img = carreg.imagens.first()
+        execucao.salvar_identificacao(v, self.aval, {'marcacoes': [{'imagem': img.pk, 'x': 0.5, 'y': 0.25, 'nota': 'amassado'}]})
+        self.assertEqual(v.marcacoes[0]['nota'], 'amassado')
+        outra = TipoEquipamento.objects.get(codigo='PIPA').imagens.first()
+        with self.assertRaises(ValidationError):
+            execucao.salvar_identificacao(v, self.aval, {'marcacoes': [{'imagem': outra.pk, 'x': 0.5, 'y': 0.5}]})
+        with self.assertRaises(ValidationError):
+            execucao.salvar_identificacao(v, self.aval, {'marcacoes': [{'imagem': img.pk, 'x': 1.5, 'y': 0.5}]})
+        c = APIClient()
+        c.force_authenticate(self.aval)
+        self.assertEqual(c.get(f'/vistorias/imagens/{img.pk}/arquivo/').status_code, 200)
+        self.assertEqual(len(c.get(f'/vistorias/vistorias/{v.uuid}/').json()['imagens_avarias']), 3)
+
+    def test_mapeamento_sga(self):
+        from django.core.management import call_command
+        from . import sga
+        call_command('carregar_fichas_vistoria', stdout=io.StringIO())
+        lista = [
+            {'cod': 1, 'tag': 'VEC-PC-03', 'nome': 'VEC-PC-03 - PA CARREGADEIRA KOMATSU', 'descricao': 'PA CARREGADEIRA', 'abastece': True},
+            {'cod': 2, 'tag': 'VEC-PC-07', 'nome': 'VEC-PC-07 - PA', 'centro_custo_nome': 'ATM-VEC-PC-07', 'abastece': True},
+            {'cod': 3, 'tag': 'VEC-CF-06', 'nome': 'VEC-CF-06 - CAMINHAO FORA EST RK 430', 'abastece': True},
+            {'cod': 4, 'tag': 'VEC-CS-07', 'nome': 'VEC-CS-07 - CAMINHAO DE SUPORTE PIPA', 'abastece': True},
+            {'cod': 5, 'tag': 'VEC-PC-LIMPEZA', 'nome': 'VEC-PC-LIMPEZA', 'abastece': True},
+            {'cod': 6, 'tag': 'VEC-VA-30', 'nome': 'VEC-VA-30 - AMAROK', 'abastece': True},
+            {'cod': 7, 'tag': 'VEC-EC-05', 'nome': 'VEC-EC-05 - EMPILHADEIRA', 'abastece': True},
+        ]
+        r = sga.importar(lista, self.geo)
+        tipos = {l['tag']: (l['tipo'], l['unidade']) for l in r['entrar']}
+        self.assertEqual(tipos['VEC-PC-07'], ('CARREGADEIRA', 'ATM'))
+        self.assertEqual(tipos['VEC-CF-06'][0], 'CAM-RK')
+        self.assertEqual(tipos['VEC-CS-07'][0], 'PIPA')
+        self.assertEqual(tipos['VEC-EC-05'][0], 'EMPILHADEIRA-2.0')
+        self.assertEqual([l['tag'] for l in r['sem_ficha']], ['VEC-VA-30'])
+        self.assertEqual(r['ignorados'][0]['tag'], 'VEC-PC-LIMPEZA')
+        self.assertEqual(Equipamento.objects.get(tag='VEC-PC-03').setor.nome, 'A definir')
+        self.assertTrue(ProgramaItem.objects.filter(equipamento__tag='VEC-PC-03').exists())
+        self.assertEqual(len(sga.importar(lista, self.geo)['criados']), 0)   # idempotente

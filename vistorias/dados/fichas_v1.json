@@ -9,37 +9,61 @@
     {
      "codigo": "CARREGADEIRA",
      "descricao": "Carregadeira",
-     "medicao": "HORIMETRO"
+     "medicao": "HORIMETRO",
+     "imagens": [
+      "desenho_02.png",
+      "desenho_03.png",
+      "desenho_04.png"
+     ]
     },
     {
      "codigo": "ESCAVADEIRA",
      "descricao": "Escavadeira",
-     "medicao": "HORIMETRO"
+     "medicao": "HORIMETRO",
+     "imagens": [
+      "desenho_05.png",
+      "desenho_06.png"
+     ]
     },
     {
      "codigo": "CAM-BITRUCK",
      "descricao": "Caminhão bitruck",
-     "medicao": "ODOMETRO"
+     "medicao": "ODOMETRO",
+     "imagens": [
+      "desenho_09.png",
+      "desenho_10.png"
+     ]
     },
     {
      "codigo": "CAM-RK",
      "descricao": "Caminhão RK",
-     "medicao": "ODOMETRO"
+     "medicao": "ODOMETRO",
+     "imagens": [
+      "desenho_11.png",
+      "desenho_12.png"
+     ]
     },
     {
      "codigo": "PERFURATRIZ",
      "descricao": "Perfuratriz",
-     "medicao": "HORIMETRO"
+     "medicao": "HORIMETRO",
+     "imagens": [
+      "desenho_13.png"
+     ]
     },
     {
      "codigo": "PICADOR",
      "descricao": "Picador",
-     "medicao": "HORIMETRO"
+     "medicao": "HORIMETRO",
+     "imagens": []
     },
     {
      "codigo": "MINI-CARREGADEIRA",
      "descricao": "Mini carregadeira",
-     "medicao": "HORIMETRO"
+     "medicao": "HORIMETRO",
+     "imagens": [
+      "desenho_18.png"
+     ]
     }
    ],
    "questoes": [
@@ -462,7 +486,11 @@
     {
      "codigo": "EMPILHADEIRA",
      "descricao": "Empilhadeira",
-     "medicao": "HORIMETRO"
+     "medicao": "HORIMETRO",
+     "imagens": [
+      "desenho_07.png",
+      "desenho_08.png"
+     ]
     }
    ],
    "questoes": [
@@ -885,7 +913,11 @@
     {
      "codigo": "EMPILHADEIRA-2.0",
      "descricao": "Empilhadeira 2.0",
-     "medicao": "HORIMETRO"
+     "medicao": "HORIMETRO",
+     "imagens": [
+      "desenho_07.png",
+      "desenho_08.png"
+     ]
     }
    ],
    "questoes": [
@@ -1258,7 +1290,11 @@
     {
      "codigo": "PIPA",
      "descricao": "Caminhão pipa",
-     "medicao": "ODOMETRO"
+     "medicao": "ODOMETRO",
+     "imagens": [
+      "desenho_14.png",
+      "desenho_15.png"
+     ]
     }
    ],
    "questoes": [
@@ -1680,8 +1716,11 @@
    "tipos": [
     {
      "codigo": "PT-02",
-     "descricao": "PT-02",
-     "medicao": "HORIMETRO"
+     "descricao": "Patrola (PT-02)",
+     "medicao": "HORIMETRO",
+     "imagens": [
+      "desenho_16.png"
+     ]
     }
    ],
    "questoes": [
@@ -2104,7 +2143,10 @@
     {
      "codigo": "COMBOIO",
      "descricao": "Comboio",
-     "medicao": "ODOMETRO"
+     "medicao": "ODOMETRO",
+     "imagens": [
+      "desenho_17.png"
+     ]
     }
    ],
    "questoes": [
@@ -2520,5 +2562,6 @@
     }
    ]
   }
- ]
+ ],
+ "imagens_obs": "Desenhos das abas da planilha para marcar avarias; a aba PICADOR repetia o desenho da patrola e ficou sem imagem."
 }
