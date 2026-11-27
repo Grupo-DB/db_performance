@@ -60,6 +60,7 @@ urlpatterns = [
     path('uniformes/', include('uniformes.urls')),
     path('combustivel/', include('combustivel.urls')),
     path('conformidadeLegal/', include('conformidadeLegal.urls')),
+    path('vistorias/', include('vistorias.urls')),
     # Dashboard financeiro (artifact do Claude) hospedado com senha única — ver cockpitFinanceiro/views.py
     path('financeiro/', include('cockpitFinanceiro.urls')),
 ]

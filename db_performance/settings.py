@@ -134,6 +134,7 @@ INSTALLED_APPS = [
     'uniformes',
     'combustivel',
     'conformidadeLegal',
+    'vistorias',
 ]
 
 MIDDLEWARE = [

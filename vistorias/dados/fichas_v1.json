@@ -1,0 +1,2524 @@
+{
+ "fonte": "Vistoria Máquinas - Versão 1.0.xlsx (21/03/2023)",
+ "regra_criticidade": "pontuação da planilha: 10 = GRAVE → crítica; 5 = MÉDIO → média; 2,5 = PEQUENO → leve",
+ "fichas": [
+  {
+   "nome": "Máquinas e caminhões",
+   "origem": "Vistoria Máquinas - Versão 1.0.xlsx (abas: CARREGADEIRA, ESCAVADEIRA, CAMINHÃO BITRUCK, CAMINHÃO RK, PERFURATRIZ, PICADOR, Mini Carregadeira)",
+   "tipos": [
+    {
+     "codigo": "CARREGADEIRA",
+     "descricao": "Carregadeira",
+     "medicao": "HORIMETRO"
+    },
+    {
+     "codigo": "ESCAVADEIRA",
+     "descricao": "Escavadeira",
+     "medicao": "HORIMETRO"
+    },
+    {
+     "codigo": "CAM-BITRUCK",
+     "descricao": "Caminhão bitruck",
+     "medicao": "ODOMETRO"
+    },
+    {
+     "codigo": "CAM-RK",
+     "descricao": "Caminhão RK",
+     "medicao": "ODOMETRO"
+    },
+    {
+     "codigo": "PERFURATRIZ",
+     "descricao": "Perfuratriz",
+     "medicao": "HORIMETRO"
+    },
+    {
+     "codigo": "PICADOR",
+     "descricao": "Picador",
+     "medicao": "HORIMETRO"
+    },
+    {
+     "codigo": "MINI-CARREGADEIRA",
+     "descricao": "Mini carregadeira",
+     "medicao": "HORIMETRO"
+    }
+   ],
+   "questoes": [
+    {
+     "codigo": "1",
+     "grupo": "Cabine",
+     "descricao": "Vidro frontal",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 1,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "2",
+     "grupo": "Cabine",
+     "descricao": "Vidro lateral direito",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 2,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "3",
+     "grupo": "Cabine",
+     "descricao": "Vidro lateral esquerdo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 3,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "4",
+     "grupo": "Cabine",
+     "descricao": "Vidro traseiro",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 4,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "5",
+     "grupo": "Cabine",
+     "descricao": "Assento reclinável",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 5,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "6",
+     "grupo": "Cabine",
+     "descricao": "Indicadores do painel",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 6,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "7",
+     "grupo": "Cabine",
+     "descricao": "Higiene interna",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 7,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "8",
+     "grupo": "Cabine",
+     "descricao": "Ar condicionado",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 8,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "9",
+     "grupo": "Cabine",
+     "descricao": "Limpador de para-brisa",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 9,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "10",
+     "grupo": "Cabine",
+     "descricao": "Volante inclinável",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 10,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "11",
+     "grupo": "Cabine",
+     "descricao": "Joystick de controle",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 11,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "12",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Água do limpador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 12,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "13",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Água do radiador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 13,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "14",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de freio",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 14,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "15",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de motor",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 15,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "16",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de caixa/transmissão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 16,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "17",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo do sistema hidráulico",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 17,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "18",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Freio de mão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 18,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "19",
+     "grupo": "Segurança",
+     "descricao": "Buzina",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 19,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "20",
+     "grupo": "Segurança",
+     "descricao": "Cintos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 20,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "21",
+     "grupo": "Segurança",
+     "descricao": "Retrovisor interno",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 21,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "22",
+     "grupo": "Segurança",
+     "descricao": "Retrovisores externos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 22,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "23",
+     "grupo": "Segurança",
+     "descricao": "Setas",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 23,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "24",
+     "grupo": "Segurança",
+     "descricao": "Alarme de ré",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 24,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "25",
+     "grupo": "Segurança",
+     "descricao": "Faixas refletivas",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 25,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "26",
+     "grupo": "Iluminação",
+     "descricao": "Faróis dianteiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 26,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "27",
+     "grupo": "Iluminação",
+     "descricao": "Faróis traseiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 27,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "28",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da cabine",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 28,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "29",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da placa",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 29,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "30",
+     "grupo": "Iluminação",
+     "descricao": "Luz de ré",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 30,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "31",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza interna",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 31,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "32",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza externa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 32,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "33",
+     "grupo": "Limpeza",
+     "descricao": "Acúmulo de material",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 33,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "34",
+     "grupo": "Limpeza",
+     "descricao": "Vazamentos de óleo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 34,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "35",
+     "grupo": "Limpeza",
+     "descricao": "Excessos de graxa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 35,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "36",
+     "grupo": "Geral",
+     "descricao": "Danos na lataria/estrutura",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 36,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "37",
+     "grupo": "Geral",
+     "descricao": "Danos na pintura",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 37,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "38",
+     "grupo": "Geral",
+     "descricao": "Calibração de pneus",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 38,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "39",
+     "grupo": "Geral",
+     "descricao": "Ficha de lavagem",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 39,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "40",
+     "grupo": "Geral",
+     "descricao": "Ficha de troca de óleo",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 40,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "41",
+     "grupo": "Geral",
+     "descricao": "Chave reserva",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 41,
+     "pontos_planilha": 2.5
+    }
+   ]
+  },
+  {
+   "nome": "Empilhadeira",
+   "origem": "Vistoria Máquinas - Versão 1.0.xlsx (abas: EMPILHADEIRA)",
+   "tipos": [
+    {
+     "codigo": "EMPILHADEIRA",
+     "descricao": "Empilhadeira",
+     "medicao": "HORIMETRO"
+    }
+   ],
+   "questoes": [
+    {
+     "codigo": "1",
+     "grupo": "Cabine",
+     "descricao": "Vidro frontal",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 1,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "2",
+     "grupo": "Cabine",
+     "descricao": "Vidro lateral direito",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 2,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "3",
+     "grupo": "Cabine",
+     "descricao": "Vidro lateral esquerdo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 3,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "4",
+     "grupo": "Cabine",
+     "descricao": "Vidro traseiro",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 4,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "5",
+     "grupo": "Cabine",
+     "descricao": "Assento",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 5,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "6",
+     "grupo": "Cabine",
+     "descricao": "Indicadores do painel",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 6,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "7",
+     "grupo": "Cabine",
+     "descricao": "Higiene/Limpeza geral",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 7,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "8",
+     "grupo": "Cabine",
+     "descricao": "Ar condicionado",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 8,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "9",
+     "grupo": "Cabine",
+     "descricao": "Limpador de para-brisa",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 9,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "10",
+     "grupo": "Cabine",
+     "descricao": "Volante",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 10,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "11",
+     "grupo": "Cabine",
+     "descricao": "Alavancas de controle",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 11,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "12",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Água do limpador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 12,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "13",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Água do radiador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 13,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "14",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de freio",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 14,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "15",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de motor",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 15,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "16",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de caixa/transmissão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 16,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "17",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo do sistema hidráulico",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 17,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "18",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Freio de mão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 18,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "19",
+     "grupo": "Segurança",
+     "descricao": "Giroled",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 19,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "20",
+     "grupo": "Segurança",
+     "descricao": "Cintos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 20,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "21",
+     "grupo": "Segurança",
+     "descricao": "Retrovisor interno",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 21,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "22",
+     "grupo": "Segurança",
+     "descricao": "Retrovisores externos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 22,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "23",
+     "grupo": "Segurança",
+     "descricao": "Setas",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 23,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "24",
+     "grupo": "Segurança",
+     "descricao": "Alarme de ré/Buzina",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 24,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "25",
+     "grupo": "Segurança",
+     "descricao": "Faixas refletivas",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 25,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "26",
+     "grupo": "Iluminação",
+     "descricao": "Faróis dianteiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 26,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "27",
+     "grupo": "Iluminação",
+     "descricao": "Faróis traseiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 27,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "28",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da cabine",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 28,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "29",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da placa",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 29,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "30",
+     "grupo": "Iluminação",
+     "descricao": "Luz de ré",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 30,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "31",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza parte inferior",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 31,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "32",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza externa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 32,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "33",
+     "grupo": "Limpeza",
+     "descricao": "Acúmulo de material",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 33,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "34",
+     "grupo": "Limpeza",
+     "descricao": "Vazamentos de óleo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 34,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "35",
+     "grupo": "Limpeza",
+     "descricao": "Excessos de graxa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 35,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "36",
+     "grupo": "Geral",
+     "descricao": "Danos na lataria/estrutura",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 36,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "37",
+     "grupo": "Geral",
+     "descricao": "Danos na pintura",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 37,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "38",
+     "grupo": "Geral",
+     "descricao": "Pneus",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 38,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "39",
+     "grupo": "Geral",
+     "descricao": "Cuidados gerais",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 39,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "40",
+     "grupo": "Geral",
+     "descricao": "Ficha de troca de óleo",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 40,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "41",
+     "grupo": "Geral",
+     "descricao": "Horímetro",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 41,
+     "pontos_planilha": 2.5
+    }
+   ]
+  },
+  {
+   "nome": "Empilhadeira 2.0",
+   "origem": "Vistoria Máquinas - Versão 1.0.xlsx (abas: EMPILHADEIRA 2.0)",
+   "tipos": [
+    {
+     "codigo": "EMPILHADEIRA-2.0",
+     "descricao": "Empilhadeira 2.0",
+     "medicao": "HORIMETRO"
+    }
+   ],
+   "questoes": [
+    {
+     "codigo": "1",
+     "grupo": "Cabine",
+     "descricao": "Assento",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 1,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "2",
+     "grupo": "Cabine",
+     "descricao": "Indicadores do painel",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 2,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "3",
+     "grupo": "Cabine",
+     "descricao": "Higiene/Limpeza geral",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 3,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "4",
+     "grupo": "Cabine",
+     "descricao": "Volante",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 4,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "5",
+     "grupo": "Cabine",
+     "descricao": "Alavancas de controle",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 5,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "6",
+     "grupo": "Cabine",
+     "descricao": "Extintor",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 6,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "7",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Água do radiador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 7,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "8",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de freio",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 8,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "9",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de motor",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 9,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "10",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de caixa/transmissão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 10,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "11",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo do sistema hidráulico",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 11,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "12",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Freio de mão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 12,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "13",
+     "grupo": "Segurança",
+     "descricao": "Giroled",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 13,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "14",
+     "grupo": "Segurança",
+     "descricao": "Cintos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 14,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "15",
+     "grupo": "Segurança",
+     "descricao": "Retrovisor interno",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 15,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "16",
+     "grupo": "Segurança",
+     "descricao": "Retrovisores externos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 16,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "17",
+     "grupo": "Segurança",
+     "descricao": "Setas",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 17,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "18",
+     "grupo": "Segurança",
+     "descricao": "Alarme de ré",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 18,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "19",
+     "grupo": "Segurança",
+     "descricao": "Faixas refletivas",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 19,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "20",
+     "grupo": "Segurança",
+     "descricao": "Buzina",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 20,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "21",
+     "grupo": "Iluminação",
+     "descricao": "Faróis dianteiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 21,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "22",
+     "grupo": "Iluminação",
+     "descricao": "Faróis traseiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 22,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "23",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da cabine",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 23,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "24",
+     "grupo": "Iluminação",
+     "descricao": "Luz de ré",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 24,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "25",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza parte inferior",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 25,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "26",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza externa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 26,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "27",
+     "grupo": "Limpeza",
+     "descricao": "Acúmulo de material",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 27,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "28",
+     "grupo": "Limpeza",
+     "descricao": "Vazamentos de óleo",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 28,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "29",
+     "grupo": "Limpeza",
+     "descricao": "Excessos de graxa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 29,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "30",
+     "grupo": "Geral",
+     "descricao": "Danos na lataria/estrutura",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 30,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "31",
+     "grupo": "Geral",
+     "descricao": "Danos na pintura",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 31,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "32",
+     "grupo": "Geral",
+     "descricao": "Pneus",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 32,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "33",
+     "grupo": "Geral",
+     "descricao": "Cuidados gerais",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 33,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "34",
+     "grupo": "Geral",
+     "descricao": "Ficha de troca de óleo",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 34,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "35",
+     "grupo": "Geral",
+     "descricao": "Horímetro",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 35,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "36",
+     "grupo": "Geral",
+     "descricao": "Folga aparente",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 36,
+     "pontos_planilha": 10
+    }
+   ]
+  },
+  {
+   "nome": "Caminhão pipa",
+   "origem": "Vistoria Máquinas - Versão 1.0.xlsx (abas: PIPA)",
+   "tipos": [
+    {
+     "codigo": "PIPA",
+     "descricao": "Caminhão pipa",
+     "medicao": "ODOMETRO"
+    }
+   ],
+   "questoes": [
+    {
+     "codigo": "1",
+     "grupo": "Cabine",
+     "descricao": "Vidro frontal",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 1,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "2",
+     "grupo": "Cabine",
+     "descricao": "Vidro lateral direito",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 2,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "3",
+     "grupo": "Cabine",
+     "descricao": "Vidro lateral esquerdo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 3,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "4",
+     "grupo": "Cabine",
+     "descricao": "Vidro traseiro",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 4,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "5",
+     "grupo": "Cabine",
+     "descricao": "Assentos",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 5,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "6",
+     "grupo": "Cabine",
+     "descricao": "Indicadores do painel",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 6,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "7",
+     "grupo": "Cabine",
+     "descricao": "Higiene interna",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 7,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "8",
+     "grupo": "Cabine",
+     "descricao": "Ar condicionado",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 8,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "9",
+     "grupo": "Cabine",
+     "descricao": "Limpador de para-brisa",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 9,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "10",
+     "grupo": "Cabine",
+     "descricao": "Volante",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 10,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "11",
+     "grupo": "Cabine",
+     "descricao": "Forros de porta e teto",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 11,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "12",
+     "grupo": "Cabine",
+     "descricao": "Água do limpador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 12,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "13",
+     "grupo": "Motor/Freio/Transmissão",
+     "descricao": "Água do radiador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 13,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "14",
+     "grupo": "Motor/Freio/Transmissão",
+     "descricao": "Óleo de freio",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 14,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "15",
+     "grupo": "Motor/Freio/Transmissão",
+     "descricao": "Óleo de motor",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 15,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "16",
+     "grupo": "Motor/Freio/Transmissão",
+     "descricao": "Óleo de caixa/transmissão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 16,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "17",
+     "grupo": "Motor/Freio/Transmissão",
+     "descricao": "Óleo do sistema hidráulico",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 17,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "18",
+     "grupo": "Motor/Freio/Transmissão",
+     "descricao": "Freio de mão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 18,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "19",
+     "grupo": "Segurança",
+     "descricao": "Condições do tanque",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 19,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "20",
+     "grupo": "Segurança",
+     "descricao": "Cintos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 20,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "21",
+     "grupo": "Segurança",
+     "descricao": "Retrovisor interno",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 21,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "22",
+     "grupo": "Segurança",
+     "descricao": "Retrovisores externos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 22,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "23",
+     "grupo": "Segurança",
+     "descricao": "Setas",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 23,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "24",
+     "grupo": "Segurança",
+     "descricao": "Alarme de ré/Buzina",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 24,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "25",
+     "grupo": "Segurança",
+     "descricao": "Faixas refletivas",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 25,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "26",
+     "grupo": "Iluminação",
+     "descricao": "Faróis dianteiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 26,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "27",
+     "grupo": "Iluminação",
+     "descricao": "Faróis traseiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 27,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "28",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da cabine",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 28,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "29",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da placa",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 29,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "30",
+     "grupo": "Iluminação",
+     "descricao": "Luz de ré",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 30,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "31",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza parte de baixo",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 31,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "32",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza externa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 32,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "33",
+     "grupo": "Limpeza",
+     "descricao": "Acúmulo de material",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 33,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "34",
+     "grupo": "Limpeza",
+     "descricao": "Vazamentos de óleo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 34,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "35",
+     "grupo": "Limpeza",
+     "descricao": "Excessos de graxa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 35,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "36",
+     "grupo": "Geral",
+     "descricao": "Danos na lataria/estrutura",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 36,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "37",
+     "grupo": "Geral",
+     "descricao": "Danos na pintura",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 37,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "38",
+     "grupo": "Geral",
+     "descricao": "Cuidado geral",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 38,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "39",
+     "grupo": "Geral",
+     "descricao": "Ficha de troca de óleo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 39,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "40",
+     "grupo": "Geral",
+     "descricao": "Pneus",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 40,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "41",
+     "grupo": "Geral",
+     "descricao": "Identificação (TAG)",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 41,
+     "pontos_planilha": 5
+    }
+   ]
+  },
+  {
+   "nome": "PT-02",
+   "origem": "Vistoria Máquinas - Versão 1.0.xlsx (abas: PT-02)",
+   "tipos": [
+    {
+     "codigo": "PT-02",
+     "descricao": "PT-02",
+     "medicao": "HORIMETRO"
+    }
+   ],
+   "questoes": [
+    {
+     "codigo": "1",
+     "grupo": "Cabine",
+     "descricao": "Vidro frontal",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 1,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "2",
+     "grupo": "Cabine",
+     "descricao": "Vidro lateral direito",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 2,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "3",
+     "grupo": "Cabine",
+     "descricao": "Vidro lateral esquerdo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 3,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "4",
+     "grupo": "Cabine",
+     "descricao": "Vidro traseiro",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 4,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "5",
+     "grupo": "Cabine",
+     "descricao": "Assento",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 5,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "6",
+     "grupo": "Cabine",
+     "descricao": "Indicadores do painel",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 6,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "7",
+     "grupo": "Cabine",
+     "descricao": "Higiene interna",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 7,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "8",
+     "grupo": "Cabine",
+     "descricao": "Ar condicionado",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 8,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "9",
+     "grupo": "Cabine",
+     "descricao": "Limpador de para-brisa",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 9,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "10",
+     "grupo": "Cabine",
+     "descricao": "Volante",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 10,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "11",
+     "grupo": "Cabine",
+     "descricao": "Alavancas de controle",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 11,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "12",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Água do limpador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 12,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "13",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Água do radiador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 13,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "14",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de freio",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 14,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "15",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de motor",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 15,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "16",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de caixa/transmissão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 16,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "17",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo do sistema hidráulico",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 17,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "18",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Freio de mão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 18,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "19",
+     "grupo": "Segurança",
+     "descricao": "Vazamentos (hidráulico)",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 19,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "20",
+     "grupo": "Segurança",
+     "descricao": "Cintos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 20,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "21",
+     "grupo": "Segurança",
+     "descricao": "Retrovisor interno",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 21,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "22",
+     "grupo": "Segurança",
+     "descricao": "Retrovisores externos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 22,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "23",
+     "grupo": "Segurança",
+     "descricao": "Setas",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 23,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "24",
+     "grupo": "Segurança",
+     "descricao": "Alarme de ré/Buzina",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 24,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "25",
+     "grupo": "Segurança",
+     "descricao": "Faixas refletivas",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 25,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "26",
+     "grupo": "Iluminação",
+     "descricao": "Faróis dianteiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 26,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "27",
+     "grupo": "Iluminação",
+     "descricao": "Faróis traseiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 27,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "28",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da cabine",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 28,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "29",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da placa",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 29,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "30",
+     "grupo": "Iluminação",
+     "descricao": "Luz de ré",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 30,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "31",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza parte inferior",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 31,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "32",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza externa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 32,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "33",
+     "grupo": "Limpeza",
+     "descricao": "Acúmulo de material",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 33,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "34",
+     "grupo": "Limpeza",
+     "descricao": "Vazamentos de óleo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 34,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "35",
+     "grupo": "Limpeza",
+     "descricao": "Excessos de graxa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 35,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "36",
+     "grupo": "Geral",
+     "descricao": "Danos na lataria/estrutura",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 36,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "37",
+     "grupo": "Geral",
+     "descricao": "Danos na pintura",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 37,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "38",
+     "grupo": "Geral",
+     "descricao": "Cuidado geral",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 38,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "39",
+     "grupo": "Geral",
+     "descricao": "Ficha de troca de óleo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 39,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "40",
+     "grupo": "Geral",
+     "descricao": "Pneus",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 40,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "41",
+     "grupo": "Geral",
+     "descricao": "Identificação (TAG)",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 41,
+     "pontos_planilha": 5
+    }
+   ]
+  },
+  {
+   "nome": "Comboio",
+   "origem": "Vistoria Máquinas - Versão 1.0.xlsx (abas: COMBOIO)",
+   "tipos": [
+    {
+     "codigo": "COMBOIO",
+     "descricao": "Comboio",
+     "medicao": "ODOMETRO"
+    }
+   ],
+   "questoes": [
+    {
+     "codigo": "1",
+     "grupo": "Cabine",
+     "descricao": "Vidro frontal",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 1,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "2",
+     "grupo": "Cabine",
+     "descricao": "Vidro lateral direito",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 2,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "3",
+     "grupo": "Cabine",
+     "descricao": "Vidro lateral esquerdo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 3,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "4",
+     "grupo": "Cabine",
+     "descricao": "Vidro traseiro",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 4,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "5",
+     "grupo": "Cabine",
+     "descricao": "Assentos",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 5,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "6",
+     "grupo": "Cabine",
+     "descricao": "Indicadores do painel",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 6,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "7",
+     "grupo": "Cabine",
+     "descricao": "Higiene interna",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 7,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "8",
+     "grupo": "Cabine",
+     "descricao": "Ar condicionado",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 8,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "9",
+     "grupo": "Cabine",
+     "descricao": "Limpador de para-brisa",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 9,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "10",
+     "grupo": "Cabine",
+     "descricao": "Volante",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 10,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "11",
+     "grupo": "Cabine",
+     "descricao": "Forros de porta e teto",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 11,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "12",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Água do limpador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 12,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "13",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Água do radiador",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 13,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "14",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de freio",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 14,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "15",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de motor",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 15,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "16",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo de caixa/transmissão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 16,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "17",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Óleo do sistema hidráulico",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 17,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "18",
+     "grupo": "Motor e Transmissão",
+     "descricao": "Freio de mão",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 18,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "19",
+     "grupo": "Segurança",
+     "descricao": "Diesel vazado no piso",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 19,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "20",
+     "grupo": "Segurança",
+     "descricao": "Cintos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 20,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "21",
+     "grupo": "Segurança",
+     "descricao": "Retrovisor interno",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 21,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "22",
+     "grupo": "Segurança",
+     "descricao": "Retrovisores externos",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 22,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "23",
+     "grupo": "Segurança",
+     "descricao": "Setas",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 23,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "24",
+     "grupo": "Segurança",
+     "descricao": "Alarme de ré/Buzina",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 24,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "25",
+     "grupo": "Segurança",
+     "descricao": "Faixas refletivas",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 25,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "26",
+     "grupo": "Iluminação",
+     "descricao": "Faróis dianteiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 26,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "27",
+     "grupo": "Iluminação",
+     "descricao": "Faróis traseiros",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 27,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "28",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da cabine",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 28,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "29",
+     "grupo": "Iluminação",
+     "descricao": "Iluminação da placa",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 29,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "30",
+     "grupo": "Iluminação",
+     "descricao": "Luz de ré",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 30,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "31",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza parte inferior",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 31,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "32",
+     "grupo": "Limpeza",
+     "descricao": "Limpeza externa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 32,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "33",
+     "grupo": "Limpeza",
+     "descricao": "Acúmulo de material",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 33,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "34",
+     "grupo": "Limpeza",
+     "descricao": "Vazamentos de óleo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 34,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "35",
+     "grupo": "Limpeza",
+     "descricao": "Excessos de graxa",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 35,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "36",
+     "grupo": "Geral",
+     "descricao": "Danos na lataria/estrutura",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 36,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "37",
+     "grupo": "Geral",
+     "descricao": "Danos na pintura",
+     "criticidade": "LEVE",
+     "permite_na": true,
+     "permite_abono": true,
+     "ordem": 37,
+     "pontos_planilha": 2.5
+    },
+    {
+     "codigo": "38",
+     "grupo": "Geral",
+     "descricao": "Cuidado geral",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 38,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "39",
+     "grupo": "Geral",
+     "descricao": "Ficha de troca de óleo",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 39,
+     "pontos_planilha": 5
+    },
+    {
+     "codigo": "40",
+     "grupo": "Geral",
+     "descricao": "Pneus",
+     "criticidade": "CRITICA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 40,
+     "pontos_planilha": 10
+    },
+    {
+     "codigo": "41",
+     "grupo": "Geral",
+     "descricao": "Identificação (TAG)",
+     "criticidade": "MEDIA",
+     "permite_na": true,
+     "permite_abono": false,
+     "ordem": 41,
+     "pontos_planilha": 5
+    }
+   ]
+  }
+ ]
+}
